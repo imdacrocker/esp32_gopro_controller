@@ -93,10 +93,18 @@ static void status_poll_timer_cb(void *arg)
 
 /* ---- Driver vtable ------------------------------------------------------- */
 
+/* Per-slot unicast: used by the mismatch poll and set_desired_recording_slot.
+ * Targets only this camera's IP — won't disturb peers that may already be
+ * recording (a duplicate Start to a running Hero4 has been observed to flip
+ * it off, hence the deliberate single-target path). */
 static esp_err_t drv_start_recording(void *arg)
 {
-    (void)arg;
-    rc_shutter_cmd_t cmd = RC_SHUTTER_START;
+    gopro_wifi_rc_ctx_t *ctx = (gopro_wifi_rc_ctx_t *)arg;
+    if (!ctx->last_ip) {
+        ESP_LOGW(TAG, "slot %d: start_recording skipped — no IP", ctx->slot);
+        return ESP_ERR_INVALID_STATE;
+    }
+    rc_shutter_cmd_t cmd = { .start = true, .ip = ctx->last_ip, .repeat = 1 };
     if (xQueueSend(s_shutter_queue, &cmd, 0) != pdTRUE) {
         ESP_LOGW(TAG, "start_recording: shutter queue full");
         return ESP_ERR_NO_MEM;
@@ -106,10 +114,44 @@ static esp_err_t drv_start_recording(void *arg)
 
 static esp_err_t drv_stop_recording(void *arg)
 {
-    (void)arg;
-    rc_shutter_cmd_t cmd = RC_SHUTTER_STOP;
+    gopro_wifi_rc_ctx_t *ctx = (gopro_wifi_rc_ctx_t *)arg;
+    if (!ctx->last_ip) {
+        ESP_LOGW(TAG, "slot %d: stop_recording skipped — no IP", ctx->slot);
+        return ESP_ERR_INVALID_STATE;
+    }
+    rc_shutter_cmd_t cmd = { .start = false, .ip = ctx->last_ip, .repeat = 1 };
     if (xQueueSend(s_shutter_queue, &cmd, 0) != pdTRUE) {
         ESP_LOGW(TAG, "stop_recording: shutter queue full");
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+/* Broadcast: used by set_desired_recording_all.  One queued command fans out
+ * to every RC camera on the AP via 255.255.255.255:8484. */
+static esp_err_t drv_start_recording_all(void)
+{
+    rc_shutter_cmd_t cmd = {
+        .start  = true,
+        .ip     = 0xFFFFFFFFu,
+        .repeat = RC_SHUTTER_BROADCAST_REPEAT,
+    };
+    if (xQueueSend(s_shutter_queue, &cmd, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "start_recording_all: shutter queue full");
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t drv_stop_recording_all(void)
+{
+    rc_shutter_cmd_t cmd = {
+        .start  = false,
+        .ip     = 0xFFFFFFFFu,
+        .repeat = RC_SHUTTER_BROADCAST_REPEAT,
+    };
+    if (xQueueSend(s_shutter_queue, &cmd, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "stop_recording_all: shutter queue full");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -155,6 +197,9 @@ static const camera_driver_t k_gopro_rc_driver = {
     .teardown             = drv_teardown,
     .update_slot_index    = drv_update_slot_index,
     .on_wifi_disconnected = NULL,
+    .broadcasts_to_all    = true,
+    .start_recording_all  = drv_start_recording_all,
+    .stop_recording_all   = drv_stop_recording_all,
 };
 
 /* ---- Driver registration ------------------------------------------------- */

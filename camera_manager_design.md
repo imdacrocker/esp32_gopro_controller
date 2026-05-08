@@ -60,7 +60,7 @@ can_manager  →  camera_manager
 
 **`open_gopro_ble`** — Implements `camera_driver_t` for Hero 9+ cameras. Owns BLE discovery, pairing, GATT setup, the V1-style readiness sequence (`GetHardwareInfo` → `SetCameraControlStatus(EXTERNAL)` → datetime + status poll), shutter commands (TLV `SetShutter`), the 5 s `GetStatusValue` poll, the 3 s BLE keepalive, and bond management. The BLE connection is the only control transport for these cameras.
 
-**`gopro_wifi_rc`** — Implements `camera_driver_t` for Hero 4 cameras. The user puts the Hero 4 into WiFi RC mode and it joins our SoftAP. Keepalive is sent over UDP (the Hero 4 protocol); shutter, status polling, and datetime are sent over plain HTTP/1.0. Hero 4 has no BLE radio.
+**`gopro_wifi_rc`** — Implements `camera_driver_t` for Hero 3 / 4 / 5 / 7 cameras. The user puts the camera into WiFi RC mode and it joins our SoftAP. Keepalive, status poll, shutter, and identify all run over UDP on the shared 8383⇄8484 socket; shutter dispatch is broadcast to `255.255.255.255:8484` for "fire all" and unicast to a single `last_ip` for per-slot or mismatch corrections (§13.3a, §17.7). Identify is via the UDP `cv` opcode (§17.2.5). HTTP/1.0 is reserved for the optional date/time set on Hero4-class cameras (§17.2.6). These cameras have no BLE radio.
 
 ---
 
@@ -296,7 +296,8 @@ static inline bool gopro_model_uses_ble_control(camera_model_t model) {
         || model == CAMERA_MODEL_GOPRO_LIT_HERO;
 }
 
-/** Keepalive must be sent over UDP. Other commands (shutter, status) use HTTP.          */
+/** Keepalive, status, shutter, and identify (`cv`) all use UDP for RC-emulation
+ *  cameras; HTTP is reserved for date/time only.                                        */
 static inline bool gopro_model_uses_udp_keepalive(camera_model_t model) {
     return gopro_model_uses_rc_emulation(model);
 }
@@ -442,19 +443,32 @@ Two drivers are registered with `camera_manager`, each owning a disjoint subset 
 
 | Driver registration `matches()` | Component | Transport |
 |---|---|---|
-| `gopro_model_uses_rc_emulation` | `gopro_wifi_rc` | UDP only for keepalive / status / shutter / identify; HTTP/1.0 only for date/time on the (Hero4-class today) cameras for which `gopro_model_supports_http_datetime()` returns true |
+| `gopro_model_uses_rc_emulation` | `gopro_wifi_rc` | UDP for keepalive / status / shutter (broadcast for fire-all, unicast for per-slot) / identify (`cv`); HTTP/1.0 only for date/time on the (Hero4-class today) cameras for which `gopro_model_supports_http_datetime()` returns true |
 | `gopro_model_uses_ble_control` | `open_gopro_ble` | BLE TLV + protobuf (everything) |
 
 `camera_manager_register_new()` allocates a slot keyed on MAC; the model is set in a separate call. For BLE-control cameras the model comes from `GetHardwareInfo` after BLE encryption. For RC-emulation cameras the model is established at pair time by the UDP `cv` opcode response (see §17.2.5); slots whose `cv` reply doesn't match a known string fall through to `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` and continue to operate via UDP.
 
 ```c
 struct camera_driver {
+    /* Per-slot — always non-NULL.  Used by the mismatch poll, by
+     * camera_manager_set_desired_recording_slot(), and by
+     * camera_manager_set_desired_recording_all() for drivers whose
+     * broadcasts_to_all flag is false. */
     esp_err_t (*start_recording)(void *ctx);
     esp_err_t (*stop_recording)(void *ctx);
     camera_recording_status_t (*get_recording_status)(void *ctx); /* returns last known cached value */
     void (*teardown)(void *ctx);                                  /* nullable — see §20.5 */
     void (*update_slot_index)(void *ctx, int new_slot);           /* nullable — update cached slot */
     void (*on_wifi_disconnected)(void *ctx);                      /* nullable; RC-emulation only   */
+
+    /* Broadcast — only consulted by camera_manager_set_desired_recording_all
+     * when broadcasts_to_all is true.  start_recording_all / stop_recording_all
+     * fire ONCE per dispatch wave; subsequent slots using the same driver have
+     * their intent + grace deadline updated but skip enrollment.  Per-slot
+     * calls always go through the per-slot entries above. */
+    bool       broadcasts_to_all;
+    esp_err_t (*start_recording_all)(void);
+    esp_err_t (*stop_recording_all)(void);
 };
 ```
 
@@ -463,6 +477,8 @@ struct camera_driver {
 `teardown()` is called by `camera_manager_remove_slot()` and gives the driver a chance to clean up its own resources (stop timers, free memory). It may be `NULL` for drivers that have nothing to clean up beyond the slot record.
 
 `on_wifi_disconnected()` is a hook for SoftAP-using drivers. BLE-control cameras leave it `NULL` because they never associate to the AP. The current RC-emulation driver also leaves it `NULL` and tracks station events through its own `gopro_wifi_rc_on_station_*` public API; the vtable hook is retained for future drivers that may want it.
+
+`broadcasts_to_all` is a capability declaration: when true, the driver supplies `start_recording_all` / `stop_recording_all` that fire one transport-level command covering every camera the driver owns. `gopro_wifi_rc` sets it true (UDP `SH` to `255.255.255.255:8484`); `open_gopro_ble` leaves it false (BLE is point-to-point). See §13.3a for dispatch semantics.
 
 ---
 
@@ -573,7 +589,7 @@ On reconnect, `last_ip` from NVS is used as the initial WoL target since RC-emul
 | Command | BLE-control (Hero 9+) | RC-emulation (Hero 3 / 4 / 5 / 6 / 7) |
 |---|---|---|
 | Keepalive | BLE `0x42` to GP-0074 every 3 s | UDP `_GPHD_:0:0:2:0.000000\n` → port 8484 every 3 s |
-| Shutter start/stop | BLE TLV `SetShutter` (0x01) → GP-0072 | UDP binary `SH` opcode (param 0x02 / 0x00) → port 8484 |
+| Shutter start/stop | BLE TLV `SetShutter` (0x01) → GP-0072 | UDP binary `SH` opcode (param 0x02 / 0x00). Broadcast `255.255.255.255:8484` × 3 for fire-all, unicast `last_ip:8484` × 1 for per-slot |
 | Recording status | BLE TLV `GetStatusValue` (0x13) on GP-0076, 5 s poll | UDP binary `st` opcode → port 8484, 5 s poll; reply b13/b15 → recording state |
 | Identify (model + fw) | BLE TLV `GetHardwareInfo` once at pair time | UDP binary `cv` opcode at pair + retry on every keepalive tick until the camera answers |
 | Date/time | BLE TLV `SetDateTime` (0x0D) → GP-0072 | HTTP/1.0 `GET /gp/gpControl/command/setup/date_time?p=...` (Hero4-class only — gated by `gopro_model_supports_http_datetime`) |
@@ -920,23 +936,37 @@ Total recovery time for ready slots is bounded by the CAN logging-state heartbea
 | Immediate dispatch (§13.3a) | `set_desired_recording_*()` call where the new intent differs from the previous value | 0 ms (synchronous in the API call) | Fast shutter response on CAN/UI input |
 | Mismatch correction (§13.3b / §13.4) | Per-slot `esp_timer` firing every 2 s | up to one poll interval | Catches slots that weren't ready at API call time, recovers from missed/dropped commands, corrects state divergence |
 
-Both paths converge on the same vtable entries (`driver->start_recording()` / `stop_recording()`) and share the same `grace_period_active` flag, so they cannot fire duplicate commands at each other.
+Both paths arm the same per-slot `grace_until_us` deadline after issuing a command, so they cannot fire duplicate corrections at each other inside the grace window. They route through different vtable entries depending on whether the driver advertises broadcast capability — see §13.3a.
 
 ### 13.3a Immediate dispatch
 
 `camera_manager_set_desired_recording_all()` and `camera_manager_set_desired_recording_slot()` execute the following sequence under the slot mutex:
 
 ```
-for each affected slot:
+for each affected slot (in order):
     if new intent == previous desired_recording → skip (idempotent)
     update desired_recording = new intent
     if new intent == DESIRED_RECORDING_UNKNOWN  → skip (no command to issue)
     if no driver assigned                       → skip (mismatch poll will catch when assigned)
     if wifi_status != WIFI_CAM_READY            → skip (mismatch poll will catch when ready)
-    snapshot (driver, ctx); set grace_period_active = true
+    if driver->broadcasts_to_all && already enrolled in this wave:
+                                                → arm grace_until_us; skip enrollment (broadcast already covers this slot)
+    enroll (driver, ctx_or_NULL, slot, broadcast_flag); arm grace_until_us
 ```
 
-After releasing the mutex, the function calls `driver->start_recording()` or `driver->stop_recording()` on each snapshotted slot. The driver call happens **outside the mutex** to avoid holding the lock across a potentially slow BLE/HTTP write — same discipline as `poll_timer_cb` (§13.4).
+After releasing the mutex, the function dispatches each enrolled entry **in slot order**:
+- broadcast entry → `driver->start_recording_all()` / `driver->stop_recording_all()` (no per-slot ctx)
+- per-slot entry → `driver->start_recording(ctx)` / `driver->stop_recording(ctx)`
+
+Driver calls happen **outside the mutex** to avoid holding the lock across a potentially slow BLE write or UDP burst — same discipline as `poll_timer_cb` (§13.4).
+
+`set_desired_recording_slot()` always uses the per-slot vtable entries regardless of `broadcasts_to_all`, so single-camera commands stay targeted at one IP / one BLE link and don't disturb peers.
+
+#### Broadcast drivers
+
+A driver that sets `camera_driver_t::broadcasts_to_all = true` and supplies `start_recording_all` / `stop_recording_all` is declaring "one call covers every camera I own." `set_desired_recording_all()` honours this by enrolling the driver only on the first matching slot it encounters; later slots using the same driver have their `desired_recording` and grace deadline updated but skip dispatch enrollment. Slot ordering is preserved, so a [BLE, RC, BLE, RC] fleet fires as: BLE slot 0 GATT write → RC broadcast (covers slots 1 and 3) → BLE slot 2 GATT write.
+
+The broadcast and per-slot entries are independent functions on the vtable — drivers may implement either, both, or neither (subject to the per-slot pair always being non-NULL). The `gopro_wifi_rc` driver implements both: broadcast for "fire all" (UDP `SH` to `255.255.255.255:8484` × 3 for reliability) and unicast per-slot for the mismatch poll and `set_desired_recording_slot` (UDP `SH` to the slot's `last_ip` × 1). The unicast per-slot path exists deliberately to avoid sending a Start to a Hero4 that's already recording, which has been observed to flip it back off. The `open_gopro_ble` driver leaves `broadcasts_to_all = false`; BLE is point-to-point by nature.
 
 Why a real-transition check instead of always dispatching:
 
@@ -972,16 +1002,21 @@ Immediately after each status update, `camera_manager` compares the driver's cac
 ```
 if desired_recording == UNKNOWN                               → no-op (no intent established)
 if status == UNKNOWN                                          → no-op (camera state unknown)
-if grace_period_active                                        → no-op (command in flight)
-if desired_recording == START  && status == IDLE              → call driver->start_recording()
-                                                                 set grace_period_active = true
-if desired_recording == STOP   && status == ACTIVE            → call driver->stop_recording()
-                                                                 set grace_period_active = true
+if now < grace_until_us                                       → no-op (recent command still settling)
+if desired_recording == START  && status == IDLE              → call driver->start_recording(ctx)
+                                                                 arm grace_until_us = now + RECORDING_STATUS_GRACE_MS
+if desired_recording == STOP   && status == ACTIVE            → call driver->stop_recording(ctx)
+                                                                 arm grace_until_us = now + RECORDING_STATUS_GRACE_MS
 ```
 
-**Grace period.** After issuing `start_recording()` or `stop_recording()` from **either** path (immediate-dispatch in §13.3a or this poll), `camera_manager` sets a per-slot `grace_period_active` flag. The flag is cleared on the next poll after it was set, regardless of whether the cache reflects the new state yet. This gives the camera one full poll cycle (≥ status poll interval) for the command to take effect and the cache to update before the mismatch loop fires another correction. Without this grace period a slow camera could receive several duplicate `start_recording` commands while the first is still being processed; with it, an immediate-dispatch followed quickly by a poll tick will not double-fire.
+**Grace period.** After issuing `start_recording()` / `stop_recording()` (or their broadcast variants) from **either** path — immediate-dispatch in §13.3a or this poll — `camera_manager` arms a per-slot deadline `grace_until_us = esp_timer_get_time() + RECORDING_STATUS_GRACE_MS` (default **10 s**). Subsequent mismatch poll ticks are no-ops while `now < grace_until_us`. The deadline expires on its own; the poll does not reset it per tick.
 
-The grace period applies only to the next mismatch decision after a correction; it does not block subsequent corrections beyond that. If the second poll still shows mismatch, a fresh correction is sent. This is the self-healing safety net for the "missed shutter" case.
+10 s comfortably covers the worst-case time for the camera to reflect the new state in its status report:
+
+- BLE-control cameras stream status notifications, but a freshly-issued `SetShutter` may take several seconds before the next `system_record_mode_active` notification fires.
+- WiFi RC cameras are polled by the driver every 5 s, so the cache may be up to one full poll interval stale.
+
+A shorter window risked re-issuing a Start to a camera that was already recording but hadn't yet told us — which on Hero4 in RC mode has been observed to flip the camera back off. After the grace deadline expires, the next poll re-evaluates and re-arms the deadline if it still has work to do, so the self-healing "missed shutter" safety net is preserved; it just runs on a slower beat.
 
 **UNKNOWN suppresses correction (both sides).** If `desired_recording == DESIRED_RECORDING_UNKNOWN`, the system has no established intent and takes no action — this is the boot state before the first CAN frame or UI command. If `status == CAMERA_RECORDING_UNKNOWN`, the driver has not yet observed the camera and correction is suppressed to avoid re-issuing commands repeatedly during a transient transport failure when the camera might already be in the desired state.
 
@@ -1325,7 +1360,7 @@ WiFi Remote Control emulation driver for the GoPro "Smart Remote" UDP protocol, 
 | WoL on associate without DHCP | Send magic packet × 5; retry every 2 s if camera silent for > 10 s |
 | UDP keepalive | `_GPHD_:0:0:2:0.000000\n` unicast, every 3 s — fire-and-forget |
 | UDP status poll | Binary `st` opcode every 5 s; response parsed for power + recording state |
-| UDP shutter | Binary `SH` opcode (param 0x02 / 0x00) per ready camera |
+| UDP shutter | Binary `SH` opcode (param 0x02 / 0x00). Broadcast to `255.255.255.255:8484` × 3 for "fire all" (CAN / Start All); unicast to `ctx->last_ip:8484` × 1 for the mismatch poll and per-slot web-UI commands |
 | UDP camera-version (`cv`) identify | Sent at pair time and re-sent on every keepalive tick until the camera answers; response is a length-prefixed firmware string + model name (`HD7.01.01.90.00` / `HERO7 Black` on a real Hero7).  Drives `gopro_model_from_name()` to set the slot's model + display name with no HTTP involvement. |
 | HTTP date/time (best-effort) | URL-encoded hex bytes; gated on `gopro_model_supports_http_datetime()` — currently Hero4 Black/Silver only.  Hero5+/Hero7 silently drop port-80 SYNs in Smart-Remote mode, so this stays narrow until verified per-model. |
 | Discovery exposure | Unmanaged SoftAP stations whose MAC OUI is on the GoPro allow-list (`GOPRO_RC_OUIS[]` in `api_rc.c` — IEEE MA-L registrations to Woodman Labs / GoPro) are exposed via `/api/rc/discovered` for the manual Add flow. Other vendors (phones, laptops) are filtered out by `http_server`. |
@@ -1334,7 +1369,8 @@ WiFi Remote Control emulation driver for the GoPro "Smart Remote" UDP protocol, 
 
 | Transport | Local | Remote | Direction | Purpose |
 |---|---|---|---|---|
-| UDP unicast | 8383 | 8484 | ESP32 → camera | Keepalive `_GPHD_`, status `st`, shutter `SH`, identify `cv` |
+| UDP unicast | 8383 | 8484 | ESP32 → camera | Keepalive `_GPHD_`, status `st`, per-slot shutter `SH`, identify `cv` |
+| UDP broadcast | 8383 | 8484 | ESP32 → 255.255.255.255 | "Fire all" shutter `SH` × 3 (`set_desired_recording_all`); requires `SO_BROADCAST` on the socket |
 | UDP unicast | 8383 | (from cam:8484) | camera → ESP32 | Replies — single bound socket |
 | UDP broadcast | — | 9 | ESP32 → 255.255.255.255 | WoL magic packet × 5 |
 | HTTP/1.0 | — | 80/TCP | ESP32 → camera | Date/time set — Hero4 Black/Silver only, best-effort |
@@ -1469,7 +1505,12 @@ typedef struct {
 
 ### 17.4 Threading Model
 
-**Shutter task** (`gopro_rc_shutter`, priority 7): Processes `CMD_SHUTTER_START` / `CMD_SHUTTER_STOP`. Sends one UDP `SH` datagram per ready slot. Higher priority guarantees shutter latency.
+**Shutter task** (`gopro_rc_shutter`, priority 7): Drains `s_shutter_queue`. Each enqueued `rc_shutter_cmd_t` carries `{start, ip, repeat}` — the task sends `repeat` copies of the appropriate `SH` packet to `ip:8484` and is otherwise transport-agnostic. Two routing styles use the same task:
+
+- **Broadcast** (`set_desired_recording_all` → `drv_start_recording_all` / `_stop_recording_all`): `ip = 0xFFFFFFFFu`, `repeat = RC_SHUTTER_BROADCAST_REPEAT` (3). 802.11 broadcasts are unacknowledged, so three back-to-back sends compensate for single-frame loss; the burst completes in well under 1 ms at 54 Mbps.
+- **Unicast** (`set_desired_recording_slot` and the mismatch poll → `drv_start_recording(ctx)` / `drv_stop_recording(ctx)`): `ip = ctx->last_ip`, `repeat = 1`. The link-layer 802.11 retry handles drops; a duplicate Start to a Hero4 that's already recording has been observed to flip it back off, so single-camera commands stay targeted at the one IP.
+
+Higher priority guarantees shutter latency.
 
 **Work task** (`gopro_rc_work`, priority 5): Station lifecycle, WoL, keepalive tick (which also drives cv-retry), UDP status poll, slot promotion, cv-data apply, HTTP date/time sync.
 
@@ -1622,15 +1663,33 @@ Liveness is now measured against any received UDP datagram (ACK *or* `st` respon
 
 ### 17.7 Shutter Commands
 
-Handled by the high-priority shutter task:
+Handled by the high-priority shutter task. The driver supplies two pairs of vtable entries; `camera_manager` picks one based on the call site (see §13.3a).
+
+**Broadcast path** (`set_desired_recording_all` / CAN `0x600` / web UI Start All):
 
 ```
-handle_shutter(bool start)
-  -> for each slot where ctx->wifi_ready == true:
-        rc_send_sh(ctx->last_ip, start)   /* one UDP datagram, ~50 µs */
+drv_start_recording_all() / drv_stop_recording_all()
+  -> xQueueSend(s_shutter_queue, { start, 0xFFFFFFFFu, RC_SHUTTER_BROADCAST_REPEAT })
+
+rc_shutter_task
+  -> for i in 0..repeat: rc_send_sh(0xFFFFFFFFu, start)   /* SO_BROADCAST set on socket */
 ```
 
-Single UDP `sendto` per camera. Was ~50 ms HTTP per camera; now < 1 ms per camera. Sequential dispatch across 4 cameras finishes inside one scheduler tick — no longer a synchronization concern.
+One queued command → 3 UDP `sendto` calls to `255.255.255.255:8484`. `SO_BROADCAST` is enabled on `s_udp_sock` once at init (also required for WoL). The 3× repeat compensates for unacknowledged 802.11 broadcast frames; the burst completes in well under 1 ms at 54 Mbps.
+
+**Unicast path** (`set_desired_recording_slot` / mismatch poll):
+
+```
+drv_start_recording(ctx) / drv_stop_recording(ctx)
+  -> xQueueSend(s_shutter_queue, { start, ctx->last_ip, 1 })
+
+rc_shutter_task
+  -> rc_send_sh(ctx->last_ip, start)   /* single targeted UDP datagram */
+```
+
+One queued command → 1 UDP `sendto` to the slot's `last_ip:8484`. The 802.11 link layer retries on its own. The single-camera unicast path exists deliberately: a duplicate Start to a Hero4 already recording has been observed to flip it back off, so single-slot commands stay targeted.
+
+Was ~50 ms HTTP per camera before this protocol revision; now < 1 ms total whether broadcasting to four cameras or unicasting to one.
 
 ### 17.8 Periodic Work
 

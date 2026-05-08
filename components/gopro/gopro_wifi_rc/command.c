@@ -212,9 +212,13 @@ int rc_http_get(uint32_t ip, const char *path, int timeout_ms,
 /* ---- Shutter task (priority 7) ------------------------------------------- */
 
 /*
- * Loop forever on s_shutter_queue.  For each command, send one UDP `SH`
- * datagram per wifi_ready slot.  Sequential dispatch across 4 cameras now
- * finishes inside one scheduler tick (was ~200 ms HTTP).
+ * Loop forever on s_shutter_queue.  Each enqueued command carries its own
+ * destination IP and repeat count, so the task is transport-agnostic:
+ *   - Broadcast (set_desired_recording_all)  → ip = 0xFFFFFFFFu, repeat = 3
+ *   - Unicast   (per-slot / mismatch poll)   → ip = slot's last_ip, repeat = 1
+ *
+ * Repeats are sent back-to-back with no delay; at 54 Mbps a 14-byte SH frame
+ * is sub-millisecond of airtime, so three sends complete in well under 1 ms.
  */
 void rc_shutter_task(void *arg)
 {
@@ -222,13 +226,13 @@ void rc_shutter_task(void *arg)
     rc_shutter_cmd_t cmd;
     while (1) {
         xQueueReceive(s_shutter_queue, &cmd, portMAX_DELAY);
-        bool start = (cmd == RC_SHUTTER_START);
-
-        for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
-            if (!s_ctx[i].wifi_ready) continue;
-            rc_send_sh(s_ctx[i].last_ip, start);
-            ESP_LOGD(TAG, "slot %d: shutter %s sent", i, start ? "start" : "stop");
+        for (int i = 0; i < cmd.repeat; i++) {
+            rc_send_sh(cmd.ip, cmd.start);
         }
+        ESP_LOGI(TAG, "SH %s %s x%u",
+                 cmd.start ? "start" : "stop",
+                 cmd.ip == 0xFFFFFFFFu ? "broadcast" : "unicast",
+                 (unsigned)cmd.repeat);
     }
 }
 

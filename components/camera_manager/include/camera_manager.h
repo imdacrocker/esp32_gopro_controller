@@ -9,6 +9,9 @@
 /* ---- Driver vtable (§8 / §13.5) ---- */
 typedef struct camera_driver camera_driver_t;
 struct camera_driver {
+    /* Per-slot recording control.  Always non-NULL.  Used by the mismatch
+     * poll, set_desired_recording_slot, and (for non-broadcast drivers)
+     * set_desired_recording_all. */
     esp_err_t                  (*start_recording)(void *ctx);
     esp_err_t                  (*stop_recording)(void *ctx);
     /* Non-blocking cache read — safe from any context (§8) */
@@ -23,6 +26,15 @@ struct camera_driver {
      * network work.  Must not block.
      */
     void                       (*on_wifi_disconnected)(void *ctx);
+
+    /* If true, set_desired_recording_all() calls *_recording_all() ONCE per
+     * wave instead of per-slot start/stop.  Subsequent slots using the same
+     * driver have their intent + grace period updated but skip dispatch.
+     * Per-slot calls (set_desired_recording_slot, mismatch poll) always go
+     * through start_recording/stop_recording regardless of this flag. */
+    bool                        broadcasts_to_all;
+    esp_err_t                  (*start_recording_all)(void);
+    esp_err_t                  (*stop_recording_all)(void);
 };
 
 /* ---- Public slot info struct (§9) ---- */

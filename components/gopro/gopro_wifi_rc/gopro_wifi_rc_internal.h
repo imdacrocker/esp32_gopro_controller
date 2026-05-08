@@ -63,7 +63,20 @@ typedef struct {
     };
 } rc_work_cmd_t;
 
-typedef enum { RC_SHUTTER_START, RC_SHUTTER_STOP } rc_shutter_cmd_t;
+/* ---- Shutter queue message ---- *
+ *
+ * `ip` is the destination address: a slot's last_ip for unicast (used by the
+ * mismatch poll and per-slot web-UI shutter), or 0xFFFFFFFFu for the broadcast
+ * fan-out (used by set_desired_recording_all).  `repeat` controls how many
+ * times the same SH packet is re-sent back-to-back; broadcasts use
+ * RC_SHUTTER_BROADCAST_REPEAT to compensate for unacknowledged 802.11 frames,
+ * unicasts use 1.
+ */
+typedef struct {
+    bool     start;     /* false = stop */
+    uint32_t ip;        /* network byte order; 0xFFFFFFFFu for broadcast */
+    uint8_t  repeat;
+} rc_shutter_cmd_t;
 
 /* ---- Globals (defined in driver.c) --------------------------------------- */
 

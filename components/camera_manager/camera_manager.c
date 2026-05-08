@@ -29,6 +29,14 @@ static const char *TAG = "camera_manager";
 /* Mismatch poll interval (§13.3 default; per-model tuning deferred) */
 #define STATUS_POLL_INTERVAL_MS   2000
 
+/* Grace window after a shutter command during which the mismatch poll will
+ * NOT compare desired vs. cached recording status.  Both Hero4 (UDP `st`
+ * polling) and Hero 9+ (BLE status notifications) take several seconds to
+ * report a state change after a SetShutter; 10 s comfortably covers both
+ * and the worst-case status-poll scheduling, so we never re-issue a Start
+ * to a camera that's already recording but hasn't yet told us. */
+#define RECORDING_STATUS_GRACE_MS 10000
+
 #define MAX_DRIVER_REGS  4
 
 /*
@@ -78,7 +86,11 @@ typedef struct {
 
     /* Mismatch correction (§13.4) */
     esp_timer_handle_t poll_timer;
-    bool               grace_period_active;
+    /* Monotonic deadline (esp_timer_get_time() µs) until which the mismatch
+     * poll suppresses dispatch for this slot — set to now + RECORDING_STATUS_
+     * GRACE_MS after every issued Start/Stop so the camera has time to reflect
+     * the new state in its status report.  0 means "no grace active". */
+    int64_t            grace_until_us;
 } camera_slot_t;
 
 typedef struct {
@@ -114,6 +126,13 @@ static inline void unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
 static void nvs_namespace(int slot, char *buf, size_t len)
 {
     snprintf(buf, len, "cam_%d", slot);
+}
+
+/* Returns the absolute esp_timer deadline at which a freshly-armed
+ * post-shutter grace window expires. */
+static inline int64_t grace_deadline(void)
+{
+    return esp_timer_get_time() + (int64_t)RECORDING_STATUS_GRACE_MS * 1000;
 }
 
 /* ================================================================
@@ -282,8 +301,8 @@ void camera_manager_on_ble_disconnected_by_handle(uint16_t conn_handle)
              * and the UI status mapping see the camera as no-longer-ready. */
             if (s_slots[i].requires_ble) {
                 was_ready = (s_slots[i].wifi_status == WIFI_CAM_READY);
-                s_slots[i].wifi_status         = WIFI_CAM_NONE;
-                s_slots[i].grace_period_active = false;
+                s_slots[i].wifi_status     = WIFI_CAM_NONE;
+                s_slots[i].grace_until_us  = 0;
             }
             found = i;
             break;
@@ -366,9 +385,9 @@ void camera_manager_on_wifi_disconnected(int slot)
     lock();
     const camera_driver_t *drv     = s_slots[slot].driver;
     void                  *drv_ctx = s_slots[slot].driver_ctx;
-    s_slots[slot].wifi_status         = WIFI_CAM_NONE;
-    s_slots[slot].ip_addr             = 0;
-    s_slots[slot].grace_period_active = false;
+    s_slots[slot].wifi_status      = WIFI_CAM_NONE;
+    s_slots[slot].ip_addr          = 0;
+    s_slots[slot].grace_until_us   = 0;
     unlock();
 
     if (drv && drv->on_wifi_disconnected) {
@@ -608,15 +627,26 @@ camera_can_state_t camera_manager_get_slot_can_state(int slot)
  * Idempotency: callers (notably can_manager on every 0x600 frame) may invoke
  * with the same intent repeatedly — we only dispatch on a real transition.
  *
- * grace_period_active is set after dispatch so the next poll cycle skips the
- * slot, mirroring poll_timer_cb's own behaviour after it issues a command.
+ * grace_until_us is armed after dispatch so the mismatch poll defers status
+ * comparison for RECORDING_STATUS_GRACE_MS, mirroring poll_timer_cb's own
+ * behaviour after it issues a command.  10 s is long enough that both BLE
+ * status notifications and the WiFi RC `st` poll have caught up before the
+ * next mismatch comparison runs.
  */
 void camera_manager_set_desired_recording_all(desired_recording_t intent)
 {
     const camera_driver_t *drvs[CAMERA_MAX_SLOTS];
-    void                  *ctxs[CAMERA_MAX_SLOTS];
+    void                  *ctxs[CAMERA_MAX_SLOTS];   /* NULL for broadcast entries */
     int                    slots[CAMERA_MAX_SLOTS];
+    bool                   is_broadcast[CAMERA_MAX_SLOTS];
     int                    n = 0;
+
+    /* Tracks broadcast-style drivers already enrolled in this dispatch wave.
+     * For these drivers, only the FIRST slot encountered triggers a call;
+     * subsequent slots have intent + grace updated but no per-slot dispatch
+     * (the broadcast already covered them). */
+    const camera_driver_t *seen_broadcast[CAMERA_MAX_SLOTS];
+    int                    seen_count = 0;
 
     lock();
     for (int i = 0; i < s_slot_count; i++) {
@@ -625,21 +655,52 @@ void camera_manager_set_desired_recording_all(desired_recording_t intent)
         sl->desired_recording = intent;
         if (intent == DESIRED_RECORDING_UNKNOWN) continue;
         if (!sl->driver || sl->wifi_status != WIFI_CAM_READY) continue;
-        drvs[n]  = sl->driver;
-        ctxs[n]  = sl->driver_ctx;
-        slots[n] = i;
-        sl->grace_period_active = true;
+
+        if (sl->driver->broadcasts_to_all) {
+            bool already_seen = false;
+            for (int k = 0; k < seen_count; k++) {
+                if (seen_broadcast[k] == sl->driver) { already_seen = true; break; }
+            }
+            if (already_seen) {
+                /* Earlier slot's broadcast already covered this camera. */
+                sl->grace_until_us = grace_deadline();
+                continue;
+            }
+            seen_broadcast[seen_count++] = sl->driver;
+            drvs[n]         = sl->driver;
+            ctxs[n]         = NULL;
+            slots[n]        = i;
+            is_broadcast[n] = true;
+        } else {
+            drvs[n]         = sl->driver;
+            ctxs[n]         = sl->driver_ctx;
+            slots[n]        = i;
+            is_broadcast[n] = false;
+        }
+        sl->grace_until_us = grace_deadline();
         n++;
     }
     unlock();
 
     for (int j = 0; j < n; j++) {
-        if (intent == DESIRED_RECORDING_START) {
-            ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording", slots[j]);
-            drvs[j]->start_recording(ctxs[j]);
-        } else { /* DESIRED_RECORDING_STOP */
-            ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording", slots[j]);
-            drvs[j]->stop_recording(ctxs[j]);
+        if (is_broadcast[j]) {
+            if (intent == DESIRED_RECORDING_START) {
+                ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording_all (broadcast)",
+                         slots[j]);
+                drvs[j]->start_recording_all();
+            } else { /* DESIRED_RECORDING_STOP */
+                ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording_all (broadcast)",
+                         slots[j]);
+                drvs[j]->stop_recording_all();
+            }
+        } else {
+            if (intent == DESIRED_RECORDING_START) {
+                ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording", slots[j]);
+                drvs[j]->start_recording(ctxs[j]);
+            } else { /* DESIRED_RECORDING_STOP */
+                ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording", slots[j]);
+                drvs[j]->stop_recording(ctxs[j]);
+            }
         }
     }
 }
@@ -659,7 +720,7 @@ void camera_manager_set_desired_recording_slot(int slot, desired_recording_t int
         && sl->driver && sl->wifi_status == WIFI_CAM_READY) {
         drv = sl->driver;
         ctx = sl->driver_ctx;
-        sl->grace_period_active = true;
+        sl->grace_until_us = grace_deadline();
     }
     unlock();
 
@@ -851,11 +912,11 @@ static void poll_timer_cb(void *arg)
     camera_recording_status_t status =
         sl->driver->get_recording_status(sl->driver_ctx);
 
-    mismatch_action_t action =
-        mismatch_step(sl->desired_recording, status, sl->grace_period_active);
+    /* Grace expires naturally when the deadline passes — no per-tick reset. */
+    bool grace_active = (esp_timer_get_time() < sl->grace_until_us);
 
-    /* Clear grace period unconditionally — command had its one poll cycle (§13.4) */
-    sl->grace_period_active = false;
+    mismatch_action_t action =
+        mismatch_step(sl->desired_recording, status, grace_active);
 
     const camera_driver_t *drv = sl->driver;
     void *ctx = sl->driver_ctx;
@@ -865,13 +926,13 @@ static void poll_timer_cb(void *arg)
         ESP_LOGI(TAG, "slot %d: mismatch — issuing start_recording", slot);
         drv->start_recording(ctx);
         lock();
-        s_slots[slot].grace_period_active = true;
+        s_slots[slot].grace_until_us = grace_deadline();
         unlock();
     } else if (action == MISMATCH_ACTION_STOP) {
         ESP_LOGI(TAG, "slot %d: mismatch — issuing stop_recording", slot);
         drv->stop_recording(ctx);
         lock();
-        s_slots[slot].grace_period_active = true;
+        s_slots[slot].grace_until_us = grace_deadline();
         unlock();
     }
 }

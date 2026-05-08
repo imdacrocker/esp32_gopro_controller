@@ -160,6 +160,13 @@ static const uint8_t RC_PKT_CV[13] = {
 #define RC_WORK_QUEUE_DEPTH         16
 #define RC_SHUTTER_QUEUE_DEPTH      8
 
+/* Number of back-to-back UDP SH packets sent for a broadcast shutter
+ * (255.255.255.255).  802.11 broadcasts are unacknowledged, so a single
+ * dropped frame would mean a missed start; sending three improves the odds
+ * that all cameras on the AP receive at least one.  Unicast shutters send
+ * once. */
+#define RC_SHUTTER_BROADCAST_REPEAT 3
+
 /* ---- Response buffer sizes ----------------------------------------------- */
 
 /* Command-channel HTTP responses (date/time set) are tiny; we don't even read

@@ -10,7 +10,7 @@ Implements `camera_driver_t` for GoPro cameras using the legacy "WiFi Smart Remo
 - **Wake-on-LAN**: broadcast magic packet bursts when an associated camera goes silent for > 10 s.
 - **UDP keepalive**: send `_GPHD_:0:0:2:0.000000\n` to each camera every 3 s (fire-and-forget).
 - **UDP status poll**: send binary `st` to each camera with a known IP every 5 s; parse the response for power + recording state.
-- **UDP shutter**: send binary `SH` packets (param 0x02 / 0x00) to all ready cameras.
+- **UDP shutter**: send binary `SH` packets (param 0x02 / 0x00). The driver exposes both per-slot unicast (mismatch poll, manual single-camera web-UI command) and a broadcast variant to `255.255.255.255:8484` × 3 (used by `set_desired_recording_all`); see "Shutter dispatch" below.
 - **UDP camera-version (`cv`) identify**: sent at pair time and on every keepalive tick until the camera responds; reply is a length-prefixed firmware string + model name. Drives `gopro_model_from_name()` to set the slot's model and display name with no HTTP involvement. Verified on real Hero7 hardware (response: `HD7.01.01.90.00` / `HERO7 Black`).
 - **HTTP date/time** (best-effort): URL-encoded hex bytes; gated on `gopro_model_supports_http_datetime()`. No-op on every model except Hero4 Black/Silver until other models' STA-side HTTP is verified.
 - **Liveness watchdog**: trigger WoL retry if `last_response_tick` ages past 10 s.
@@ -55,6 +55,20 @@ Bytes 9–10 are static per opcode (verified working without rolling counters). 
 | `s t` | 0x00 | 0x00, 0x00 | 13 B | Status request | 20 B; b13=power, b14=mode, b15=record state |
 | `S H` | 0x00 | 0x01, 0x00 | 14 B | Shutter (param 0x02 start / 0x00 stop) | 15-byte echo |
 | `c v` | 0x00 | 0x00, 0x00 | 13 B | Camera-version identify | Variable; length-prefixed firmware + model name |
+
+### Shutter dispatch
+
+The driver registers `broadcasts_to_all = true` with `camera_manager` and supplies both pairs of vtable entries:
+
+| Caller | Path | Destination | Repeats |
+|---|---|---|---|
+| `camera_manager_set_desired_recording_all` (CAN `0x600`, web UI Start All) | `start_recording_all` / `stop_recording_all` | `255.255.255.255:8484` | `RC_SHUTTER_BROADCAST_REPEAT` (3) |
+| `camera_manager_set_desired_recording_slot` (web UI per-camera) | `start_recording(ctx)` / `stop_recording(ctx)` | `ctx->last_ip:8484` | 1 |
+| Mismatch poll | `start_recording(ctx)` / `stop_recording(ctx)` | `ctx->last_ip:8484` | 1 |
+
+Both paths post a `rc_shutter_cmd_t { start, ip, repeat }` to the shared shutter queue; `rc_shutter_task` reads `ip` and `repeat` from the command, so it's transport-agnostic. The 3× repeat compensates for unacknowledged 802.11 broadcast frames; at 54 Mbps the burst completes in well under 1 ms. Unicast paths send once because the underlying 802.11 link layer retries on its own.
+
+The single-camera unicast path exists deliberately: a duplicate Start to a Hero4 that's already recording has been observed to flip it back off. By keeping mismatch corrections and per-slot manual commands targeted at a single IP, peers that may already be recording stay undisturbed.
 
 ### Status (`st`) response decode
 

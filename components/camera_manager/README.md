@@ -82,20 +82,26 @@ Each slot carries two independent pieces of state:
 
 **Two dispatch paths** keep the camera aligned with intent:
 
-1. **Immediate dispatch** — `set_desired_recording_all()` / `_slot()` send `start_recording()` / `stop_recording()` directly when the new intent differs from the previous value, the slot is `WIFI_CAM_READY`, and the intent is not `UNKNOWN`. This is the happy path for shutter latency: the BLE/HTTP write goes out as soon as the API call returns rather than waiting for the next poll tick. Idempotent calls (same intent as before) are a no-op so `can_manager`'s per-frame `0x600` updates don't hammer the cameras.
+1. **Immediate dispatch** — `set_desired_recording_all()` / `_slot()` send `start_recording()` / `stop_recording()` directly when the new intent differs from the previous value, the slot is `WIFI_CAM_READY`, and the intent is not `UNKNOWN`. This is the happy path for shutter latency: the BLE/UDP write goes out as soon as the API call returns rather than waiting for the next poll tick. Idempotent calls (same intent as before) are a no-op so `can_manager`'s per-frame `0x600` updates don't hammer the cameras. `set_desired_recording_all` also dedups *broadcast* drivers — see "Broadcast drivers" below.
 2. **Mismatch-correction poll** — fires every **2 s** while a slot is `WIFI_CAM_READY`. Catches slots that weren't ready when the API was called, slots whose real status diverges from the commanded state, and any case where the immediate dispatch was suppressed. On each tick:
 
 ```
-desired == UNKNOWN               → no-op (boot state, no intent yet)
-actual  == UNKNOWN               → no-op (camera state not yet known)
-grace_period_active              → no-op (command from last tick still in flight)
-desired == START, actual == IDLE  → start_recording(); set grace_period_active
-desired == STOP, actual == ACTIVE → stop_recording(); set grace_period_active
+desired == UNKNOWN                → no-op (boot state, no intent yet)
+actual  == UNKNOWN                → no-op (camera state not yet known)
+now < grace_until_us              → no-op (recent command still settling)
+desired == START, actual == IDLE   → start_recording(); arm grace deadline
+desired == STOP, actual == ACTIVE  → stop_recording(); arm grace deadline
 ```
 
-Both paths set `grace_period_active = true` after issuing a command; it's cleared on the next poll tick regardless of whether the camera's status has updated, giving each command one full poll cycle before a correction is re-issued.
+Both paths arm `grace_until_us = now + RECORDING_STATUS_GRACE_MS` (10 s) after issuing a command. The deadline expires on its own — the poll does not reset it per tick. This is long enough that both BLE status notifications and the WiFi RC `st` poll have caught up before the next mismatch comparison runs, so we don't re-issue a Start to a camera that's already recording but hasn't yet told us. The per-cycle reset behaviour was replaced after observing late status updates from Hero4-class cameras under load.
 
-`mismatch_step()` is a pure function in `mismatch.c` — no side effects, no ESP-IDF headers — and can be unit-tested on the host (§23.2). It governs the poll path only; the immediate-dispatch path keys off the intent transition itself and does not consult cached status.
+`mismatch_step()` is a pure function in `mismatch.c` — no side effects, no ESP-IDF headers — and can be unit-tested on the host (§23.2). It still takes the grace-period state as a `bool`; the deadline-vs-now comparison happens at the call site. The immediate-dispatch path keys off the intent transition itself and does not consult cached status.
+
+### Broadcast drivers
+
+If a `camera_driver_t` sets `broadcasts_to_all = true`, `set_desired_recording_all()` calls the driver's `start_recording_all()` / `stop_recording_all()` **once per dispatch wave** (at the slot index of the first match it encounters), rather than calling the per-slot vtable entries for every slot owned by that driver. Other slots using the same driver still have their `desired_recording` and grace deadline updated — they just don't trigger another driver call, since the broadcast already covered them. Slot order in the dispatch list is preserved, so any non-broadcast (e.g. BLE) slots interleaved with broadcast (e.g. RC) slots fire in their natural order.
+
+The mismatch poll and `set_desired_recording_slot` always go through the per-slot vtable entries (`start_recording` / `stop_recording`) regardless of `broadcasts_to_all`, so single-camera commands stay targeted and don't disturb peers.
 
 ---
 
@@ -288,12 +294,22 @@ Pass these as function pointers when constructing `ble_core_callbacks_t` in `ope
 
 ```c
 struct camera_driver {
+    /* Per-slot — used by mismatch poll and set_desired_recording_slot, and by
+     * set_desired_recording_all when broadcasts_to_all is false. */
     esp_err_t                 (*start_recording)(void *ctx);
     esp_err_t                 (*stop_recording)(void *ctx);
     camera_recording_status_t (*get_recording_status)(void *ctx); // non-blocking cache read
     void                      (*teardown)(void *ctx);              // nullable
     void                      (*update_slot_index)(void *ctx, int new_slot); // nullable
     void                      (*on_wifi_disconnected)(void *ctx);  // nullable; RC-emulation only
+
+    /* Broadcast — only used by set_desired_recording_all when this flag is
+     * true.  start_recording_all/stop_recording_all fire once per dispatch
+     * wave; subsequent slots using the same driver have their intent + grace
+     * deadline updated but skip the call. */
+    bool                       broadcasts_to_all;
+    esp_err_t                (*start_recording_all)(void);
+    esp_err_t                (*stop_recording_all)(void);
 };
 ```
 
@@ -333,7 +349,7 @@ Values map directly to RaceCapture direct-CAN channel bytes and must not be reor
 
 ## Threading
 
-A single FreeRTOS mutex (`s_mutex`) guards the slot array. Both the mismatch timer callback and the immediate-dispatch path in `set_desired_recording_*` acquire the mutex briefly to read/update state and set the grace-period flag, then release the mutex before issuing `start_recording()` / `stop_recording()` to avoid holding the lock during a potentially slow driver call.
+A single FreeRTOS mutex (`s_mutex`) guards the slot array. Both the mismatch timer callback and the immediate-dispatch path in `set_desired_recording_*` acquire the mutex briefly to read/update state and arm the grace deadline, then release the mutex before issuing `start_recording()` / `stop_recording()` (or `start_recording_all()` / `stop_recording_all()`) to avoid holding the lock during a potentially slow driver call.
 
 `stop_poll_timer()` is always called **before** acquiring the mutex (in `on_wifi_disconnected` and `remove_slot`) because the timer callback itself acquires the mutex — holding it while stopping the timer would deadlock if a callback fired concurrently.
 
