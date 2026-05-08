@@ -24,9 +24,11 @@ typedef struct {
     bool                       identify_attempted; /* set true once cv has been parsed
                                                       and applied; gates cv-retry on tick */
     /* Populated by the UDP RX task on receipt of a `cv` response.  Read by
-     * the work task (handle_apply_cv / handle_promote / handle_http_identify)
-     * to apply the model+name and skip the HTTP fallback when cv has already
-     * resolved the identity.  Empty (length 0) until cv arrives. */
+     * the work task (handle_apply_cv / handle_promote) to map the model_name
+     * string to a camera_model_t enum and persist it.  Empty (length 0)
+     * until cv arrives.  Note: parsed_model_name is the model identity
+     * string (e.g. "HERO7 Black"), not a user-set device name — it is NOT
+     * written into the slot's name field. */
     char                       parsed_model_name[32];   /* e.g. "HERO7 Black" */
     char                       parsed_firmware[40];     /* e.g. "HD7.01.01.90.00" */
     /* Updated by the UDP RX task on every datagram from the slot's IP

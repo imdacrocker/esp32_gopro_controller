@@ -255,10 +255,13 @@ void gopro_wifi_rc_add_camera(const uint8_t mac[6], uint32_t ip)
         ESP_LOGE(TAG, "add_camera: no free slots");
         return;
     }
-    /* Register as the legacy/unidentified RC fallback.  The HTTP identify
-     * probe (fired from rc_handle_promote on first response) will upgrade
-     * this to HERO4_BLACK / SILVER / future Hero5+ on cameras that respond
-     * to GET /gp/gpControl, or leave it as LEGACY_RC on Hero3-class.
+    /* Register as the legacy/unidentified RC fallback.  The UDP `cv`
+     * identify (sent below in the prime burst, retried by keepalive_tick
+     * every 3 s while identify_attempted is false) will upgrade this to
+     * the specific HERO4_BLACK / SILVER / HERO7 / etc. enum once the camera
+     * answers — handled asynchronously by the RX task and rc_handle_apply_cv.
+     * If the camera never answers `cv` (e.g. Hero3-class), the slot stays
+     * LEGACY_RC and UDP control still works.
      * set_model assigns the gopro_wifi_rc driver and calls ctx_create. */
     camera_manager_set_model(slot, CAMERA_MODEL_GOPRO_HERO_LEGACY_RC);
 
@@ -275,9 +278,9 @@ void gopro_wifi_rc_add_camera(const uint8_t mac[6], uint32_t ip)
     /* Prime the camera with keepalive + status + camera-version so it
      * responds within ms instead of waiting up to 3-5 s for the next
      * scheduled tick.  cv gives us model + firmware over UDP — the RX task
-     * decodes it and posts CMD_APPLY_CV.  CMD_PROMOTE fires on the first
-     * response of any kind; if cv has already arrived by then, promote
-     * applies the model directly with no HTTP fallback. */
+     * decodes it and posts CMD_APPLY_CV, which sets the model on the slot.
+     * CMD_PROMOTE fires on the first response of any kind; if cv has
+     * already arrived by then, promote applies the model inline. */
     rc_send_keepalive(ip);
     rc_send_st(ip);
     rc_send_cv(ip);

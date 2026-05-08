@@ -1361,7 +1361,7 @@ WiFi Remote Control emulation driver for the GoPro "Smart Remote" UDP protocol, 
 | UDP keepalive | `_GPHD_:0:0:2:0.000000\n` unicast, every 3 s — fire-and-forget |
 | UDP status poll | Binary `st` opcode every 5 s; response parsed for power + recording state |
 | UDP shutter | Binary `SH` opcode (param 0x02 / 0x00). Broadcast to `255.255.255.255:8484` × 3 for "fire all" (CAN / Start All); unicast to `ctx->last_ip:8484` × 1 for the mismatch poll and per-slot web-UI commands |
-| UDP camera-version (`cv`) identify | Sent at pair time and re-sent on every keepalive tick until the camera answers; response is a length-prefixed firmware string + model name (`HD7.01.01.90.00` / `HERO7 Black` on a real Hero7).  Drives `gopro_model_from_name()` to set the slot's model + display name with no HTTP involvement. |
+| UDP camera-version (`cv`) identify | Sent at pair time and re-sent on every keepalive tick until the camera answers; response is a length-prefixed firmware string + model name (`HD7.01.01.90.00` / `HERO7 Black` on a real Hero7).  Drives `gopro_model_from_name()` to set the slot's model (camera_model_t enum) with no HTTP involvement.  The slot's name field is left blank — the cv response carries the model identity, not a user-set device name, and there is no known WiFi RC protocol path to retrieve the latter. |
 | HTTP date/time (best-effort) | URL-encoded hex bytes; gated on `gopro_model_supports_http_datetime()` — currently Hero4 Black/Silver only.  Hero5+/Hero7 silently drop port-80 SYNs in Smart-Remote mode, so this stays narrow until verified per-model. |
 | Discovery exposure | Unmanaged SoftAP stations whose MAC OUI is on the GoPro allow-list (`GOPRO_RC_OUIS[]` in `api_rc.c` — IEEE MA-L registrations to Woodman Labs / GoPro) are exposed via `/api/rc/discovered` for the manual Add flow. Other vendors (phones, laptops) are filtered out by `http_server`. |
 
@@ -1444,8 +1444,11 @@ rc_parse_cv_response(slot, buf, len)
 
 The work-task handler `rc_handle_apply_cv()` then maps the name string via
 `gopro_model_from_name()`, calls `camera_manager_set_model()` /
-`set_name()` / `save_slot()`, and flips `ctx->identify_attempted = true` so
-the keepalive tick stops re-sending `cv`.
+`save_slot()`, and flips `ctx->identify_attempted = true` so the keepalive
+tick stops re-sending `cv`.  The slot's name field is **not** populated
+from the cv response — the model_name string is the camera's model
+identity, not a user-set device name, and there is no known WiFi RC
+protocol path to retrieve the latter.
 
 **Retry policy:** `cv` is sent once during the pair prime, again on
 promotion if no response yet, and on every keepalive tick (3 s) thereafter
@@ -1453,8 +1456,8 @@ while `identify_attempted` is false.  Some cameras drop the very first `cv`
 (arrives before the RC pairing has fully settled) — the retry window keeps
 nudging until the camera answers.  If it never does, the slot stays at
 `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` (the default set by `add_camera`) and
-all UDP control still works; only the display name and HTTP-datetime
-capability are missing.
+all UDP control still works; only the resolved model enum and HTTP-datetime
+capability check are missing.
 
 Identification is **not** on the readiness path — `wifi_ready` flips on the
 first datagram of any kind from the camera; `cv` simply settles the model
@@ -1608,7 +1611,8 @@ handle_promote(slot)
   -> if !identify_attempted:
         if parsed_model_name is set (cv arrived first):
             identify_attempted = true
-            apply (gopro_model_from_name + set_model + set_name + save_slot)
+            apply (gopro_model_from_name + set_model + save_slot)
+            /* name field intentionally left blank — see §17.2.5 */
         else:
             rc_send_cv(ip)     /* nudge — keepalive_tick will keep retrying */
   -> rc_send_datetime(slot)    /* gated on gopro_model_supports_http_datetime() */
@@ -1622,12 +1626,12 @@ handle_apply_cv(slot)
   -> log INFO "slot N: applying cv data — model='HERO7 Black' fw='HD7.01.01.90.00'"
   -> mapped = gopro_model_from_name(parsed_model_name)
   -> camera_manager_set_model(slot, mapped)
-  -> camera_manager_set_name(slot, parsed_model_name)
   -> camera_manager_save_slot(slot)
+  /* slot's name field is intentionally left blank — see §17.2.5 */
   -> identify_attempted = true   /* keepalive_tick stops re-sending cv */
 ```
 
-If the camera never answers `cv` at all, the slot stays at `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` (the default seeded by `add_camera`). All UDP control still works in that state — only the displayed model name and HTTP-datetime capability are missing.
+If the camera never answers `cv` at all, the slot stays at `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` (the default seeded by `add_camera`). All UDP control still works in that state — only the resolved model enum and HTTP-datetime capability check are missing.
 
 #### 17.5.1 Status-poll bootstrap
 
@@ -1786,7 +1790,7 @@ Reconnection is driven by a passive BLE scan managed by `ble_core` and directed 
 
 No active scanning. The SoftAP handles discovery by virtue of the camera connecting to it. `gopro_wifi_rc` ignores all unknown MACs — only cameras already registered in `camera_manager` receive any autonomous action.
 
-**Station associates with a DHCP lease:** The DHCP request proves the camera is awake. `gopro_wifi_rc` records `last_ip`, persists it via `camera_manager_save_slot()`, primes the camera with a keepalive + `st` + `cv` UDP burst, and arms the 3 s keepalive timer. On the first received UDP datagram (any opcode) the slot transitions to `WIFI_CAM_READY`; a `cv` response settles the model + display name asynchronously when the camera answers (see §17.5 / §17.2.5).
+**Station associates with a DHCP lease:** The DHCP request proves the camera is awake. `gopro_wifi_rc` records `last_ip`, persists it via `camera_manager_save_slot()`, primes the camera with a keepalive + `st` + `cv` UDP burst, and arms the 3 s keepalive timer. On the first received UDP datagram (any opcode) the slot transitions to `WIFI_CAM_READY`; a `cv` response settles the model asynchronously when the camera answers (see §17.5 / §17.2.5). The slot's name field is left blank — there is no known WiFi RC protocol path to retrieve the user-set camera name.
 
 **Station associates without a DHCP lease (cached IP):** The camera may be asleep or reusing a static IP. `gopro_wifi_rc` checks `last_ip` from the camera's NVS record:
 - `last_ip` known: send WoL magic packet x5, prime with a keepalive, arm the 3 s keepalive timer. The first received UDP datagram drives `CMD_PROMOTE` -> `WIFI_CAM_READY`.

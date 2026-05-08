@@ -1,7 +1,8 @@
 /*
- * connection.c — Station lifecycle handlers, slot promotion, HTTP identify
- * probe, keepalive watchdog, and per-slot keepalive / WoL-retry timer
- * management.  All functions here run on the work task unless otherwise noted.
+ * connection.c — Station lifecycle handlers, slot promotion, UDP `cv`
+ * identify apply, keepalive watchdog, and per-slot keepalive / WoL-retry
+ * timer management.  All functions here run on the work task unless
+ * otherwise noted.
  *
  * §17.4, §17.5, §17.6 of camera_manager_design.md.
  */
@@ -191,7 +192,6 @@ void rc_handle_promote(int slot)
                  slot, ctx->parsed_model_name, ctx->parsed_firmware);
         camera_model_t mapped = gopro_model_from_name(ctx->parsed_model_name);
         camera_manager_set_model(slot, mapped);
-        camera_manager_set_name(slot, ctx->parsed_model_name);
         camera_manager_save_slot(slot);
     } else if (!ctx->identify_attempted) {
         /* cv hasn't arrived yet — kick another one off; keepalive_tick will
@@ -208,9 +208,12 @@ void rc_handle_promote(int slot)
  *
  * Posted by the UDP RX task (rc_parse_cv_response) when a `cv` reply arrives
  * AFTER promote has already run — typically because the camera's keepalive
- * ACK reached us before the cv response.  Applies the parsed model name and
- * firmware to the slot (NVS-persisting), and marks identify_attempted so the
- * HTTP fallback (if it's still in the work queue) skips on dispatch.
+ * ACK reached us before the cv response.  Maps the parsed model_name string
+ * to the camera_model_t enum and persists it (NVS-saved), then marks
+ * identify_attempted so keepalive_tick stops re-sending `cv`.  The slot's
+ * name field is intentionally left blank — there is no known WiFi RC
+ * protocol path to retrieve the user-set camera name, and the model_name
+ * string carried by `cv` is the model identity, not a user-set name.
  */
 void rc_handle_apply_cv(int slot)
 {
@@ -223,7 +226,6 @@ void rc_handle_apply_cv(int slot)
              slot, ctx->parsed_model_name, (int)mapped, ctx->parsed_firmware);
 
     camera_manager_set_model(slot, mapped);
-    camera_manager_set_name(slot, ctx->parsed_model_name);
     camera_manager_save_slot(slot);
 
     ctx->identify_attempted = true;

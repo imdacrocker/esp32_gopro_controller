@@ -308,7 +308,8 @@ button {
 
 .cam-meta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
   flex-wrap: wrap;
@@ -350,7 +351,7 @@ button {
 .cam-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
 }
 

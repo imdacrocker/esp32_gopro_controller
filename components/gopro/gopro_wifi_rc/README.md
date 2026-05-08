@@ -11,7 +11,7 @@ Implements `camera_driver_t` for GoPro cameras using the legacy "WiFi Smart Remo
 - **UDP keepalive**: send `_GPHD_:0:0:2:0.000000\n` to each camera every 3 s (fire-and-forget).
 - **UDP status poll**: send binary `st` to each camera with a known IP every 5 s; parse the response for power + recording state.
 - **UDP shutter**: send binary `SH` packets (param 0x02 / 0x00). The driver exposes both per-slot unicast (mismatch poll, manual single-camera web-UI command) and a broadcast variant to `255.255.255.255:8484` × 3 (used by `set_desired_recording_all`); see "Shutter dispatch" below.
-- **UDP camera-version (`cv`) identify**: sent at pair time and on every keepalive tick until the camera responds; reply is a length-prefixed firmware string + model name. Drives `gopro_model_from_name()` to set the slot's model and display name with no HTTP involvement. Verified on real Hero7 hardware (response: `HD7.01.01.90.00` / `HERO7 Black`).
+- **UDP camera-version (`cv`) identify**: sent at pair time and on every keepalive tick until the camera responds; reply is a length-prefixed firmware string + model name. Drives `gopro_model_from_name()` to set the slot's model with no HTTP involvement. The slot's name field is left blank — there is no known WiFi RC protocol path to retrieve the user-set camera name. Verified on real Hero7 hardware (response: `HD7.01.01.90.00` / `HERO7 Black`).
 - **HTTP date/time** (best-effort): URL-encoded hex bytes; gated on `gopro_model_supports_http_datetime()`. No-op on every model except Hero4 Black/Silver until other models' STA-side HTTP is verified.
 - **Liveness watchdog**: trigger WoL retry if `last_response_tick` ages past 10 s.
 
@@ -98,7 +98,7 @@ Layout (after the 13-byte header echo):
 | 16+1+fw_len | uint8 model-name length |
 | .. | Model name (no NUL) |
 
-Decode lives in `rc_parse_cv_response()` (`status.c`). The model-name string is mapped into `camera_model_t` via `gopro_model_from_name()`; the slot's model and display name are persisted by `rc_handle_apply_cv()` (`connection.c`). All three (model name, mapped enum, firmware) are logged at INFO so unrecognised model_name strings can be added to the lookup table over time.
+Decode lives in `rc_parse_cv_response()` (`status.c`). The model-name string is mapped into `camera_model_t` via `gopro_model_from_name()`; the slot's model is persisted by `rc_handle_apply_cv()` (`connection.c`). The slot's name field is intentionally left blank — the cv response carries the model identity, not a user-set device name, and there is no known WiFi RC protocol path to retrieve the latter. All three (model name, mapped enum, firmware) are logged at INFO so unrecognised model_name strings can be added to the lookup table over time.
 
 ### HTTP date/time format
 
@@ -169,8 +169,9 @@ UDP RX (first datagram from slot's IP, slot not yet ready)
 UDP RX (cv response, any time)
   → rc_parse_cv_response: fill ctx->parsed_model_name + parsed_firmware,
                           post CMD_APPLY_CV
-  → handle_apply_cv: gopro_model_from_name → set_model + set_name + save_slot;
+  → handle_apply_cv: gopro_model_from_name → set_model + save_slot;
                      identify_attempted = true (stops cv-retry on tick)
+                     (slot's name field is left blank — see "Identify" above)
 
 UDP RX (st response)
   → rc_parse_st_response: ctx->recording_status from b13/b15
@@ -187,7 +188,7 @@ on_station_disassociated(mac)
   → clear wifi_ready, disarm timers
 ```
 
-If the camera never answers `cv`, the slot stays at `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` (the default seeded by `add_camera`). All UDP control still works in that state — only the displayed model name and HTTP-datetime capability are missing.
+If the camera never answers `cv`, the slot stays at `CAMERA_MODEL_GOPRO_HERO_LEGACY_RC` (the default seeded by `add_camera`). All UDP control still works in that state — only the resolved model and HTTP-datetime capability check are missing.
 
 ---
 

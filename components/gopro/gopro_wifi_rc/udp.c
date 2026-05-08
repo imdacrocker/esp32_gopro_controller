@@ -189,7 +189,8 @@ static int find_slot_by_ip(uint32_t src_ip)
  * Common bookkeeping for any datagram we receive from a known slot's IP:
  *   - Refresh last_response_tick (drives the WoL silence watchdog)
  *   - If the slot is not yet wifi_ready, post CMD_PROMOTE so the work task
- *     flips the flag, fires the HTTP identify probe, and sends date/time.
+ *     flips the flag, applies cv data if it has already arrived (or nudges
+ *     another `cv` if not), and sends date/time.
  *
  * last_response_tick is a TickType_t (32-bit on Xtensa LX7); aligned 32-bit
  * stores are atomic, so the single-writer (this task) / single-reader
@@ -308,7 +309,8 @@ void rc_udp_rx_task(void *arg)
         /* Camera-version response — opcode "cv" in bytes 11-12, variable
          * length, length-prefixed firmware + model_name strings.  Decoded by
          * rc_parse_cv_response() in status.c, which posts RC_CMD_APPLY_CV
-         * so the work task applies set_model + set_name + save. */
+         * so the work task maps the model_name to camera_model_t and
+         * persists it via set_model + save_slot. */
         if (n > RC_CV_RESP_FW_LEN_OFFSET &&
             buf[RC_RESP_OPCODE_OFFSET]     == 'c' &&
             buf[RC_RESP_OPCODE_OFFSET + 1] == 'v') {

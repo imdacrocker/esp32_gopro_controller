@@ -135,21 +135,21 @@ function renderCameraCards(cameras) {
         const id   = `cam-card-${cam.slot}`;
         let   card = document.getElementById(id);
 
-        const typeBadge = cam.type === 'rc_emulation'
-            ? '<span class="cam-type-badge">WiFi RC</span>' : '';
-
-        const modelLine = (cam.model_name && cam.model_name !== cam.name)
-            ? `<div class="cam-model-name">${cam.model_name}</div>` : '';
+        const hasModel = cam.model_name && cam.model_name !== 'Unknown';
+        const modelText = hasModel ? cam.model_name : (cam.name || '');
+        const modelLine = modelText
+            ? `<div class="cam-model-name">${modelText}</div>` : '';
+        const nameLine = (cam.name && cam.name !== modelText)
+            ? `<div class="cam-model-name">${cam.name}</div>` : '';
 
         const inner = `
             <div class="cam-meta">
-                <span class="cam-number">Cam ${cam.index}</span>
-                <span class="cam-display-name">${cam.name}</span>
-                ${typeBadge}
+                <span class="cam-number">Camera ${cam.index}</span>
+                ${makeBadge(cam.status)}
             </div>
             ${modelLine}
+            ${nameLine}
             <div class="cam-footer">
-                ${makeBadge(cam.status)}
                 ${makeShutterBtn(cam)}
             </div>`;
 
@@ -760,16 +760,25 @@ function renderModalPairedCameras(cameras) {
 
     cameras.forEach(cam => {
         const isRc     = cam.type === 'rc_emulation';
-        const typeBadge = isRc ? '<span class="cam-type-badge">WiFi RC</span>' : '';
+        const isBle    = cam.type === 'ble';
+        const typeBadge = isRc ? '<span class="cam-type-badge">WiFi RC</span>'
+                        : isBle ? '<span class="cam-type-badge">Bluetooth</span>' : '';
         const removeLabel = 'Remove';
-        const metaParts = [cam.model_name, `Cam ${cam.index}`];
+
+        const hasModel = cam.model_name && cam.model_name !== 'Unknown';
+        const modelText = hasModel ? cam.model_name : (cam.name || '');
+        const nameForMeta = (cam.name && cam.name !== modelText) ? cam.name : null;
+
+        const metaParts = [];
+        if (nameForMeta) metaParts.push(nameForMeta);
+        metaParts.push(`Cam ${cam.index}`);
         if (isRc && cam.addr) metaParts.push(cam.addr);
 
         const row = document.createElement('div');
         row.className = 'modal-paired-row';
         row.innerHTML = `
             <div class="modal-paired-info">
-                <div class="modal-paired-name">${cam.name} ${typeBadge}</div>
+                <div class="modal-paired-name">${modelText} ${typeBadge}</div>
                 <div class="modal-paired-meta">${metaParts.filter(Boolean).join(' · ')}</div>
             </div>
             <button class="remove-btn" data-slot="${cam.slot}" data-rc="${isRc}">${removeLabel}</button>`;

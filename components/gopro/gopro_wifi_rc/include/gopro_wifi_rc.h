@@ -47,10 +47,11 @@ void gopro_wifi_rc_on_station_disassociated(const uint8_t mac[6]);
  *
  * Slot is registered with model = CAMERA_MODEL_GOPRO_HERO_LEGACY_RC; the
  * camera's `cv` response (parsed asynchronously by the RX task) upgrades
- * this to the specific Hero4 / Hero7 / etc. model and persists the display
- * name.  If the camera never answers `cv`, the slot stays at LEGACY_RC and
- * UDP control still works — only the model name and HTTP-datetime
- * capability check are missing.
+ * this to the specific Hero4 / Hero7 / etc. model.  The slot's name field
+ * is left blank — there is no known WiFi RC protocol path to retrieve the
+ * user-set camera name.  If the camera never answers `cv`, the slot stays
+ * at LEGACY_RC and UDP control still works — only the resolved model and
+ * HTTP-datetime capability check are missing.
  */
 void gopro_wifi_rc_add_camera(const uint8_t mac[6], uint32_t ip);
 
