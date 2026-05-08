@@ -309,8 +309,8 @@ button {
 .cam-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 12px;
   margin-bottom: 4px;
   flex-wrap: wrap;
 }
@@ -365,36 +365,40 @@ button {
   font-weight: 600;
 }
 
-.status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
+.status-icon {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.status-badge.disconnected .status-dot { display: none; }
-.status-badge.disconnected             { color: var(--gray-light); }
+/* Legacy .status-dot (kept hidden in case any non-rendered code paths still emit it). */
+.status-dot { display: none; }
 
-.status-badge.pairing .status-dot {
-  background: var(--blue);
+.status-badge.disconnected { color: #9aa0a6; }
+.status-badge.pairing      { color: #1d6fdb; }
+.status-badge.connecting   { color: #1d6fdb; }
+.status-badge.idle         { color: #248a3d; }
+.status-badge.recording    { color: #c0271f; }
+
+/* Pulsing recording dot. */
+.status-badge.recording .recording-icon svg circle {
+  transform-origin: center;
   animation: cam-pulse 1.2s infinite;
 }
-.status-badge.pairing                  { color: var(--blue); }
 
-.status-badge.connecting .status-dot {
-  background: var(--blue);
-  animation: cam-pulse 1.2s infinite;
+/* Real arc spinner for connecting / pairing. */
+.status-badge.connecting .connecting-icon,
+.status-badge.pairing    .connecting-icon {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(29, 111, 219, 0.25);
+  border-top-color: #1d6fdb;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
 }
-.status-badge.connecting               { color: var(--blue); }
-
-.status-badge.idle .status-dot         { background: var(--orange); }
-.status-badge.idle                     { color: var(--orange); }
-
-.status-badge.recording .status-dot {
-  background: var(--green);
-  animation: cam-pulse 1.2s infinite;
-}
-.status-badge.recording { color: var(--green-dark); }
 
 /* ---- Per-camera shutter buttons ----------------------------------------- */
 

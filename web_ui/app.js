@@ -94,9 +94,18 @@ const STATUS_LABEL = {
     recording:    'Recording',
 };
 
+const STATUS_ICON = {
+    disconnected: `<span class="status-icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="5.2"/><line x1="3.5" y1="10.5" x2="10.5" y2="3.5"/></svg></span>`,
+    idle:         `<span class="status-icon"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5.2"/></svg></span>`,
+    recording:    `<span class="status-icon recording-icon"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="currentColor"/></svg></span>`,
+    connecting:   `<span class="status-icon connecting-icon"></span>`,
+    pairing:      `<span class="status-icon connecting-icon"></span>`,
+};
+
 function makeBadge(status) {
+    const icon = STATUS_ICON[status] || `<span class="status-icon"></span>`;
     return `<div class="status-badge ${status}">
-        <span class="status-dot"></span>
+        ${icon}
         <span>${STATUS_LABEL[status] || status}</span>
     </div>`;
 }
