@@ -289,6 +289,15 @@ void rc_handle_keepalive_tick(int slot)
             ESP_LOGW(TAG, "slot %d: silence %lu ms — arming WoL retry",
                      slot, (unsigned long)(silence * portTICK_PERIOD_MS));
             rc_arm_wol_retry_timer(ctx);
+
+            /* Demote camera_manager state so the UI / CAN report the slot as
+             * "connecting" (still associated to the SoftAP, just not answering)
+             * instead of staying at "idle"/"recording".  Clearing wifi_ready
+             * makes the next received UDP datagram re-trigger CMD_PROMOTE,
+             * which calls camera_manager_on_camera_ready() to restore READY. */
+            ctx->wifi_ready       = false;
+            ctx->recording_status = CAMERA_RECORDING_UNKNOWN;
+            camera_manager_on_camera_unresponsive(slot);
         }
     } else if (ctx->wol_retry_timer && esp_timer_is_active(ctx->wol_retry_timer)) {
         rc_disarm_wol_retry_timer(ctx);

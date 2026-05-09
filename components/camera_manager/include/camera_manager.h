@@ -58,6 +58,12 @@ typedef struct {
      * Persisted in NVS.  Used by the web UI to distinguish "Pairing" (first-
      * time setup, false) from "Connecting" (subsequent reconnect, true). */
     bool              first_pair_complete;
+    /* RC-emulation only: true between a SoftAP station-join event and its
+     * matching station-disassociation event.  Used by the http_server to
+     * distinguish "silent but still on the AP" (→ "connecting") from "left
+     * the AP entirely" (→ "disconnected") for RC slots whose wifi_status
+     * has been demoted from READY by the keepalive silence watchdog. */
+    bool              wifi_associated;
 } camera_slot_info_t;
 
 /* ---- Pair-attempt info exposed via /api/pair/status ---- */
@@ -147,6 +153,19 @@ void camera_manager_on_camera_ready(int slot);
 
 /* Called when a SoftAP-using camera leaves the AP.  Stops the poll timer. */
 void camera_manager_on_wifi_disconnected(int slot);
+
+/*
+ * Called by an RC-emulation driver when a previously-READY slot has gone
+ * silent on UDP for longer than its silence threshold but is still associated
+ * to the SoftAP (the WoL retry loop is now active).  Demotes wifi_status from
+ * WIFI_CAM_READY to WIFI_CAM_PROBING and stops the mismatch poll timer; does
+ * NOT touch ip_addr or wifi_associated, and does NOT invoke the driver's
+ * on_wifi_disconnected hook — the slot is reachable in principle, the
+ * controller just doesn't have a fresh response.  No-op if the slot is not
+ * currently READY.  When the camera answers again the driver re-runs its
+ * promote path and camera_manager_on_camera_ready() restores READY.
+ */
+void camera_manager_on_camera_unresponsive(int slot);
 
 /*
  * Called from the wifi_manager on_station_ip callback.

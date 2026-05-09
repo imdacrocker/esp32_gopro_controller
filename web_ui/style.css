@@ -501,6 +501,63 @@ button {
   padding: 16px 16px 6px;
 }
 
+.modal-separator {
+  height: 1px;
+  background: var(--gray-border-light);
+  margin: 12px 16px;
+}
+
+.modal-action-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+}
+
+.modal-action-row .modal-action-btn {
+  flex: 1;
+  width: auto;
+  margin: 0;
+}
+
+.modal-info-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--gray-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.modal-info-btn svg { width: 28px; height: 28px; }
+
+.modal-info-btn:hover { color: var(--text-secondary); }
+
+.modal-info-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  max-width: 280px;
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 9px 11px;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  z-index: 10;
+  display: none;
+}
+
+.modal-info-tooltip.show { display: block; }
+
 /* ---- Settings modal (top sheet) ----------------------------------------- */
 
 .settings-modal {

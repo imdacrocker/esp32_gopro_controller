@@ -112,18 +112,32 @@
     <div id="modal-status"></div>
 
     <!-- Section 1: BLE pairing -->
-    <div class="modal-section-title">Pair a Hero9 or newer Camera</div>
-    <button class="modal-action-btn" id="scan-btn">Scan for Cameras</button>
+    <div class="modal-action-row">
+      <button class="modal-action-btn" id="scan-btn">Add a new Bluetooth camera</button>
+      <button class="modal-info-btn" type="button" aria-label="More info">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+      </button>
+      <div class="modal-info-tooltip">Put your camera into Pairing mode, like you would for the GoPro Quik App</div>
+    </div>
+    <div class="modal-section-title" style="padding-top:0">Pair a Hero9 Black or newer over BLE</div>
+    <div class="modal-separator"></div>
     <div id="results"></div>
 
     <!-- Section 2: WiFi RC Emulation -->
-    <div class="modal-section-title">Pair WiFi RC Camera (Hero8 & older)</div>
-    <button class="modal-action-btn" id="rc-add-btn">Refresh List</button>
+    <div class="modal-action-row">
+      <button class="modal-action-btn" id="rc-add-btn">Add a new Wifi RC Camera</button>
+      <button class="modal-info-btn" type="button" aria-label="More info">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+      </button>
+      <div class="modal-info-tooltip">On your camera, add a new connection, and choose either the Wifi RC or Smart Remote option. The camera will automatically pair successfully. Then you can add it to the controller here.</div>
+    </div>
+    <div class="modal-section-title" style="padding-top:0">Pair an older camera as a Wifi Remote</div>
+    <div class="modal-separator"></div>
     <div id="rc-results"></div>
 
     <!-- Section 3: Paired cameras -->
     <div class="modal-section-title-row">
-      <span class="modal-section-title" style="padding:0">Paired Cameras</span>
+      <span class="modal-section-title" style="padding:0;color:var(--text-primary)">Paired Cameras</span>
       <span class="modal-count-badge" id="paired-count"></span>
     </div>
     <div id="paired-list"></div>

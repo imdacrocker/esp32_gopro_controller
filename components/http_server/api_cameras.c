@@ -64,8 +64,13 @@ static const char *model_name_str(camera_model_t model)
 /*
  * Status mapping mirrors camera_manager state (web_ui_spec §...).
  *
- * WiFi (RC-emulation) — three states:
- *   disconnected — wifi_status != READY
+ * WiFi (RC-emulation) — four states:
+ *   disconnected — wifi_status != READY, !wifi_associated
+ *   connecting   — wifi_status != READY,  wifi_associated
+ *                  (slot is on the SoftAP but either still waiting on its
+ *                   first UDP response post-associate, or has been demoted
+ *                   from READY by the keepalive silence watchdog and is in
+ *                   the WoL-retry loop)
  *   idle         — wifi_status == READY, !is_recording
  *   recording    — wifi_status == READY,  is_recording
  *
@@ -88,7 +93,7 @@ static const char *camera_status_str(const camera_slot_info_t *info)
     }
 
     if (is_rc) {
-        return "disconnected";
+        return info->wifi_associated ? "connecting" : "disconnected";
     }
 
     /* BLE camera: choose label based on whether this is initial pairing. */

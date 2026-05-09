@@ -303,7 +303,8 @@ Card internal layout:
 | `recording` | `recording` | 9×9px, `#27ae60`, `cam-pulse 1.2s` | `#2e7d32` | "Recording" |
 
 **Status mapping** (from `camera_manager` enums; see `camera_manager_design.md` §...):
-- `pairing` and `connecting` only apply to BLE cameras. The two are distinguished by the persisted `first_pair_complete` flag — `pairing` shows during the user's initial add-camera flow; `connecting` shows during routine reconnects on subsequent boots.
+- `pairing` only applies to BLE cameras (initial add-camera flow before `first_pair_complete`).
+- `connecting` applies to both transports. For BLE: any non-READY state once `first_pair_complete` is set. For RC: the slot is associated to the SoftAP but `wifi_status != WIFI_CAM_READY` — either still waiting on the first UDP response after a fresh associate, or demoted from READY by the keepalive silence watchdog (WoL retry loop active). The slot returns to `idle`/`recording` on the next received UDP datagram, or to `disconnected` if the camera disassociates from the AP.
 - `idle` and `recording` are gated on `wifi_status == WIFI_CAM_READY` (which BLE drivers also flip at the end of their readiness sequence — the field is overloaded as the universal "fully ready" signal).
 
 ### 10.2 Type Badge (RC-emulation cameras)
@@ -434,20 +435,31 @@ padding: 0 0 2em
 
 **Header:** "Manage Cameras" title left, "Done" button right. Sticky (z-index 10) so it stays visible while scrolling.
 
-On open: immediately calls `refreshModalPairedCameras()` and `refreshLegacyDiscovered()`, then starts a 3s interval for both.
+On open: immediately calls `refreshModalPairedCameras()` and starts a 3s interval that refreshes the paired list and (when activated) the RC-discovered list. The RC-discovered list is **not** populated on modal open — it stays empty until the user clicks "Add a new Wifi RC Camera" (see §13.2). A module-level `rcListActivated` flag gates `refreshRcDiscovered()`; the periodic poll continues to call it but it short-circuits while the flag is false.
 
-On close: cancels any active BLE scan, clears the 3s refresh interval, resets all modal UI state.
+On close: cancels any active BLE scan, clears the 3s refresh interval, resets all modal UI state including `#rc-results` and `rcListActivated = false` (so reopening the modal again starts the RC section blank).
 
 Clicking backdrop also closes modal.
 
+**Action-row pattern (§13.1, §13.2):** Each "add a new camera" section is rendered as a `.modal-action-row` flex row containing:
+- A primary `.modal-action-btn` (flex:1) — the action button
+- A 44×44 px circular `.modal-info-btn` — info icon (Lucide-style "i in a circle" SVG, 28×28)
+- An absolutely-positioned `.modal-info-tooltip` (top: row + 6 px, right: 0, max-width 280 px, dark background `#2a2a2a`, white text) — hidden by default
+
+Tapping the info icon toggles the `.show` class on its sibling tooltip. Tapping a different info icon swaps which tooltip is visible (only one open at a time). Tapping anywhere outside an info icon or open tooltip closes all open tooltips.
+
+Below each action row is a section caption styled as `.modal-section-title` with `padding-top:0` (so it reads as a caption *for* the button above, not a heading for what follows). Each section ends with a `.modal-separator` (1 px `--gray-border-light` line, 12 px vertical / 16 px horizontal margin).
+
 ### 13.1 Section 1 — Pair a New Camera (BLE)
 
-Title: "PAIR A NEW CAMERA"
-
-**Scan button** (`#scan-btn`):
-- Idle: blue `#2980b9`, text "Scan for Cameras"
+**Action button** (`#scan-btn`):
+- Idle: blue `#2980b9`, text "Add a new Bluetooth camera"
 - Scanning: background `#f0f0f0`, border `1px solid #ccc`, color `#333`, text "Cancel Scan"
 - Toggle behavior: if scanning → cancel; else → start
+
+**Info-icon tooltip:** "Put your camera into Pairing mode, like you would for the GoPro Quik App"
+
+**Caption (below button):** "Pair a Hero9 Black or newer over BLE"
 
 **Scan flow:**
 1. `POST /api/scan` → start 1s poll on `GET /api/cameras` + `GET /api/paired-cameras`
@@ -466,11 +478,15 @@ Title: "PAIR A NEW CAMERA"
 
 ### 13.2 Section 2 — Add WiFi RC Emulation Camera
 
-Title: "ADD WIFI RC EMULATION CAMERA"
+**Action button** (`#rc-add-btn`): green `#27ae60`, text "Add a new Wifi RC Camera"
 
-**Refresh List button** (`#rc-add-btn`): green `#27ae60`
+**Info-icon tooltip:** "On your camera, add a new connection, and choose either the Wifi RC or Smart Remote option. The camera will automatically pair successfully. Then you can add it to the controller here."
 
-On open and on button click: `GET /api/rc/discovered`
+**Caption (below button):** "Pair an older camera as a Wifi Remote"
+
+**Activation:** `#rc-results` stays empty when the modal opens. The first click of `#rc-add-btn` sets `rcListActivated = true` and calls `refreshRcDiscovered()`; from that point the existing 3s modal poll keeps the list current. The flag resets on modal close.
+
+On click (and on each subsequent poll while activated): `GET /api/rc/discovered`
 - Returns array of `{ addr, ip }` for SoftAP-connected stations whose MAC OUI is on the GoPro allow-list (see `GOPRO_RC_OUIS[]` in `api_rc.c` — IEEE MA-L registrations to Woodman Labs / GoPro) and that aren't already in a managed RC slot. Non-GoPro stations (phones, laptops viewing the web UI) are filtered out server-side.
 - 0 results: "No unidentified devices connected."
 - N results: "{N} device(s) connected — click Add to probe:"
@@ -481,7 +497,7 @@ Each unidentified device renders as a `.found-camera-row`:
 - "Add" button (blue, `pair-this-btn`)
 
 **Add flow** (mirrors the BLE pair flow — same `pair-overlay` modal and `/api/pair/status` polling):
-1. If IP missing: show "Cannot add — IP address not yet assigned. Wait a moment and click Refresh List." and abort
+1. If IP missing: show "Cannot add — IP address not yet assigned. Wait a moment and click Add a new Wifi RC Camera again." and abort
 2. Open the pair-progress modal (`openPairModal()`); this also closes the Manage Cameras modal so the home screen takes focus on success
 3. `POST /api/rc/add` with `{ addr, ip }` — firmware reserves the shared pair-attempt machine (`PAIR_TRANSPORT_WIFI_RC`) and primes the camera with keepalive + `st` + `cv`. `409 Conflict` means another pair attempt is in flight; the modal flips to the failure view immediately.
 4. `startPairStatusPoll()` — UI polls `GET /api/pair/status` every 1 s.
@@ -492,7 +508,7 @@ Each unidentified device renders as a `.found-camera-row`:
 
 ### 13.3 Section 3 — Paired Cameras
 
-Title: "PAIRED CAMERAS" + count badge (hidden when 0)
+Title: "PAIRED CAMERAS" + count badge (hidden when 0). Unlike the §13.1/§13.2 captions (which use the default `--gray-light` colour), this title is rendered in `--text-primary` (dark) via an inline `style="color:var(--text-primary)"` override on the `.modal-section-title` span, to mark it as a heading for the list rather than a caption for a button above.
 
 Source: `GET /api/paired-cameras`
 
@@ -526,7 +542,7 @@ All polls fire independently via `setInterval`; no coordination or debouncing be
 | GET | `/api/auto-control` | — | `{ enabled: bool }` | |
 | POST | `/api/auto-control` | `{ enabled: bool }` | `{ enabled: bool }` | |
 | GET | `/api/cameras` | — | `[{ name, addr, addr_type, rssi }]` | BLE scan results |
-| GET | `/api/paired-cameras` | — | `[{ slot, index, name, model_name, type, addr, status }]` | `slot` and `index` are **1-based** — first paired camera is `1`. `type`: `"ble"` or `"rc_emulation"`. `status`: WiFi cameras → `"disconnected"\|"idle"\|"recording"`; BLE cameras → `"disconnected"\|"pairing"\|"connecting"\|"idle"\|"recording"` |
+| GET | `/api/paired-cameras` | — | `[{ slot, index, name, model_name, type, addr, status }]` | `slot` and `index` are **1-based** — first paired camera is `1`. `type`: `"ble"` or `"rc_emulation"`. `status`: WiFi cameras → `"disconnected"\|"connecting"\|"idle"\|"recording"`; BLE cameras → `"disconnected"\|"pairing"\|"connecting"\|"idle"\|"recording"`. For RC, `connecting` covers both the post-associate window before the first UDP response and the keepalive-silence WoL-retry loop |
 | POST | `/api/scan` | — | `{}` | Starts BLE scan |
 | POST | `/api/scan-cancel` | — | `{}` | Cancels BLE scan |
 | POST | `/api/pair` | `{ addr, addr_type }` | `{}` | Initiates BLE pairing. Returns `409 Conflict` if a previous pair attempt is still in flight (UI polls `/api/pair/status` until terminal). |
@@ -563,7 +579,7 @@ All polls fire independently via `setInterval`; no coordination or debouncing be
 - **Camera type field:** V2 API uses `"rc_emulation"` for Hero 4 and `"ble"` for Hero 9+ (not `"legacy_wifi"` / `"cohn"`). UI badge text is "WiFi RC" / "BLE". ✅ Resolved.
 - **Model selection for RC-emulation cameras:** Firmware defaults to `HERO4_BLACK`; no model picker in the UI. ✅ Resolved (deferred).
 - **BLE-control cameras (Hero 9+):** Pairing alone is sufficient — there is no separate provisioning step. The post-readiness sequence (`GetHardwareInfo` → `SetCameraControlStatus(EXTERNAL)` → `SetDateTime` → status poll) runs automatically inside `open_gopro_ble`. ✅ Resolved.
-- **BLE status granularity:** Five states for BLE cameras (`disconnected` / `pairing` / `connecting` / `idle` / `recording`); three for WiFi (`disconnected` / `idle` / `recording`). The `pairing` vs `connecting` distinction is driven by the persisted `first_pair_complete` flag.
+- **Status granularity:** Five states for BLE cameras (`disconnected` / `pairing` / `connecting` / `idle` / `recording`); four for WiFi (`disconnected` / `connecting` / `idle` / `recording`). The `pairing` vs `connecting` distinction (BLE only) is driven by the persisted `first_pair_complete` flag. RC `connecting` covers any time the slot is associated to the SoftAP but `wifi_status != WIFI_CAM_READY` — including the keepalive-silence WoL-retry window.
 - **Pair-attempt polling:** Both the BLE Add flow and the WiFi RC Add flow drive the same `pair-overlay` modal and poll `GET /api/pair/status` every ~1 s until the state reaches `success` or `failed`. Errors are mapped to user-friendly messages by `PAIR_ERROR_LABEL` in `app.js`. The `model_unsupported` code surfaces frozen models (e.g. Hero 7) so the user gets a clear "this model is not supported" message instead of a silent disconnect. RC failures show as `handshake_timeout` (no UDP response in 20 s) or `slots_full`. The 15-second arbitrary refresh delay used in the pre-shared-modal RC flow is gone.
 - **Color palette:** V2 should use CSS custom properties (`:root { --blue: #2980b9; … }`) for maintainability.
 - **Settings → Device section:** May need additional entries (e.g. per-camera name edit) — TBD.

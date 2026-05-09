@@ -396,6 +396,29 @@ void camera_manager_on_wifi_disconnected(int slot)
     ESP_LOGI(TAG, "slot %d: wifi disconnected", slot);
 }
 
+void camera_manager_on_camera_unresponsive(int slot)
+{
+    if (!slot_valid(slot)) return;
+
+    bool was_ready;
+    lock();
+    was_ready = (s_slots[slot].wifi_status == WIFI_CAM_READY);
+    if (was_ready) {
+        s_slots[slot].wifi_status    = WIFI_CAM_PROBING;
+        s_slots[slot].grace_until_us = 0;
+    }
+    unlock();
+
+    if (!was_ready) return;
+
+    /* Mismatch poll timer is only armed once on_camera_ready has fired, so a
+     * paired stop is safe and required — leaving it running would dispatch
+     * start/stop commands to a camera we already know is not answering. */
+    stop_poll_timer(slot);
+
+    ESP_LOGI(TAG, "slot %d: camera unresponsive — demoted to PROBING", slot);
+}
+
 void camera_manager_on_station_ip(const uint8_t mac[6], uint32_t ip)
 {
     int slot = camera_manager_find_by_mac(mac);
@@ -578,6 +601,7 @@ esp_err_t camera_manager_get_slot_info(int slot, camera_slot_info_t *out)
     out->ip_addr             = sl->ip_addr;
     out->desired_recording   = sl->desired_recording;
     out->first_pair_complete = sl->first_pair_complete;
+    out->wifi_associated     = sl->wifi_associated;
     memcpy(out->mac, sl->mac, 6);
     strncpy(out->name, sl->name, sizeof(out->name) - 1);
     out->name[sizeof(out->name) - 1] = '\0';

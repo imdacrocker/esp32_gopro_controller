@@ -507,6 +507,12 @@ typedef struct {
     /* Pair-flow tracking (persisted in NVS) */
     bool                  first_pair_complete;
 
+    /* RC-emulation only: true between SoftAP join and disassociation events.
+     * Used by the web UI to render a slot whose wifi_status was demoted by
+     * the keepalive silence watchdog as "connecting" (still on the AP) vs.
+     * "disconnected" (left the AP). */
+    bool                  wifi_associated;
+
     /* Future additions: battery_pct, storage_remaining_mb, temperature, etc. */
 } camera_slot_info_t;
 ```
@@ -1823,7 +1829,7 @@ No active scanning. The SoftAP handles discovery by virtue of the camera connect
 - `last_ip` known: send WoL magic packet x5, prime with a keepalive, arm the 3 s keepalive timer. The first received UDP datagram drives `CMD_PROMOTE` -> `WIFI_CAM_READY`.
 - `last_ip` unknown (never connected before): log warning, take no further action. If the camera wakes and requests a DHCP lease, `CMD_STATION_DHCP` fires and the normal flow resumes.
 
-**Keepalive silence > 10 s (WoL retry):** If no UDP datagram (keepalive ACK, `st`, `SH`, or `cv` reply) arrives within 10 s of the timer being armed, a 2 s WoL-retry timer fires repeatedly — sending WoL x5 followed by a keepalive each cycle — until traffic resumes.
+**Keepalive silence > 10 s (WoL retry):** If no UDP datagram (keepalive ACK, `st`, `SH`, or `cv` reply) arrives within 10 s of the timer being armed, a 2 s WoL-retry timer fires repeatedly — sending WoL x5 followed by a keepalive each cycle — until traffic resumes. On entry to the silence state the driver also calls `camera_manager_on_camera_unresponsive()`, which demotes `wifi_status` from `WIFI_CAM_READY` to `WIFI_CAM_PROBING` and stops the mismatch poll. The slot remains `wifi_associated == true` (it has not left the AP), so the http_server reports its status as `"connecting"` rather than `"disconnected"`. The next received UDP datagram drives `CMD_PROMOTE` again, which calls `camera_manager_on_camera_ready()` and restores `WIFI_CAM_READY`.
 
 **Station disassociates:** Slot returns to `WIFI_CAM_NONE` immediately. Keepalive and WoL-retry timers are disarmed. No further traffic is sent until the camera re-associates.
 

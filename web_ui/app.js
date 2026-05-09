@@ -347,7 +347,6 @@ modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) clo
 function openModal() {
     modalOverlay.classList.add('open');
     refreshModalPairedCameras();
-    refreshRcDiscovered();
     modalPairedRefreshTimer = setInterval(() => {
         refreshModalPairedCameras();
         refreshRcDiscovered();
@@ -360,6 +359,8 @@ function closeModal() {
     modalPairedRefreshTimer = null;
     document.getElementById('modal-status').textContent = '';
     document.getElementById('results').innerHTML = '';
+    document.getElementById('rc-results').innerHTML = '';
+    rcListActivated = false;
     modalOverlay.classList.remove('open');
     /* Note: the pair-progress modal is a separate overlay with higher
      * z-index and manages its own lifecycle. */
@@ -368,6 +369,23 @@ function closeModal() {
 function setModalStatus(msg) {
     document.getElementById('modal-status').textContent = msg;
 }
+
+/* ---- Info-button tooltips ----------------------------------------------- */
+
+document.querySelectorAll('.modal-info-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const tip = btn.parentElement.querySelector('.modal-info-tooltip');
+        const wasOpen = tip.classList.contains('show');
+        document.querySelectorAll('.modal-info-tooltip.show').forEach(t => t.classList.remove('show'));
+        if (!wasOpen) tip.classList.add('show');
+    });
+});
+
+document.addEventListener('click', e => {
+    if (e.target.closest('.modal-info-tooltip') || e.target.closest('.modal-info-btn')) return;
+    document.querySelectorAll('.modal-info-tooltip.show').forEach(t => t.classList.remove('show'));
+});
 
 /* ---- BLE Scan ------------------------------------------------------------ */
 
@@ -663,9 +681,15 @@ pairCancelBtn.addEventListener('click', () => {
 
 /* ---- RC Emulation discovered --------------------------------------------- */
 
-document.getElementById('rc-add-btn').addEventListener('click', refreshRcDiscovered);
+let rcListActivated = false;
+
+document.getElementById('rc-add-btn').addEventListener('click', () => {
+    rcListActivated = true;
+    refreshRcDiscovered();
+});
 
 function refreshRcDiscovered() {
+    if (!rcListActivated) return;
     apiFetch('GET', '/api/rc/discovered')
         .then(renderRcDiscovered)
         .catch(() => {});
@@ -709,7 +733,7 @@ document.getElementById('rc-results').addEventListener('click', async e => {
     const ip   = btn.dataset.ip;
 
     if (!ip) {
-        setModalStatus('Cannot add — IP address not yet assigned. Wait a moment and click Refresh List.');
+        setModalStatus('Cannot add — IP address not yet assigned. Wait a moment and click Add a new Wifi RC Camera again.');
         return;
     }
 
