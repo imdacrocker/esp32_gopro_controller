@@ -335,16 +335,21 @@ Card internal layout:
 ```
 .status-badge  display: inline-flex, align-items: center, gap: 8px
                font-weight: 600, font-size: 0.88rem
-.status-dot    border-radius: 50%, flex-shrink: 0
+.status-icon   width/height: 14px, flex-shrink: 0
+               (inline-flex container for the inner SVG or spinner div)
 ```
 
-| API `status` | CSS class | Dot | Text color | Label |
+The badge is built by `makeBadge(status)` from a fixed `STATUS_ICON` table (SVG or empty `<span>` for the spinner) and a `STATUS_LABEL` table (`renderCameraCards` in `app.js`). The same code path renders the RaceCapture pill — see §7.
+
+| API `status` | CSS class | Icon | Text color | Label |
 |---|---|---|---|---|
-| `disconnected` | `disconnected` | hidden (`display: none`) | `#999` | "Not Connected" |
-| `pairing` | `pairing` | 9×9px, `#2980b9`, `cam-pulse 1.2s` | `#2980b9` | "Pairing…" |
-| `connecting` | `connecting` | 9×9px, `#2980b9`, `cam-pulse 1.2s` | `#2980b9` | "Connecting…" |
-| `idle` | `idle` | 9×9px, `#f39c12` (solid) | `#f39c12` | "Idle" |
-| `recording` | `recording` | 9×9px, `#27ae60`, `cam-pulse 1.2s` | `#2e7d32` | "Recording" |
+| `disconnected` | `disconnected` | 14×14 SVG: outline circle with diagonal slash | `#9aa0a6` | "Not Connected" |
+| `pairing` | `pairing` | 13×13 CSS-border arc spinner (`spin 0.75s linear infinite`), border-top `#1d6fdb` | `#1d6fdb` | "Pairing…" |
+| `connecting` | `connecting` | same arc spinner as `pairing` | `#1d6fdb` | "Connecting…" |
+| `idle` | `idle` | 14×14 SVG: outline circle | `#248a3d` | "Idle" |
+| `recording` | `recording` | 14×14 SVG: solid circle, `cam-pulse 1.2s infinite` on the inner `<circle>` | `#c0271f` | "Recording" |
+
+A `.status-dot { display: none }` rule is retained as a no-op safeguard for any historical code path that might still emit the old `<span class="status-dot">` element — current rendering uses `.status-icon` exclusively.
 
 **Status mapping** (from `camera_manager` enums; see `camera_manager_design.md` §...):
 - `pairing` only applies to BLE cameras (initial add-camera flow before `first_pair_complete`).
