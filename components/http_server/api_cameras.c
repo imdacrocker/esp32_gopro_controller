@@ -32,17 +32,32 @@ static const char *TAG = "http_api_cameras";
 static const char *model_name_str(camera_model_t model)
 {
     switch (model) {
-    case CAMERA_MODEL_GOPRO_HERO4_BLACK:  return "GoPro Hero4 Black";
-    case CAMERA_MODEL_GOPRO_HERO4_SILVER: return "GoPro Hero4 Silver";
-    case CAMERA_MODEL_GOPRO_HERO9_BLACK:  return "GoPro Hero9 Black";
-    case CAMERA_MODEL_GOPRO_HERO10_BLACK: return "GoPro Hero10 Black";
-    case CAMERA_MODEL_GOPRO_HERO11_BLACK: return "GoPro Hero11 Black";
-    case CAMERA_MODEL_GOPRO_HERO11_MINI:  return "GoPro Hero11 Mini";
-    case CAMERA_MODEL_GOPRO_HERO12_BLACK: return "GoPro Hero12 Black";
-    case CAMERA_MODEL_GOPRO_MAX2:         return "GoPro MAX2";
-    case CAMERA_MODEL_GOPRO_HERO13_BLACK: return "GoPro Hero13 Black";
-    case CAMERA_MODEL_GOPRO_LIT_HERO:     return "GoPro Lite Hero";
-    default:                              return "Unknown";
+    case CAMERA_MODEL_GOPRO_HERO2:            return "GoPro Hero2";
+    case CAMERA_MODEL_GOPRO_HERO3_WHITE:      return "GoPro Hero3 White";
+    case CAMERA_MODEL_GOPRO_HERO3_SILVER:     return "GoPro Hero3 Silver";
+    case CAMERA_MODEL_GOPRO_HERO3_BLACK:      return "GoPro Hero3 Black";
+    case CAMERA_MODEL_GOPRO_HERO3PLUS_SILVER: return "GoPro Hero3+ Silver";
+    case CAMERA_MODEL_GOPRO_HERO3PLUS_BLACK:  return "GoPro Hero3+ Black";
+    case CAMERA_MODEL_GOPRO_HEROPLUS_LCD:     return "GoPro Hero+ LCD";
+    case CAMERA_MODEL_GOPRO_HEROPLUS:         return "GoPro Hero+";
+    case CAMERA_MODEL_GOPRO_HERO4_SILVER:     return "GoPro Hero4 Silver";
+    case CAMERA_MODEL_GOPRO_HERO4_BLACK:      return "GoPro Hero4 Black";
+    case CAMERA_MODEL_GOPRO_HERO4_SESSION:    return "GoPro Hero4 Session";
+    case CAMERA_MODEL_GOPRO_HERO5_BLACK:      return "GoPro Hero5 Black";
+    case CAMERA_MODEL_GOPRO_HERO5_SESSION:    return "GoPro Hero5 Session";
+    case CAMERA_MODEL_GOPRO_HERO6_BLACK:      return "GoPro Hero6 Black";
+    case CAMERA_MODEL_GOPRO_HERO_2018:        return "GoPro HERO (2018)";
+    case CAMERA_MODEL_GOPRO_HERO_LEGACY_RC:   return "GoPro Hero (legacy)";
+    case CAMERA_MODEL_GOPRO_HERO7_BLACK:      return "GoPro Hero7 Black";
+    case CAMERA_MODEL_GOPRO_HERO9_BLACK:      return "GoPro Hero9 Black";
+    case CAMERA_MODEL_GOPRO_HERO10_BLACK:     return "GoPro Hero10 Black";
+    case CAMERA_MODEL_GOPRO_HERO11_BLACK:     return "GoPro Hero11 Black";
+    case CAMERA_MODEL_GOPRO_HERO11_MINI:      return "GoPro Hero11 Mini";
+    case CAMERA_MODEL_GOPRO_HERO12_BLACK:     return "GoPro Hero12 Black";
+    case CAMERA_MODEL_GOPRO_MAX2:             return "GoPro MAX2";
+    case CAMERA_MODEL_GOPRO_HERO13_BLACK:     return "GoPro Hero13 Black";
+    case CAMERA_MODEL_GOPRO_LIT_HERO:         return "GoPro Lit Hero";
+    default:                                  return "Unknown";
     }
 }
 
@@ -145,6 +160,11 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
         char mac_str[18];
         format_mac(mac_str, info.mac);
 
+        char ip_str[16] = "";
+        if (info.ip_addr != 0) {
+            format_ip(ip_str, sizeof(ip_str), info.ip_addr);
+        }
+
         const char *type   = gopro_model_uses_rc_emulation(info.model)
                              ? "rc_emulation" : "ble";
         const char *status = camera_status_str(&info);
@@ -158,6 +178,7 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
             "\"model_name\":\"%s\","
             "\"type\":\"%s\","
             "\"addr\":\"%s\","
+            "\"ip\":\"%s\","
             "\"status\":\"%s\""
             "}",
             (i == 0) ? "" : ",",
@@ -166,6 +187,7 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
             model_name_str(info.model),
             type,
             mac_str,
+            ip_str,
             status);
 
         if (n < 0 || (size_t)n >= BUF_SIZE - pos) {

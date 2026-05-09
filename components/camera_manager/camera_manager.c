@@ -254,7 +254,6 @@ int camera_manager_register_new(const uint8_t mac[6])
     sl->model             = CAMERA_MODEL_UNKNOWN;
     sl->desired_recording = DESIRED_RECORDING_UNKNOWN;
     memcpy(sl->mac, mac, 6);
-    snprintf(sl->name, sizeof(sl->name), "Camera %d", slot + 1);
     unlock();
 
     ESP_LOGI(TAG, "slot %d: registered new camera (model TBD)", slot);

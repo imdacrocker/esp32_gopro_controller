@@ -145,10 +145,9 @@ function renderCameraCards(cameras) {
         let   card = document.getElementById(id);
 
         const hasModel = cam.model_name && cam.model_name !== 'Unknown';
-        const modelText = hasModel ? cam.model_name : (cam.name || '');
-        const modelLine = modelText
-            ? `<div class="cam-model-name">${modelText}</div>` : '';
-        const nameLine = (cam.name && cam.name !== modelText)
+        const modelLine = hasModel
+            ? `<div class="cam-model-name">${cam.model_name}</div>` : '';
+        const nameLine = cam.name
             ? `<div class="cam-model-name">${cam.name}</div>` : '';
 
         const inner = `
@@ -759,25 +758,29 @@ function renderModalPairedCameras(cameras) {
         const isBle    = cam.type === 'ble';
         const typeBadge = isRc ? '<span class="cam-type-badge">WiFi RC</span>'
                         : isBle ? '<span class="cam-type-badge">Bluetooth</span>' : '';
-        const removeLabel = 'Remove';
 
         const hasModel = cam.model_name && cam.model_name !== 'Unknown';
-        const modelText = hasModel ? cam.model_name : (cam.name || '');
-        const nameForMeta = (cam.name && cam.name !== modelText) ? cam.name : null;
+        const nameLine  = cam.name
+            ? `<div class="modal-paired-meta">${cam.name}</div>` : '';
+        const modelLine = hasModel
+            ? `<div class="modal-paired-meta">${cam.model_name}</div>` : '';
 
-        const metaParts = [];
-        if (nameForMeta) metaParts.push(nameForMeta);
-        metaParts.push(`Cam ${cam.index}`);
-        if (isRc && cam.addr) metaParts.push(cam.addr);
+        const addrParts = [];
+        if (cam.ip)   addrParts.push(cam.ip);
+        if (cam.addr) addrParts.push(cam.addr);
+        const addrLine = addrParts.length
+            ? `<div class="modal-paired-meta">${addrParts.join(' · ')}</div>` : '';
 
         const row = document.createElement('div');
         row.className = 'modal-paired-row';
         row.innerHTML = `
             <div class="modal-paired-info">
-                <div class="modal-paired-name">${modelText} ${typeBadge}</div>
-                <div class="modal-paired-meta">${metaParts.filter(Boolean).join(' · ')}</div>
+                <div class="modal-paired-name">Camera ${cam.index} ${typeBadge}</div>
+                ${nameLine}
+                ${modelLine}
+                ${addrLine}
             </div>
-            <button class="remove-btn" data-slot="${cam.slot}" data-rc="${isRc}">${removeLabel}</button>`;
+            <button class="remove-btn" data-slot="${cam.slot}" data-rc="${isRc}">Remove</button>`;
         list.appendChild(row);
     });
 }

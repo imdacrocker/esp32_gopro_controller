@@ -93,6 +93,13 @@ void gopro_on_encrypted(uint16_t conn_handle, ble_addr_t addr)
             return;
         }
         ESP_LOGI(TAG, "registered new camera in slot %d conn=%d", slot, conn_handle);
+
+        /* Carry the advertised name (e.g. "GP50553313") forward as the slot's
+         * display name.  Discovery cache holds the value until the next scan. */
+        char adv_name[32];
+        if (open_gopro_ble_lookup_disc_name(addr.val, adv_name, sizeof(adv_name))) {
+            camera_manager_set_name(slot, adv_name);
+        }
     }
 
     if (is_active_pair) {

@@ -134,6 +134,22 @@ int open_gopro_ble_get_discovered(gopro_device_t *out, int max_count)
     return n;
 }
 
+bool open_gopro_ble_lookup_disc_name(const uint8_t mac[6], char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return false;
+    bool found = false;
+    xSemaphoreTake(s_disc_mutex, portMAX_DELAY);
+    for (int i = 0; i < s_disc_count; i++) {
+        if (memcmp(s_disc_list[i].addr.val, mac, 6) == 0) {
+            snprintf(out, out_len, "%s", s_disc_list[i].name);
+            found = true;
+            break;
+        }
+    }
+    xSemaphoreGive(s_disc_mutex);
+    return found;
+}
+
 /* ---- Connection ---------------------------------------------------------- */
 
 void open_gopro_ble_connect_by_addr(const ble_addr_t *addr)

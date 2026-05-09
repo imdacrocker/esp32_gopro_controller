@@ -79,6 +79,13 @@ gopro_ble_ctx_t *gopro_ctx_by_slot(int slot);
 /* Returns ctx whose conn_handle matches, or NULL. */
 gopro_ble_ctx_t *gopro_ctx_by_conn(uint16_t conn_handle);
 
+/*
+ * Look up the advertised name captured during discovery for a given MAC.
+ * Copies into `out` (NUL-terminated, truncated if needed) and returns true on
+ * hit; returns false if no matching discovery record is cached.
+ */
+bool open_gopro_ble_lookup_disc_name(const uint8_t mac[6], char *out, size_t out_len);
+
 /* ---- GATT discovery (gatt.c) --------------------------------------------- */
 
 /* Start MTU exchange + characteristic discovery.  Called from pairing.c. */
