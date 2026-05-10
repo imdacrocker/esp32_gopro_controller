@@ -5,6 +5,7 @@ idf_component_register(
         "api_rc.c"
         "api_settings.c"
         "api_system.c"
+        "api_ota.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -16,7 +17,9 @@ idf_component_register(
         wifi_manager
         open_gopro_ble
         gopro_wifi_rc
+        ota_io
         esp_http_server
+        esp_app_format
         joltwallet__littlefs
         espressif__cjson
         lwip

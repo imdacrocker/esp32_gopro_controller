@@ -2,6 +2,7 @@
  * api_system.c — System-level API handlers (§20.4).
  *
  * Endpoints:
+ *   GET  /api/version
  *   GET  /api/logging-state
  *   GET  /api/utc
  *   GET  /api/auto-control
@@ -14,8 +15,12 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "cJSON.h"
 #include "can_manager.h"
@@ -23,6 +28,97 @@
 #include "http_server_internal.h"
 
 static const char *TAG = "http_api_system";
+
+/* ---- GET /api/version ---------------------------------------------------- *
+ * Returns running firmware identity per ota_design.md §6.
+ *
+ *   app:    main app version (esp_app_get_description)
+ *   ui:     read from /www/manifest.json's ui_version field;
+ *           "unknown" if file missing or unparseable
+ *   recovery: read from factory partition's app desc; "unknown" if missing
+ *   channel: NVS ota/channel, default "stable"
+ *   running_partition: label (typically ota_0 or ota_1 in main mode)
+ *   mode: "main"
+ */
+
+static void read_ui_version(char *out, size_t out_len)
+{
+    /* compress.py (Phase 5) writes /www/manifest.json into the LittleFS
+     * staging dir at build time. Until then, the file is missing — that's
+     * expected; report "unknown". */
+    FILE *f = fopen("/www/manifest.json", "rb");
+    if (!f) {
+        strncpy(out, "unknown", out_len - 1);
+        out[out_len - 1] = '\0';
+        return;
+    }
+    char buf[256];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    cJSON *v = root ? cJSON_GetObjectItem(root, "ui_version") : NULL;
+    if (cJSON_IsString(v) && v->valuestring) {
+        strncpy(out, v->valuestring, out_len - 1);
+        out[out_len - 1] = '\0';
+    } else {
+        strncpy(out, "unknown", out_len - 1);
+        out[out_len - 1] = '\0';
+    }
+    cJSON_Delete(root);
+}
+
+static void read_recovery_version(char *out, size_t out_len)
+{
+    const esp_partition_t *factory = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+    esp_app_desc_t desc;
+    if (factory && esp_ota_get_partition_description(factory, &desc) == ESP_OK) {
+        strncpy(out, desc.version, out_len - 1);
+        out[out_len - 1] = '\0';
+    } else {
+        strncpy(out, "unknown", out_len - 1);
+        out[out_len - 1] = '\0';
+    }
+}
+
+static void read_channel(char *out, size_t out_len)
+{
+    nvs_handle_t h;
+    if (nvs_open("ota", NVS_READONLY, &h) != ESP_OK) {
+        strncpy(out, "stable", out_len - 1);
+        out[out_len - 1] = '\0';
+        return;
+    }
+    size_t sz = out_len;
+    if (nvs_get_str(h, "channel", out, &sz) != ESP_OK) {
+        strncpy(out, "stable", out_len - 1);
+        out[out_len - 1] = '\0';
+    }
+    nvs_close(h);
+}
+
+static esp_err_t handler_version(httpd_req_t *req)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+
+    char ui[48], recovery[48], channel[16];
+    read_ui_version(ui, sizeof(ui));
+    read_recovery_version(recovery, sizeof(recovery));
+    read_channel(channel, sizeof(channel));
+
+    char buf[320];
+    snprintf(buf, sizeof(buf),
+             "{\"app\":\"%s\",\"ui\":\"%s\",\"recovery\":\"%s\","
+             "\"channel\":\"%s\",\"running_partition\":\"%s\","
+             "\"mode\":\"main\"}",
+             app->version, ui, recovery, channel,
+             running ? running->label : "unknown");
+    send_json(req, buf);
+    return ESP_OK;
+}
 
 /* ---- GET /api/logging-state ---------------------------------------------- */
 
@@ -128,6 +224,7 @@ static esp_err_t handler_factory_reset(httpd_req_t *req)
 void api_system_register(httpd_handle_t server)
 {
     static const httpd_uri_t uris[] = {
+        { .uri = "/api/version",       .method = HTTP_GET,  .handler = handler_version          },
         { .uri = "/api/logging-state", .method = HTTP_GET,  .handler = handler_logging_state    },
         { .uri = "/api/utc",           .method = HTTP_GET,  .handler = handler_utc              },
         { .uri = "/api/auto-control",  .method = HTTP_GET,  .handler = handler_get_auto_control },

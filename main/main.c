@@ -3,6 +3,8 @@
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_timer.h"
 #include "wifi_manager.h"
 #include "ble_core.h"
 #include "camera_manager.h"
@@ -12,6 +14,39 @@
 #include "http_server.h"
 
 static const char *TAG = "main";
+
+/* ---- OTA rollback disarm (§11) ------------------------------------------ *
+ * After an OTA commit, the bootloader marks the new app PENDING_VERIFY. If
+ * the app crashes (or never calls mark_valid_cancel_rollback) before the
+ * next reset, the bootloader auto-reverts to factory (recovery). Arming a
+ * 30 s timer here gives us confidence the new app is stable before
+ * disarming the rollback. Returns ESP_ERR_NOT_SUPPORTED when running from
+ * the factory partition — that's the recovery app, not relevant.
+ */
+static void rollback_timer_cb(void *arg)
+{
+    (void)arg;
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "OTA rollback disarmed — app marked valid");
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        /* running from factory; no rollback to cancel */
+    } else {
+        ESP_LOGW(TAG, "mark_app_valid_cancel_rollback: %s", esp_err_to_name(err));
+    }
+}
+
+static void arm_rollback_timer(void)
+{
+    static esp_timer_handle_t timer;
+    const esp_timer_create_args_t args = {
+        .callback        = rollback_timer_cb,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "rollback_arm",
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&args, &timer));
+    ESP_ERROR_CHECK(esp_timer_start_once(timer, 30ULL * 1000 * 1000));  /* 30 s */
+}
 
 /* ---- CAN callbacks ------------------------------------------------------- */
 
@@ -91,6 +126,10 @@ void app_main(void)
     /* Mount LittleFS, start esp_httpd, register all /api/ handlers.
      * TCP-only — does not touch the radio, safe to do before BLE. */
     http_server_init();
+
+    /* Arm the OTA rollback-disarm timer (§11). 30 s of survival + httpd
+     * up = "looks healthy enough to keep." */
+    arm_rollback_timer();
 
     /* Starts the NimBLE host task. on_sync fires async and begins scanning.
      * Deferred until after the AP beacon is on-air (see comment above). */

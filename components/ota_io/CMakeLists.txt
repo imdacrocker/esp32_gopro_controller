@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "ota_writer.c"
+        "storage_writer.c"
+        "boot_helpers.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_partition
+        app_update
+        esp_app_format
+        nvs_flash
+        mbedtls
+)

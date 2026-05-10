@@ -1,11 +1,29 @@
-# ESP32 GoPro Controller V2
+# ESP32 GoPro Controller V2 — OTA-capable layout
 # Target: ESP32-S3  |  Flash: 8 MB
 #
 # Bootloader:      0x000000 – 0x007FFF  (32 KB, IDF default)
 # Partition table: 0x008000 – 0x008FFF  (4 KB, IDF default)
 #
+# `factory` is the recovery app (sibling project esp32_gopro_canbus_recovery).
+# `ota_0` and `ota_1` are the A/B slots for the main app — `esp_ota_begin`
+#   refuses to write to the running partition, so two slots are needed for
+#   in-place upgrades from the main app's web UI (ota_design.md §6 / §13).
+# `storage` is the LittleFS web UI for the main app.
+# Free 0x740000 .. 0x800000 (~768 KB) reserved for future use.
+#
+# Deviations from ota_design.md §3:
+#   - factory grew from 512 KB → 768 KB. WiFi-capable IDF v6 recovery is ~700 KB
+#     minimum (libnet80211 + lwIP + libpp alone are ~290 KB).
+#   - ota_0 shrank from 1.94 MB → 1.69 MB. Main app is ~1.2 MB; comfortable.
+#   - ota_1 added now (§3 deferred it to "future"). Without ota_1, in-place OTA
+#     from main fails (ESP_ERR_OTA_PARTITION_CONFLICT — can't write the running
+#     partition). The 1.69 MB came out of the 2.4 MB future-reserve.
+#
 # Name,     Type,  SubType,  Offset,    Size,
 nvs,         data,  nvs,      0x009000,  0x006000,
-phy_init,    data,  phy,      0x00F000,  0x001000,
-factory,     app,   factory,  0x010000,  0x1F0000,
-storage,     data,  spiffs,   0x200000,  0x300000,
+otadata,     data,  ota,      0x00F000,  0x002000,
+phy_init,    data,  phy,      0x011000,  0x001000,
+factory,     app,   factory,  0x020000,  0x0C0000,
+ota_0,       app,   ota_0,    0x0E0000,  0x1B0000,
+storage,     data,  spiffs,   0x290000,  0x300000,
+ota_1,       app,   ota_1,    0x590000,  0x1B0000,

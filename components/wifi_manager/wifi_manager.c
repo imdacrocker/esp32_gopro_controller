@@ -157,10 +157,15 @@ void wifi_manager_init(void)
     /* DHCP: fixed IP 10.71.79.1/24, pool 10.71.79.2–50 (§11.2) */
     ESP_ERROR_CHECK(esp_netif_dhcps_stop(s_ap_netif));
 
+    /* IP4_ADDR + cast aliases esp_ip4_addr_t as lwIP's ip4_addr_t. The two
+     * are layout-compatible (single uint32_t addr field), but -Os promotes
+     * the strict-aliasing warning to a hard error. Build the value via a
+     * local lwIP type and copy across. */
     esp_netif_ip_info_t ip_info = {};
-    IP4_ADDR((ip4_addr_t *)&ip_info.ip,      10, 71, 79,   1);
-    IP4_ADDR((ip4_addr_t *)&ip_info.gw,      10, 71, 79,   1);
-    IP4_ADDR((ip4_addr_t *)&ip_info.netmask, 255, 255, 255, 0);
+    ip4_addr_t tmp;
+    IP4_ADDR(&tmp, 10, 71, 79,   1); ip_info.ip.addr      = tmp.addr;
+    IP4_ADDR(&tmp, 10, 71, 79,   1); ip_info.gw.addr      = tmp.addr;
+    IP4_ADDR(&tmp, 255, 255, 255, 0); ip_info.netmask.addr = tmp.addr;
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
 
     dhcps_lease_t lease = { .enable = true };
@@ -175,7 +180,7 @@ void wifi_manager_init(void)
     /* SoftAP: open auth, ch 11, 60 s inactive timeout, PMF disabled (§11.2) */
     wifi_config_t ap_config = {};
     snprintf((char *)ap_config.ap.ssid, sizeof(ap_config.ap.ssid),
-             "HERO-RC-%02X%02X%02X", ap_mac[3], ap_mac[4], ap_mac[5]);
+             AP_SSID_PREFIX "%02X%02X%02X", ap_mac[3], ap_mac[4], ap_mac[5]);
     ap_config.ap.ssid_len         = (uint8_t)strlen((char *)ap_config.ap.ssid);
     ap_config.ap.channel          = AP_CHANNEL;
     ap_config.ap.authmode         = WIFI_AUTH_OPEN;
