@@ -2,7 +2,7 @@ menu "GoPro Controller — OTA"
 
     config OTA_BASE_URL
         string "Cloudflare Worker base URL (proxy to GitHub Releases)"
-        default "https://firmware-proxy.example.workers.dev"
+        default "https://firmware-proxy.imdacrocker.workers.dev"
         help
             Base URL the browser uses to fetch manifests and binaries.
             The Worker proxies github.com and adds CORS headers.
