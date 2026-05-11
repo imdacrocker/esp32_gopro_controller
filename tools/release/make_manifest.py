@@ -1,0 +1,120 @@
+"""Generate a release manifest.json from pre-built binaries.
+
+This script is invoked by .github/workflows/release.yml after the ESP-IDF builds
+have completed. It does NOT build itself — that's CI's job (it has the IDF setup).
+For local use, run idf.py build for both apps first.
+
+Schema is defined in ota_design.md §5.
+
+Channel derivation:
+    v1.2.3         -> stable
+    v1.2.3-rc.N    -> beta
+    v1.2.3-beta.N  -> beta
+    v1.2.3-dev.*   -> rejected (dev channel is local-only, never published)
+
+Usage:
+    python make_manifest.py \\
+        --version v0.1.0-rc.1 \\
+        --app-bin     apps/main/build/esp32_gopro_canbus_controller_v2.bin \\
+        --storage-bin apps/main/build/storage.bin \\
+        --output      manifest.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from datetime import date, timezone
+from pathlib import Path
+
+
+SEMVER_RE = re.compile(
+    r"^v?(?P<core>\d+\.\d+\.\d+)(?:-(?P<pre>(?:rc|beta|dev)(?:\.[0-9A-Za-z-]+)?))?$"
+)
+
+
+def parse_version(raw: str) -> tuple[str, str]:
+    """Return (semver-without-v, channel). Raises SystemExit on bad input."""
+    m = SEMVER_RE.match(raw)
+    if not m:
+        sys.exit(f"error: version {raw!r} does not look like vMAJOR.MINOR.PATCH[-rc.N|-beta.N]")
+    core = m.group("core")
+    pre = m.group("pre")
+    if pre is None:
+        return core, "stable"
+    kind = pre.split(".", 1)[0]
+    if kind == "dev":
+        sys.exit("error: dev versions are local-only and must not be published")
+    if kind in ("rc", "beta"):
+        return f"{core}-{pre}", "beta"
+    sys.exit(f"error: unrecognized prerelease tag {pre!r}")
+
+
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", required=True,
+                   help="Release tag, e.g. v0.1.0 or v0.1.0-rc.1")
+    p.add_argument("--app-bin", required=True, type=Path,
+                   help="Path to the main app binary (typically esp32_gopro_canbus_controller_v2.bin)")
+    p.add_argument("--storage-bin", required=True, type=Path,
+                   help="Path to the LittleFS storage image (storage.bin)")
+    p.add_argument("--min-recovery-version", default="0.1.0",
+                   help="Floor recovery version this build is compatible with (default: 0.1.0)")
+    p.add_argument("--release-notes-url", default=None,
+                   help="Optional URL for release notes shown in the web UI")
+    p.add_argument("--output", required=True, type=Path,
+                   help="Where to write manifest.json")
+    args = p.parse_args()
+
+    version, channel = parse_version(args.version)
+
+    for label, path in (("app", args.app_bin), ("storage", args.storage_bin)):
+        if not path.exists():
+            sys.exit(f"error: {label} binary not found at {path}")
+
+    manifest = {
+        "channel": channel,
+        "released": date.today().isoformat(),
+        "app": {
+            "version": version,
+            "size":    args.app_bin.stat().st_size,
+            "sha256":  sha256_of(args.app_bin),
+            "url":     "app.bin",
+        },
+        "ui": {
+            # App + UI ship as a pair; until the web UI carries its own version
+            # (Phase 5 will populate /www/manifest.json), we tie it to the app.
+            "version": version,
+            "size":    args.storage_bin.stat().st_size,
+            "sha256":  sha256_of(args.storage_bin),
+            "url":     "storage.bin",
+        },
+        "min_recovery_version": args.min_recovery_version,
+    }
+    if args.release_notes_url:
+        manifest["release_notes_url"] = args.release_notes_url
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    print(f"wrote {args.output}")
+    print(f"  channel: {channel}")
+    print(f"  version: {version}")
+    print(f"  app:     {manifest['app']['size']} bytes, sha={manifest['app']['sha256'][:12]}...")
+    print(f"  ui:      {manifest['ui']['size']} bytes, sha={manifest['ui']['sha256'][:12]}...")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
