@@ -1,0 +1,28 @@
+menu "GoPro Controller — OTA (recovery)"
+
+    config OTA_BASE_URL
+        string "Cloudflare Worker base URL (proxy to GitHub Releases)"
+        default "https://firmware-proxy.imdacrocker.workers.dev"
+        help
+            Base URL the embedded recovery UI uses to fetch manifests and
+            binaries. Must match apps/main/Kconfig.projbuild — both apps
+            ship as a pair with the same default. If the URL ever moves,
+            users on stale recovery builds fall back to manual upload
+            (per ota_design.md §1).
+
+    config OTA_REPO_PATH
+        string "GitHub <owner>/<repo> path for releases"
+        default "imdacrocker/esp32_gopro_controller"
+        help
+            Used by the recovery UI to compose the full manifest URL:
+              <OTA_BASE_URL>/<OTA_REPO_PATH>/releases/download/latest-<channel>/manifest.json
+
+    config OTA_ALLOW_DEV_CHANNEL
+        bool "Expose 'dev' channel in /api/ota/channel"
+        default n
+        help
+            When enabled, adds "dev" to the available-channels list returned
+            by GET /api/ota/channel. No online publishing target exists for
+            the dev channel — local-only.
+
+endmenu

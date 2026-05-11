@@ -19,6 +19,9 @@ project(esp32_gopro_canbus_controller_v2)
 # compress.py copies index.html and writes plain + gzipped CSS/JS into the
 # staging dir; littlefs_create_partition_image builds storage.bin from it
 # and wires it into `idf.py flash` via FLASH_IN_PROJECT.
+#
+# OTA runtime config (base URL, repo path) is served by the device via
+# /api/version — no per-build file goes into LittleFS for that.
 
 set(WEB_UI_SRC "${CMAKE_SOURCE_DIR}/web_ui")
 set(WEB_UI_OUT "${CMAKE_BINARY_DIR}/web_ui_out")

@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "sdkconfig.h"
 #include "recovery_http.h"
 #include "ota_io.h"
 
@@ -94,20 +95,152 @@ static esp_err_t handler_root(httpd_req_t *req)
     return httpd_resp_send(req, s_html, s_html_len);
 }
 
-/* ---- GET /api/version ---------------------------------------------------- */
-
+/* ---- GET /api/version ---------------------------------------------------- *
+ *
+ *   app:               recovery's own version (no main-app version is
+ *                      readable from the running partition; we report
+ *                      what's running, hence recovery's version)
+ *   ui:                "none" — recovery's UI is embedded in the binary,
+ *                      not a separate version
+ *   recovery:          same as app field for clarity
+ *   channel:           shared NVS ota/channel via ota_io
+ *   mode:              "recovery"
+ */
 static esp_err_t handler_version(httpd_req_t *req)
 {
     const esp_app_desc_t *desc = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
-    char buf[256];
+
+    char channel[OTA_IO_CHANNEL_MAX];
+    ota_io_get_channel(channel, sizeof(channel));
+
+    char buf[512];
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"none\",\"recovery\":\"%s\","
-             "\"channel\":\"recovery\",\"running_partition\":\"%s\","
-             "\"mode\":\"recovery\"}",
-             desc->version, desc->version,
-             running ? running->label : "unknown");
+             "\"channel\":\"%s\",\"running_partition\":\"%s\","
+             "\"mode\":\"recovery\","
+             "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
+             desc->version, desc->version, channel,
+             running ? running->label : "unknown",
+             CONFIG_OTA_BASE_URL, CONFIG_OTA_REPO_PATH);
     return send_json(req, buf);
+}
+
+/* ---- GET /api/ota/channel ----------------------------------------------- */
+
+static esp_err_t handler_get_channel(httpd_req_t *req)
+{
+    char current[OTA_IO_CHANNEL_MAX];
+    ota_io_get_channel(current, sizeof(current));
+
+    char body[128];
+#if CONFIG_OTA_ALLOW_DEV_CHANNEL
+    snprintf(body, sizeof(body),
+             "{\"current\":\"%s\",\"available\":[\"stable\",\"beta\",\"dev\"]}",
+             current);
+#else
+    snprintf(body, sizeof(body),
+             "{\"current\":\"%s\",\"available\":[\"stable\",\"beta\"]}",
+             current);
+#endif
+    return send_json(req, body);
+}
+
+/* ---- POST /api/ota/channel ---------------------------------------------- */
+
+/* Read up to `cap` bytes of body into `buf`. Returns negative and emits an
+ * error response on failure. */
+static int read_body_capped(httpd_req_t *req, char *buf, size_t cap)
+{
+    if (req->content_len == 0 || req->content_len >= cap) {
+        send_status_json(req, "400 Bad Request",
+            "{\"error\":\"body too large or empty\"}");
+        return -1;
+    }
+    int total = 0;
+    while ((size_t)total < req->content_len) {
+        int n = httpd_req_recv(req, buf + total, req->content_len - total);
+        if (n <= 0) {
+            if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            send_status_json(req, "400 Bad Request",
+                "{\"error\":\"recv failed\"}");
+            return -1;
+        }
+        total += n;
+    }
+    buf[total] = '\0';
+    return total;
+}
+
+/* Extract a quoted string value for `key` from a flat JSON object.
+ * Recovery only ever receives `{"channel":"<word>"}`, so we hand-roll
+ * this to avoid pulling cJSON into recovery's binary (62 KB headroom).
+ *
+ * Writes the unescaped value to `out` (NUL-terminated). Returns true on
+ * success. Tolerates whitespace around tokens but does NOT process JSON
+ * escape sequences — fine because the only valid values are plain ASCII
+ * channel names (stable / beta / dev).
+ */
+static bool extract_string_field(const char *json, const char *key,
+                                  char *out, size_t out_len)
+{
+    /* Find "key" */
+    size_t key_len = strlen(key);
+    const char *p = json;
+    while ((p = strchr(p, '"')) != NULL) {
+        if (strncmp(p + 1, key, key_len) == 0 && p[1 + key_len] == '"') {
+            p += 2 + key_len;
+            break;
+        }
+        p++;
+    }
+    if (!p) return false;
+
+    /* Skip whitespace and the colon */
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p++ != ':') return false;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+
+    /* Expect opening quote */
+    if (*p++ != '"') return false;
+
+    /* Copy until closing quote */
+    size_t i = 0;
+    while (*p && *p != '"' && i + 1 < out_len) {
+        out[i++] = *p++;
+    }
+    if (*p != '"') return false;
+    out[i] = '\0';
+    return true;
+}
+
+static esp_err_t handler_post_channel(httpd_req_t *req)
+{
+    char buf[64];
+    if (read_body_capped(req, buf, sizeof(buf)) < 0) return ESP_OK;
+
+    char channel[OTA_IO_CHANNEL_MAX];
+    if (!extract_string_field(buf, "channel", channel, sizeof(channel)) ||
+        !ota_io_channel_allowed(channel)) {
+        return send_status_json(req, "400 Bad Request",
+            "{\"error\":\"channel must be one of stable / beta"
+#if CONFIG_OTA_ALLOW_DEV_CHANNEL
+            " / dev"
+#endif
+            "\"}");
+    }
+
+    esp_err_t err = ota_io_set_channel(channel);
+    if (err != ESP_OK) {
+        char body[96];
+        snprintf(body, sizeof(body), "{\"error\":\"nvs: %s\"}",
+                 esp_err_to_name(err));
+        return send_status_json(req, "500 Internal Server Error", body);
+    }
+
+    char body[64];
+    snprintf(body, sizeof(body), "{\"current\":\"%s\"}", channel);
+    return send_json(req, body);
 }
 
 /* ---- shared upload pipeline --------------------------------------------- */
@@ -368,7 +501,7 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
 
     httpd_handle_t server = NULL;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 12;
     /* Uploads can be slow; keep recv timeout generous. */
     cfg.recv_wait_timeout = 30;
     cfg.send_wait_timeout = 30;
@@ -380,12 +513,14 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
     }
 
     static const httpd_uri_t routes[] = {
-        { .uri = "/",                     .method = HTTP_GET,  .handler = handler_root        },
-        { .uri = "/api/version",          .method = HTTP_GET,  .handler = handler_version     },
-        { .uri = "/api/ota/upload-app",   .method = HTTP_POST, .handler = handler_upload_app  },
-        { .uri = "/api/ota/upload-ui",    .method = HTTP_POST, .handler = handler_upload_ui   },
-        { .uri = "/api/ota/commit",       .method = HTTP_POST, .handler = handler_commit      },
-        { .uri = "/api/ota/boot-main",    .method = HTTP_POST, .handler = handler_boot_main   },
+        { .uri = "/",                     .method = HTTP_GET,  .handler = handler_root         },
+        { .uri = "/api/version",          .method = HTTP_GET,  .handler = handler_version      },
+        { .uri = "/api/ota/upload-app",   .method = HTTP_POST, .handler = handler_upload_app   },
+        { .uri = "/api/ota/upload-ui",    .method = HTTP_POST, .handler = handler_upload_ui    },
+        { .uri = "/api/ota/commit",       .method = HTTP_POST, .handler = handler_commit       },
+        { .uri = "/api/ota/boot-main",    .method = HTTP_POST, .handler = handler_boot_main    },
+        { .uri = "/api/ota/channel",      .method = HTTP_GET,  .handler = handler_get_channel  },
+        { .uri = "/api/ota/channel",      .method = HTTP_POST, .handler = handler_post_channel },
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         err = httpd_register_uri_handler(server, &routes[i]);

@@ -13,12 +13,17 @@ Treat this as the source of truth — companion to `camera_manager_design.md` an
 | Channels | `stable` + `beta` published online; `dev` is local-only via `dev.ps1` |
 | Integrity | SHA-256 of every blob, declared in manifest, verified on-device before commit |
 | Signing | None — closed CAN bus, no PII, low-value target. Additive later if threat model changes. |
-| Versioning | App + UI shipped as a pair; manifest declares both, install pushes both |
+| Versioning | App + UI ship as a pair with **strictly equal** semver. Manifest's `app.version` is the single version users see; `ui.version` is kept equal as an invariant. |
+| `min_recovery_version` | Removed — no client- or server-side enforcement. Add back if a real incompatibility ever emerges. |
 | SHA-skip | Recovery skips writing partitions whose existing SHA already matches incoming (free ergonomic upgrade) |
 | Hardware recovery button | Future TODO — see §15 |
 | SoftAP credentials | Shared SSID/PSK baked into `wifi_manager` defaults; both apps inherit |
-| Two projects | `esp32_gopro_canbus_controller_v2` (main) + `esp32_gopro_canbus_recovery` (factory) |
-| Daily dev | `.\dev.ps1` wrapper does build + OTA-flash + monitor |
+| Auto-update reach | **Both** main and recovery offer the auto-update flow (channel picker → check → install). Recovery additionally keeps the manual file-upload form. |
+| OTA base URL | Compile-time only via each app's own `CONFIG_OTA_BASE_URL`. No runtime override; if the URL ever moves, ship a new release and users on stale recovery fall back to manual upload. |
+| Channel storage | Shared NVS namespace `ota`, key `channel`. Both apps read the same value, set from either UI. |
+| Single monorepo | `apps/main/` + `apps/recovery/` + shared top-level `components/{ota_io,wifi_manager}/`, shared `partitions.csv` at root |
+| Daily dev | `.\dev.ps1 -App main\|recovery` wraps build + OTA-flash + monitor |
+| Releases | `release-beta.yml` (manual trigger, auto-versioned `vX.Y.Z-beta.<run_number>` from root `VERSION` file) + `release-promote.yml` (manual, rebuilds beta SHA with clean version stamp) |
 
 ---
 
@@ -146,12 +151,11 @@ Single JSON file per channel. Hosted as a release asset on GitHub Releases, fetc
     "url": "app.bin"
   },
   "ui": {
-    "version": "1.4.0",
+    "version": "1.4.2",
     "size": 142336,
     "sha256": "ab02...cc",
     "url": "storage.bin"
   },
-  "min_recovery_version": "0.1.0",
   "release_notes_url": "https://github.com/.../releases/tag/v1.4.2"
 }
 ```
@@ -159,11 +163,10 @@ Single JSON file per channel. Hosted as a release asset on GitHub Releases, fetc
 ### Field semantics
 - `channel`: must match the channel the device is asking for. Mismatch = manifest is wrong, abort.
 - `released`: ISO-8601 date, informational only (shown in UI).
-- `app.version`, `ui.version`: semver. Browser uses these for upgrade/downgrade detection.
+- `app.version`, `ui.version`: semver. **Invariant: always equal** (locked decision §1). The browser displays `app.version` only; it does not compare them. `make_manifest.py` enforces equality at publish time.
 - `app.size`, `ui.size`: expected byte count. Browser pre-allocates progress bar; device validates.
 - `app.sha256`, `ui.sha256`: lowercase hex, 64 chars. Device verifies during upload.
 - `app.url`, `ui.url`: relative to the manifest URL. Browser resolves them against the manifest's location.
-- `min_recovery_version`: if device's recovery app is older than this, refuse install — recovery may not understand the upload protocol used by this build.
 - `release_notes_url`: optional, shown in UI as a link.
 
 ### Channel routing
@@ -193,17 +196,21 @@ Returns the running firmware's identity.
 ```json
 {
   "app": "1.4.2",
-  "ui": "1.4.0",
+  "ui": "1.4.2",
   "recovery": "0.1.0",
   "channel": "stable",
   "running_partition": "ota_0",
-  "mode": "main"
+  "mode": "main",
+  "ota_base_url": "https://firmware-proxy.imdacrocker.workers.dev",
+  "ota_repo_path": "imdacrocker/esp32_gopro_controller"
 }
 ```
 
 Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent main app's version).
 
-The `ui` field in main mode is read from `/www/manifest.json` inside the LittleFS image. If that file is missing or unparseable, return `"ui": "unknown"`.
+Per the locked equality invariant (§1), `app == ui` always. Both fields derive from `CONFIG_APP_PROJECT_VER` at compile time. No file read needed.
+
+`ota_base_url` and `ota_repo_path` come from compile-time `CONFIG_OTA_BASE_URL` / `CONFIG_OTA_REPO_PATH` (set per-app in each `Kconfig.projbuild`). The browser composes the manifest URL as `<base>/<repo>/releases/download/latest-<channel>/manifest.json`. Both apps return the same fields so the auto-update flow works identically in main and recovery without a separate config file in LittleFS.
 
 ---
 
@@ -275,21 +282,21 @@ Force reboot into the recovery app.
 
 ---
 
-### `GET /api/ota/channel` *(main only)*
+### `GET /api/ota/channel` *(both apps)*
 
 **Response 200:** `{ "current": "stable", "available": ["stable", "beta"] }`.
 
-The `available` list is hardcoded in `api_ota.c` for now. Compile-time flag `CONFIG_OTA_ALLOW_DEV_CHANNEL` adds `"dev"` for developer builds.
+The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_DEV_CHANNEL` adds `"dev"` for developer builds (intentionally never published online).
 
 ---
 
-### `POST /api/ota/channel` *(main only)*
+### `POST /api/ota/channel` *(both apps)*
 
 **Body:** `{ "channel": "beta" }`.
 
 **Response 200:** `{ "current": "beta" }`.
 
-**Side effects:** persists to NVS namespace `ota`, key `channel`. Takes effect on next manifest fetch — does not trigger an immediate reboot or update check.
+**Side effects:** persists to shared NVS namespace `ota`, key `channel`. Takes effect on next manifest fetch — does not trigger an immediate reboot or update check. Both apps share the same NVS partition, so a value set in either UI is visible to the other.
 
 ---
 
@@ -394,12 +401,11 @@ The `available` list is hardcoded in `api_ota.c` for now. Compile-time flag `CON
 **Deliverables:**
 - Cloudflare Worker `firmware-proxy/` deployed via `wrangler deploy`. Source in Appendix A.
 - `tools/release/make_manifest.py`: runs `idf.py build` for both projects (or just main, if recovery unchanged), hashes `app.bin` and `storage.bin`, emits `manifest.json` per §5.
-- `.github/workflows/release.yml`:
-  - Triggered on tags `v[0-9]+.[0-9]+.[0-9]+` (stable) and `v[0-9]+.[0-9]+.[0-9]+-{rc,beta}.*` (beta).
-  - Builds, hashes, generates manifest, attaches `app.bin`, `storage.bin`, `manifest.json` to a GitHub Release.
-  - Moves the floating tag (`latest-stable` or `latest-beta`) to the new release.
+- `.github/workflows/release-beta.yml`: manual trigger; reads root `VERSION` file, builds with `${VERSION}-beta.${{ github.run_number }}`, publishes immutable beta release + moves `latest-beta` floating tag.
+- `.github/workflows/release-promote.yml`: manual trigger with input `beta_tag` (e.g. `v0.2.0-beta.5`); checks out that SHA, rebuilds with clean version stamp (no `-beta` suffix), publishes immutable stable release + moves `latest-stable` floating tag.
+- Root `VERSION` file holds the next planned stable line (e.g. `0.2.0`). After each promote, manually bumped (PR `0.3.0`).
 
-**Files touched:** new `firmware-proxy/` (separate repo or subdirectory), new `tools/release/make_manifest.py`, new `.github/workflows/release.yml`.
+**Files touched:** `tools/firmware-proxy/` (Worker source, deployed via `wrangler deploy`), new `tools/release/make_manifest.py`, new `.github/workflows/release-beta.yml`, new `.github/workflows/release-promote.yml`, new root `VERSION`.
 
 **Done when:** pushing `v0.1.0-rc.1` results in `https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-beta/manifest.json` returning the expected JSON with CORS headers.
 
@@ -407,22 +413,89 @@ The `available` list is hardcoded in `api_ota.c` for now. Compile-time flag `CON
 
 ## 13. Phase 5 — Web UI
 
-**Goal:** "Check for Updates" button works end-to-end.
+**Goal:** "Check for Updates" works end-to-end from both the main app and recovery, with no separate version logic between them.
 
-**Deliverables:**
-- New "Updates" panel in `web_ui/index.html`:
-  - Current `app` / `ui` / `recovery` versions and channel.
-  - Channel selector (Stable / Beta) — POSTs to `/api/ota/channel`.
-  - "Check for updates" button — fetches manifest, compares semver, displays delta.
-  - "Install" button — downloads both blobs from cloud, POSTs to device with progress bar (`XHR.upload.onprogress`), POSTs `/api/ota/commit`, polls `/api/version` until new version answers.
-  - Downgrade and channel-switch warnings.
-  - Offline-fallback message.
-- New `web_ui/updates.js` to keep `app.js` from bloating.
-- Build-time addition: `compress.py` writes `manifest.json` into the staging dir (`{ "ui_version": "<version>" }`) so `/api/version` can report it.
+### Scope
 
-**Files touched:** `web_ui/index.html`, `web_ui/style.css`, new `web_ui/updates.js`, `web_ui/compress.py`.
+Both apps get the same simple flow: pick channel → check → install. Differences:
 
-**Done when:** clicking "Check for updates" with a newer version on the cloud surfaces it; clicking "Install" downloads, uploads, commits, reboots, and the UI confirms the new version came up. Offline / mismatched / corrupted cases display sensible errors.
+| | Main app UI | Recovery UI |
+|---|---|---|
+| Channel picker (Stable/Beta) | yes | yes |
+| Check for updates / Install | yes | yes |
+| Restart to Recovery button | yes (under "Advanced") | n/a |
+| Boot back into main | n/a | yes (existing `/api/ota/boot-main`) |
+| Manual file upload | no | yes (existing form, kept as fallback) |
+| Override OTA base URL | no (compile-time only) | no |
+
+### Shared deliverables
+
+- **`components/ota_io`** — add NVS helpers (no HTTP dependency, mirrors the §2 deviation rule):
+  - `ota_io_get_channel(char *out, size_t)` — returns `"stable"` if NVS key missing
+  - `ota_io_set_channel(const char *)` — validates against allowlist, writes NVS
+  - `ota_io_channel_allowed(const char *)` — checks against `CONFIG_OTA_ALLOW_DEV_CHANNEL`
+- **`/api/ota/channel` GET/POST in recovery** — thin wrapper around the helpers above, mirroring the main app's existing implementation.
+- **`/api/version` simplification** — derive `ui` field from `CONFIG_APP_PROJECT_VER` (per the equality invariant, §1). Drops the `/www/manifest.json` read.
+
+### Main app deliverables
+
+- **`apps/main/web_ui/compress.py`** — no Phase-5 changes (the `manifest.json` plan was dropped during implementation; all OTA URL config now flows through `/api/version`). The script still picks up a new `updates.js` in its asset list.
+- **`apps/main/web_ui/index.html`** — new "Updates" panel:
+  ```
+  ┌─ Updates ─────────────────────────────┐
+  │ App version: 0.2.0                    │
+  │ Recovery:    0.1.0                    │
+  │ Channel:     [Stable ▼]               │
+  │                                       │
+  │ [ Check for updates ]                 │
+  │                                       │
+  │ ─── advanced ────────────────────     │
+  │ [ Restart to Recovery ]               │
+  └───────────────────────────────────────┘
+  ```
+- **`apps/main/web_ui/updates.js`** — new module:
+  - On panel load: fetch `/api/version` (versions + base URL config) and `/api/ota/channel` (current + available list) in parallel.
+  - Channel change: immediate `POST /api/ota/channel`; on failure, revert dropdown and show inline error.
+  - "Check for updates": fetch `<base>/<owner>/<repo>/releases/download/latest-<channel>/manifest.json` with 10 s `AbortController` timeout. On success show version + Install button. On error map to one of three buckets (see below).
+  - "Install":
+    1. `fetch` `app.bin` and `storage.bin` from the cloud (XHR with `progress` events for the download bar).
+    2. `POST /api/ota/upload-app` and `POST /api/ota/upload-ui` with `X-Sha256` / `X-Size` headers (XHR `upload.onprogress` for the upload bar).
+    3. `POST /api/ota/commit`.
+    4. If response has `rebooting: true`: wait 3 s, then poll `/api/version` every 2 s with 3 s per-request timeout. Stop on first response where `app == manifest.app.version`. Overall ceiling 60 s; on timeout, show *"Device didn't respond after 60 s. Reconnect to **HERO-RC-XXXX** and reload this page to verify."*
+    5. If response has `rebooting: false` (UI-only path, only reachable via manual upload edge cases): show *"UI updated. Reload the page to see changes."*
+  - "Restart to Recovery": confirmation modal, then `POST /api/ota/reboot-recovery`. Same reconnect-and-reload message.
+- **`apps/main/web_ui/style.css`** — styles for the Updates panel, progress bar, advanced disclosure.
+
+### Recovery deliverables
+
+- **`apps/recovery/Kconfig.projbuild`** — new file. Adds `CONFIG_OTA_BASE_URL`, `CONFIG_OTA_REPO_PATH`, and `CONFIG_OTA_ALLOW_DEV_CHANNEL` (duplicates of main's, same defaults).
+- **`apps/recovery/main/recovery.html`** — extend embedded HTML with a "Quick update from cloud" section (channel picker, Check, Install) above the existing manual upload form. The base URL is fetched from `/api/version` at page load — no template substitution at boot, no `<script>window.OTA_BASE_URL=…</script>` injection.
+- **`components/recovery_http`** — extend `/api/version` to include `ota_base_url` + `ota_repo_path`. Register new `/api/ota/channel` GET/POST endpoints (using `ota_io` helpers). `max_uri_handlers` bumped 8 → 12.
+
+### Manifest fetch error buckets
+
+Three messages cover all failure modes:
+
+| Trigger | Copy |
+|---|---|
+| Network unreachable, CORS error, AbortController timeout, HTTP 5xx | "Can't reach the update server. Your phone or laptop needs internet access to check for updates — cellular data works while you're connected to the camera's WiFi." |
+| HTTP 404 (channel never released) | "No {channel} releases published yet." |
+| JSON parse fail or required field missing (`app.version`, `app.sha256`, `app.url`, `app.size`) | "Got an invalid response from the update server. Try again, and if it persists report it." |
+
+No "you're up to date" or "older version" copy — if the user clicks Install on the same or older version, that's their call (per Q8 follow-up).
+
+### Files touched
+
+- **Main:** `apps/main/web_ui/index.html`, `apps/main/web_ui/style.css`, new `apps/main/web_ui/updates.js`, `apps/main/web_ui/compress.py` (picks up updates.js), `apps/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/main/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` from sdkconfig), `apps/main/components/http_server/api_ota.c` (channel handlers use `ota_io`).
+- **Recovery:** new `apps/recovery/Kconfig.projbuild`, `apps/recovery/main/recovery.html` (auto-update section), `apps/recovery/components/recovery_http/recovery_http.c` (channel handlers + `ota_base_url`/`ota_repo_path` in `/api/version`), `apps/recovery/components/recovery_http/CMakeLists.txt` (`espressif__cjson` requires).
+- **Shared:** `components/ota_io/include/ota_io.h` (channel helper declarations), new `components/ota_io/ota_settings.c`, `components/ota_io/CMakeLists.txt`.
+
+### Done when
+
+- Clicking "Check for updates" on main or recovery hits the cloud and either shows a version + Install button, or one of the three error messages above.
+- Clicking "Install" downloads both blobs, uploads with two visible progress bars, commits, reboots, and the panel confirms the new version is running (or shows the reconnect-and-reload message after 60 s).
+- Channel changes persist across reboots and across switches between main and recovery.
+- "Restart to Recovery" reaches recovery's web UI; from there the user can either auto-update or manually upload, then "Boot to Main" returns to the main app.
 
 ---
 

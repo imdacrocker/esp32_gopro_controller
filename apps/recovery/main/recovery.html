@@ -26,11 +26,34 @@
  .log.err { color: var(--warn); }
  .log.ok  { color: var(--ok); }
  .meta { font-size: .8rem; color: var(--b); }
+ select { width: 100%; box-sizing: border-box; padding: .25rem; font: inherit; background: transparent; color: var(--fg); border: 1px solid var(--b); border-radius: 3px; }
+ .row { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+ .row > * { margin-top: 0; }
+ .row > label { flex: 0 0 auto; margin: 0; font-size: .85rem; color: var(--b); }
+ .row > select { flex: 1 1 auto; }
 </style>
 </head>
 <body>
 <h1>GoPro Controller — Recovery</h1>
 <div class="ver" id="ver">Loading version…</div>
+
+<fieldset>
+ <legend>Quick update from cloud</legend>
+ <p class="meta">Pick a channel and install the latest release. Your phone or laptop needs internet access — cellular data works while connected to this WiFi.</p>
+ <div class="row">
+  <label for="upChannel">Channel</label>
+  <select id="upChannel" disabled>
+   <option value="stable">Stable</option>
+   <option value="beta">Beta</option>
+  </select>
+ </div>
+ <button id="upCheck" class="primary" disabled>Check for updates</button>
+ <div class="log" id="upLog"></div>
+ <progress id="upProg" value="0" max="100" hidden></progress>
+</fieldset>
+
+<h2>Manual upload</h2>
+<p class="meta">Use this if the cloud is unreachable or you want a specific version. Fields stay independent of the cloud flow above.</p>
 
 <fieldset>
  <legend>1. Main app image</legend>
@@ -76,12 +99,169 @@
 const $ = id => document.getElementById(id);
 const log = (id, msg, cls) => { const el = $(id); el.textContent = msg; el.className = 'log' + (cls ? ' ' + cls : ''); };
 
+let otaBaseUrl = null, otaRepoPath = null;
+
 async function loadVersion() {
   try {
     const r = await fetch('/api/version');
     const j = await r.json();
     $('ver').textContent = `Recovery v${j.app}  •  mode: ${j.mode}  •  running from: ${j.running_partition}`;
+    if (j.ota_base_url && j.ota_repo_path) {
+      otaBaseUrl  = j.ota_base_url;
+      otaRepoPath = j.ota_repo_path;
+    }
   } catch (e) { $('ver').textContent = 'Could not read /api/version'; }
+}
+
+async function loadChannel() {
+  try {
+    const r = await fetch('/api/ota/channel');
+    const j = await r.json();
+    const sel = $('upChannel');
+    sel.innerHTML = '';
+    const labels = { stable: 'Stable', beta: 'Beta', dev: 'Dev' };
+    for (const c of (j.available || ['stable', 'beta'])) {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = labels[c] || c;
+      sel.appendChild(o);
+    }
+    sel.value = j.current;
+    sel.disabled = false;
+    sel.dataset.last = j.current;
+    $('upCheck').disabled = !(otaBaseUrl && otaRepoPath);
+  } catch (e) { log('upLog', "Couldn't load channel.", 'err'); }
+}
+
+$('upChannel').addEventListener('change', async () => {
+  const sel = $('upChannel');
+  const next = sel.value;
+  if (next === sel.dataset.last) return;
+  sel.disabled = true;
+  try {
+    const r = await fetch('/api/ota/channel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: next })
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    sel.dataset.last = next;
+    log('upLog', '');  // clear any prior result
+  } catch (e) {
+    sel.value = sel.dataset.last;
+    log('upLog', `Couldn't change channel: ${e.message}`, 'err');
+  } finally { sel.disabled = false; }
+});
+
+async function fetchManifest(channel) {
+  const url = `${otaBaseUrl}/${otaRepoPath}/releases/download/latest-${channel}/manifest.json`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 10000);
+  let r;
+  try { r = await fetch(url, { signal: ctl.signal }); }
+  catch (e) { throw new Error("Can't reach the update server. Make sure your phone or laptop has internet (cellular data works while on this WiFi)."); }
+  finally { clearTimeout(timer); }
+  if (r.status === 404) throw new Error(`No ${channel} releases published yet.`);
+  if (!r.ok) throw new Error(`Update server returned HTTP ${r.status}.`);
+  let m;
+  try { m = await r.json(); }
+  catch (_) { throw new Error('Update server returned invalid JSON.'); }
+  if (!m.app || !m.app.sha256 || !m.app.url || !m.ui || !m.ui.sha256 || !m.ui.url) {
+    throw new Error('Manifest is missing required fields.');
+  }
+  m._url = url;
+  return m;
+}
+
+function downloadBlob(url, expectedSize, onPct) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'arraybuffer';
+    xhr.onprogress = e => {
+      const total = e.lengthComputable ? e.total : expectedSize;
+      if (total > 0) onPct((e.loaded / total) * 100);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { onPct(100); resolve(xhr.response); }
+      else reject(new Error(`download failed: HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('download failed: network error'));
+    xhr.send();
+  });
+}
+
+function uploadBlob(path, bytes, sha, onPct) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Sha256', sha);
+    xhr.setRequestHeader('X-Size',   String(bytes.byteLength));
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onPct((e.loaded / e.total) * 100); };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { onPct(100); resolve(); }
+      else {
+        let detail = xhr.responseText;
+        try { detail = JSON.parse(detail).error || detail; } catch (_) {}
+        reject(new Error(`upload failed (HTTP ${xhr.status}): ${detail}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('upload failed: network error'));
+    xhr.send(bytes);
+  });
+}
+
+$('upCheck').addEventListener('click', async () => {
+  if (!otaBaseUrl || !otaRepoPath) return;
+  $('upCheck').disabled = true;
+  log('upLog', 'Checking…');
+  try {
+    const channel = $('upChannel').value;
+    const m = await fetchManifest(channel);
+    log('upLog', `Latest ${channel}: v${m.app.version}. Click Install to download and apply.`, 'ok');
+
+    // Replace the Check button with an Install button so the next click
+    // kicks off the install flow with the manifest we just fetched.
+    const btn = $('upCheck');
+    btn.textContent = `Install v${m.app.version}`;
+    btn.disabled = false;
+    btn.onclick = () => doInstall(m);
+  } catch (e) {
+    log('upLog', e.message, 'err');
+    $('upCheck').disabled = false;
+  }
+});
+
+async function doInstall(m) {
+  const btn = $('upCheck');
+  btn.disabled = true;
+  $('upProg').hidden = false;
+  log('upLog', 'Downloading app…');
+  try {
+    const appUrl = new URL(m.app.url, m._url).toString();
+    const uiUrl  = new URL(m.ui.url,  m._url).toString();
+    const setPct = p => { $('upProg').value = p; };
+
+    const appBytes = await downloadBlob(appUrl, m.app.size, setPct);
+    log('upLog', 'Downloading UI…'); setPct(0);
+    const uiBytes = await downloadBlob(uiUrl,  m.ui.size,  setPct);
+
+    log('upLog', 'Uploading app to device…'); setPct(0);
+    await uploadBlob('/api/ota/upload-app', appBytes, m.app.sha256, setPct);
+
+    log('upLog', 'Uploading UI to device…'); setPct(0);
+    await uploadBlob('/api/ota/upload-ui',  uiBytes,  m.ui.sha256,  setPct);
+
+    log('upLog', 'Committing…');
+    const r = await fetch('/api/ota/commit', { method: 'POST' });
+    if (!r.ok) throw new Error(`commit failed: HTTP ${r.status}`);
+    log('upLog', `Installed v${m.app.version}. Device is rebooting into the main app — reload in ~10s.`, 'ok');
+  } catch (e) {
+    log('upLog', e.message, 'err');
+    btn.disabled = false;
+  } finally {
+    $('upProg').hidden = true;
+  }
 }
 
 async function sha256Hex(buf) {
@@ -167,7 +347,8 @@ $('bootMain').addEventListener('click', async () => {
   } catch (e) { log('bootLog', e.message, 'err'); $('bootMain').disabled = false; }
 });
 
-loadVersion();
+// Sequence so loadChannel can check the OTA URL fields populated by loadVersion.
+loadVersion().then(loadChannel);
 </script>
 </body>
 </html>

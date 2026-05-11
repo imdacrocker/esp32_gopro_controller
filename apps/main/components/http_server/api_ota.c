@@ -21,7 +21,6 @@
 #include "esp_http_server.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs.h"
 #include "cJSON.h"
 
 #include "ota_io.h"
@@ -37,9 +36,6 @@ static bool s_app_uploaded;
 static bool s_ui_uploaded;
 
 #define UPLOAD_CHUNK_BYTES 2048
-#define NVS_NAMESPACE      "ota"
-#define NVS_KEY_CHANNEL    "channel"
-#define DEFAULT_CHANNEL    "stable"
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -331,28 +327,10 @@ static esp_err_t handler_reboot_recovery(httpd_req_t *req)
 
 /* ---- GET /api/ota/channel ---------------------------------------------- */
 
-static const char *channel_or_default(char *buf, size_t buf_len)
-{
-    nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
-        strncpy(buf, DEFAULT_CHANNEL, buf_len - 1);
-        buf[buf_len - 1] = '\0';
-        return buf;
-    }
-    size_t sz = buf_len;
-    esp_err_t err = nvs_get_str(h, NVS_KEY_CHANNEL, buf, &sz);
-    nvs_close(h);
-    if (err != ESP_OK) {
-        strncpy(buf, DEFAULT_CHANNEL, buf_len - 1);
-        buf[buf_len - 1] = '\0';
-    }
-    return buf;
-}
-
 static esp_err_t handler_get_channel(httpd_req_t *req)
 {
-    char current[16];
-    channel_or_default(current, sizeof(current));
+    char current[OTA_IO_CHANNEL_MAX];
+    ota_io_get_channel(current, sizeof(current));
 
     char body[128];
 #if CONFIG_OTA_ALLOW_DEV_CHANNEL
@@ -370,17 +348,6 @@ static esp_err_t handler_get_channel(httpd_req_t *req)
 
 /* ---- POST /api/ota/channel --------------------------------------------- */
 
-static bool channel_is_allowed(const char *c)
-{
-    if (!c) return false;
-    if (strcmp(c, "stable") == 0) return true;
-    if (strcmp(c, "beta")   == 0) return true;
-#if CONFIG_OTA_ALLOW_DEV_CHANNEL
-    if (strcmp(c, "dev")    == 0) return true;
-#endif
-    return false;
-}
-
 static esp_err_t handler_post_channel(httpd_req_t *req)
 {
     char buf[64];
@@ -393,7 +360,7 @@ static esp_err_t handler_post_channel(httpd_req_t *req)
             "{\"error\":\"invalid JSON\"}");
     }
     cJSON *ch = cJSON_GetObjectItem(root, "channel");
-    if (!cJSON_IsString(ch) || !channel_is_allowed(ch->valuestring)) {
+    if (!cJSON_IsString(ch) || !ota_io_channel_allowed(ch->valuestring)) {
         cJSON_Delete(root);
         return send_status_json(req, "400 Bad Request",
             "{\"error\":\"channel must be one of stable / beta"
@@ -403,13 +370,7 @@ static esp_err_t handler_post_channel(httpd_req_t *req)
             "\"}");
     }
 
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
-    if (err == ESP_OK) {
-        err = nvs_set_str(h, NVS_KEY_CHANNEL, ch->valuestring);
-        if (err == ESP_OK) err = nvs_commit(h);
-        nvs_close(h);
-    }
+    esp_err_t err = ota_io_set_channel(ch->valuestring);
     if (err != ESP_OK) {
         cJSON_Delete(root);
         char body[96];

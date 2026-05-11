@@ -20,11 +20,12 @@
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs.h"
 #include "nvs_flash.h"
 #include "cJSON.h"
+#include "sdkconfig.h"
 #include "can_manager.h"
 #include "camera_manager.h"
+#include "ota_io.h"
 #include "http_server_internal.h"
 
 static const char *TAG = "http_api_system";
@@ -32,42 +33,19 @@ static const char *TAG = "http_api_system";
 /* ---- GET /api/version ---------------------------------------------------- *
  * Returns running firmware identity per ota_design.md §6.
  *
- *   app:    main app version (esp_app_get_description)
- *   ui:     read from /www/manifest.json's ui_version field;
- *           "unknown" if file missing or unparseable
- *   recovery: read from factory partition's app desc; "unknown" if missing
- *   channel: NVS ota/channel, default "stable"
+ *   app:               main app version (esp_app_get_description)
+ *   ui:                always equal to app per the §1 invariant — they ship
+ *                      as a strictly-paired bundle, so we just echo the app
+ *                      version rather than reading it from a file
+ *   recovery:          factory partition's app desc; "unknown" if missing
+ *   channel:           shared NVS ota/channel via ota_io
  *   running_partition: label (typically ota_0 or ota_1 in main mode)
- *   mode: "main"
+ *   mode:              "main"
+ *   ota_base_url:      compile-time CONFIG_OTA_BASE_URL — the browser uses
+ *                      this to compose the manifest URL (no /manifest.json
+ *                      file needed on LittleFS)
+ *   ota_repo_path:     compile-time CONFIG_OTA_REPO_PATH
  */
-
-static void read_ui_version(char *out, size_t out_len)
-{
-    /* compress.py (Phase 5) writes /www/manifest.json into the LittleFS
-     * staging dir at build time. Until then, the file is missing — that's
-     * expected; report "unknown". */
-    FILE *f = fopen("/www/manifest.json", "rb");
-    if (!f) {
-        strncpy(out, "unknown", out_len - 1);
-        out[out_len - 1] = '\0';
-        return;
-    }
-    char buf[256];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    cJSON *v = root ? cJSON_GetObjectItem(root, "ui_version") : NULL;
-    if (cJSON_IsString(v) && v->valuestring) {
-        strncpy(out, v->valuestring, out_len - 1);
-        out[out_len - 1] = '\0';
-    } else {
-        strncpy(out, "unknown", out_len - 1);
-        out[out_len - 1] = '\0';
-    }
-    cJSON_Delete(root);
-}
 
 static void read_recovery_version(char *out, size_t out_len)
 {
@@ -83,39 +61,25 @@ static void read_recovery_version(char *out, size_t out_len)
     }
 }
 
-static void read_channel(char *out, size_t out_len)
-{
-    nvs_handle_t h;
-    if (nvs_open("ota", NVS_READONLY, &h) != ESP_OK) {
-        strncpy(out, "stable", out_len - 1);
-        out[out_len - 1] = '\0';
-        return;
-    }
-    size_t sz = out_len;
-    if (nvs_get_str(h, "channel", out, &sz) != ESP_OK) {
-        strncpy(out, "stable", out_len - 1);
-        out[out_len - 1] = '\0';
-    }
-    nvs_close(h);
-}
-
 static esp_err_t handler_version(httpd_req_t *req)
 {
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
 
-    char ui[48], recovery[48], channel[16];
-    read_ui_version(ui, sizeof(ui));
+    char recovery[48];
+    char channel[OTA_IO_CHANNEL_MAX];
     read_recovery_version(recovery, sizeof(recovery));
-    read_channel(channel, sizeof(channel));
+    ota_io_get_channel(channel, sizeof(channel));
 
-    char buf[320];
+    char buf[512];
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"%s\",\"recovery\":\"%s\","
              "\"channel\":\"%s\",\"running_partition\":\"%s\","
-             "\"mode\":\"main\"}",
-             app->version, ui, recovery, channel,
-             running ? running->label : "unknown");
+             "\"mode\":\"main\","
+             "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
+             app->version, app->version, recovery, channel,
+             running ? running->label : "unknown",
+             CONFIG_OTA_BASE_URL, CONFIG_OTA_REPO_PATH);
     send_json(req, buf);
     return ESP_OK;
 }

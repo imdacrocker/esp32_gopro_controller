@@ -93,3 +93,25 @@ esp_err_t ota_io_set_boot_factory(void);
  * Returns ESP_ERR_NOT_FOUND if no OTA slot holds a valid app.
  */
 esp_err_t ota_io_set_boot_main(char out_label[17]);
+
+/* ---- Channel settings (shared NVS, no HTTP) ---------------------------- *
+ * Both apps read/write the same NVS key (`ota/channel`). A value set in
+ * either UI is immediately visible to the other after restart-into-the-other.
+ *
+ * Allowlist always includes "stable" and "beta"; "dev" is appended if any
+ * call site's CONFIG_OTA_ALLOW_DEV_CHANNEL is set (see ota_io_channel_allowed).
+ */
+
+#define OTA_IO_CHANNEL_MAX 8  /* "stable" / "beta" / "dev" + NUL */
+
+/* Copy current channel into out_buf (NUL-terminated). Falls back to "stable"
+ * if NVS is unreadable or the key is absent. Always succeeds. */
+void ota_io_get_channel(char *out_buf, size_t out_len);
+
+/* Persist a channel string to NVS. Returns ESP_ERR_INVALID_ARG if the
+ * channel isn't in the allowlist for this build. Does NOT trigger any
+ * downstream behavior — takes effect at next manifest fetch. */
+esp_err_t ota_io_set_channel(const char *channel);
+
+/* Returns true if `channel` is one of the strings this build allows. */
+bool ota_io_channel_allowed(const char *channel);

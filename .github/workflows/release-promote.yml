@@ -1,0 +1,98 @@
+name: release-promote
+
+# Promote a previously-published beta to stable. Same source SHA, clean
+# version stamp (no -beta suffix), republished under latest-stable.
+#
+# Trigger from Actions tab; supply the beta tag, e.g. v0.2.0-beta.5.
+# After the run, manually bump VERSION (e.g. 0.2.0 -> 0.3.0) so subsequent
+# betas don't collide with the released stable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      beta_tag:
+        description: 'Beta tag to promote (e.g. v0.2.0-beta.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve beta commit and base version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BETA="${{ inputs.beta_tag }}"
+          # commits API resolves any ref (incl. annotated tags) to a commit SHA
+          COMMIT=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BETA}" --jq '.sha')
+          BASE=$(echo "$BETA" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*$/\1/')
+          if [ -z "$COMMIT" ] || [ "$BASE" = "$BETA" ]; then
+            echo "error: could not resolve $BETA" >&2
+            exit 1
+          fi
+          echo "Promoting $BETA (commit ${COMMIT:0:7}) to v$BASE"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "version=$BASE"  >> "$GITHUB_OUTPUT"
+          echo "tag=v$BASE"     >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.commit }}
+
+      - name: Stamp clean version (no -beta suffix)
+        run: |
+          sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.resolve.outputs.version }}\"/" \
+              apps/main/sdkconfig.defaults
+
+      - name: Build main app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/main
+
+      - name: Build recovery app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/recovery
+
+      - name: Stage assets and generate manifest
+        run: |
+          mkdir -p release
+          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
+          cp apps/main/build/storage.bin                          release/storage.bin
+          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
+          python tools/release/make_manifest.py \
+            --version "${{ steps.resolve.outputs.tag }}" \
+            --app-bin     release/app.bin \
+            --storage-bin release/storage.bin \
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.resolve.outputs.tag }}" \
+            --output release/manifest.json
+
+      - name: Create immutable stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.resolve.outputs.tag }}" \
+            --title "${{ steps.resolve.outputs.tag }}" \
+            --notes "Promoted from \`${{ inputs.beta_tag }}\` at \`${{ steps.resolve.outputs.commit }}\`." \
+            --target "${{ steps.resolve.outputs.commit }}" \
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
+
+      - name: Move latest-stable floating tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest-stable --yes --cleanup-tag || true
+          gh release create latest-stable \
+            --title "Latest stable (${{ steps.resolve.outputs.tag }})" \
+            --notes "Floating tag for \`${{ steps.resolve.outputs.tag }}\`." \
+            --target "${{ steps.resolve.outputs.commit }}" \
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin

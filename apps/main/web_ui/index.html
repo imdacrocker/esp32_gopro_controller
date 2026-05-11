@@ -99,6 +99,35 @@
       <select class="settings-select" id="tz-select"></select>
     </div>
 
+    <div class="modal-section-title">Updates</div>
+
+    <div class="settings-row">
+      <span class="settings-row-label">App version</span>
+      <span class="settings-row-value" id="upd-app-version">…</span>
+    </div>
+
+    <div class="settings-row">
+      <span class="settings-row-label">Recovery</span>
+      <span class="settings-row-value" id="upd-recovery-version">…</span>
+    </div>
+
+    <div class="settings-row">
+      <span class="settings-row-label">Channel</span>
+      <select class="settings-select" id="upd-channel-select" disabled>
+        <option value="stable">Stable</option>
+        <option value="beta">Beta</option>
+      </select>
+    </div>
+
+    <button class="settings-action-btn" id="upd-check-btn" disabled>Check for updates</button>
+
+    <div id="upd-result" class="upd-result" hidden></div>
+
+    <details class="settings-advanced">
+      <summary>Advanced</summary>
+      <button class="settings-recovery-btn" id="upd-recovery-btn">Restart to Recovery</button>
+    </details>
+
     <button class="settings-reboot-btn" id="reboot-btn">Reboot</button>
     <button class="settings-reset-btn" id="reset-btn">Factory Reset</button>
   </div>
@@ -160,5 +189,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="updates.js"></script>
 </body>
 </html>

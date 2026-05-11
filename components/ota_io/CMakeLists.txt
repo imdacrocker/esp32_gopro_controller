@@ -3,6 +3,7 @@ idf_component_register(
         "ota_writer.c"
         "storage_writer.c"
         "boot_helpers.c"
+        "ota_settings.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

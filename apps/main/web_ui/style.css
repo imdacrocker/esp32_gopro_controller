@@ -684,6 +684,120 @@ button {
 
 .settings-reset-btn:hover { background: var(--red-hover); }
 
+/* ---- Updates section (in settings modal) -------------------------------- */
+
+.settings-row-value {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #555);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-action-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-action-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 12px 16px 0;
+}
+
+.upd-result {
+  margin: 12px 16px 0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: #f7f7f9;
+  border: 1px solid var(--gray-border-light);
+}
+
+.upd-result.upd-error  { background: #fdeceb; border-color: #f5c6c2; color: #8a1a13; }
+.upd-result.upd-info   { background: #eef5fb; border-color: #cfe2f0; color: #1c4f7a; }
+.upd-result.upd-success { background: #ebf7ee; border-color: #c3e1cb; color: #1f6b34; }
+
+.upd-result-version {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 6px;
+}
+
+.upd-result-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.upd-progress-row {
+  margin-top: 10px;
+}
+
+.upd-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.upd-progress-bar {
+  height: 8px;
+  background: var(--gray-border-light);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.upd-progress-fill {
+  height: 100%;
+  background: var(--blue);
+  width: 0;
+  transition: width 0.2s ease;
+}
+
+.settings-advanced {
+  margin: 16px 16px 0;
+  padding: 0;
+  border-top: 1px solid var(--gray-border-light);
+}
+
+.settings-advanced > summary {
+  padding: 12px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.settings-advanced > summary::-webkit-details-marker { display: none; }
+
+.settings-advanced > summary::before {
+  content: "▶";
+  display: inline-block;
+  font-size: 0.7rem;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+.settings-advanced[open] > summary::before { transform: rotate(90deg); }
+
+.settings-recovery-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  background: none;
+  border: 1px solid var(--orange-dark);
+  color: var(--orange-dark);
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-height: 44px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.settings-recovery-btn:hover { background: #fff3e0; }
+.settings-recovery-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
 /* ---- Manage cameras modal (bottom sheet) --------------------------------- */
 
 .manage-modal {

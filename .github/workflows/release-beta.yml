@@ -1,0 +1,87 @@
+name: release-beta
+
+# Manual trigger from the Actions tab. Each click produces the next beta in
+# sequence: VERSION file holds the next planned stable line (e.g. "0.2.0"),
+# and the run number provides the suffix -> v0.2.0-beta.7.
+#
+# Switch the trigger to `push: branches: [main]` if you want every push to main
+# to cut a beta automatically.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases and move floating tags
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version
+        id: ver
+        run: |
+          BASE=$(cat VERSION)
+          VERSION="${BASE}-beta.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"     >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version into sdkconfig.defaults
+        run: |
+          sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.version }}\"/" \
+              apps/main/sdkconfig.defaults
+
+      - name: Build main app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/main
+
+      - name: Build recovery app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/recovery
+
+      - name: Stage assets and generate manifest
+        run: |
+          mkdir -p release
+          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
+          cp apps/main/build/storage.bin                          release/storage.bin
+          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
+          python tools/release/make_manifest.py \
+            --version "${{ steps.ver.outputs.tag }}" \
+            --app-bin     release/app.bin \
+            --storage-bin release/storage.bin \
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.ver.outputs.tag }}" \
+            --output release/manifest.json
+
+      - name: Create immutable beta release
+        # Preserves the exact build for traceability; promote workflow checks
+        # this tag out and rebuilds from the same SHA with a clean version.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --notes "Auto-built beta from \`${GITHUB_SHA::7}\`." \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
+
+      - name: Move latest-beta floating tag
+        # Floating tag is what the Cloudflare Worker proxies to the device.
+        # GitHub releases can't retarget a tag, so delete + recreate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest-beta --yes --cleanup-tag || true
+          gh release create latest-beta \
+            --title "Latest beta (${{ steps.ver.outputs.tag }})" \
+            --notes "Floating tag for \`${{ steps.ver.outputs.tag }}\`." \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
