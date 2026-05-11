@@ -63,3 +63,5 @@ build/
 /.claude
 /apps/recovery/.vscode
 /apps/main/.vscode
+
+release/

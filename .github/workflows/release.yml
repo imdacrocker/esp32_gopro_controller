@@ -1,0 +1,108 @@
+name: release
+
+# Triggers:
+#   v1.2.3            -> stable channel
+#   v1.2.3-rc.N       -> beta channel
+#   v1.2.3-beta.N     -> beta channel
+#
+# On each push:
+#   1. Build apps/main and apps/recovery against ESP-IDF v6.0.1.
+#   2. Generate manifest.json (channel inferred from tag).
+#   3. Publish a release at the floating tag (latest-stable or latest-beta),
+#      moving that tag to the new commit. The semver tag (the actual trigger)
+#      stays in git history for traceability but isn't itself a release.
+#   4. Attach app.bin, storage.bin, recovery.bin, and manifest.json as release
+#      assets so the Cloudflare Worker can serve them.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.*'
+
+permissions:
+  contents: write   # needed to create/update releases and move floating tags
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive channel from tag
+        id: channel
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *-rc.* || "$TAG" == *-beta.* ]]; then
+            echo "name=beta"           >> "$GITHUB_OUTPUT"
+            echo "floating=latest-beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=stable"           >> "$GITHUB_OUTPUT"
+            echo "floating=latest-stable" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp version into sdkconfig.defaults
+        # CONFIG_APP_PROJECT_VER is what esp_app_get_description() reports and
+        # what /api/version returns; aligning it with the tag avoids the
+        # "tagged v0.2.0 but the binary still says 0.1.0" footgun.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"$VERSION\"/" \
+              apps/main/sdkconfig.defaults
+
+      - name: Build main app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/main
+
+      - name: Build recovery app
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/recovery
+
+      - name: Generate manifest.json
+        run: |
+          python tools/release/make_manifest.py \
+            --version "${GITHUB_REF_NAME}" \
+            --app-bin     apps/main/build/esp32_gopro_canbus_controller_v2.bin \
+            --storage-bin apps/main/build/storage.bin \
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}" \
+            --output release/manifest.json
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
+          cp apps/main/build/storage.bin                           release/storage.bin
+          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin   release/recovery.bin
+
+      - name: Move floating tag to current commit
+        # `gh release create` won't reuse a tag, and the floating tag must
+        # point at the new commit. Delete any prior release+tag first.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FLOAT="${{ steps.channel.outputs.floating }}"
+          gh release delete "$FLOAT" --yes --cleanup-tag || true
+
+      - name: Publish floating release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FLOAT="${{ steps.channel.outputs.floating }}"
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          gh release create "$FLOAT" \
+            --title "Latest $CHANNEL (${GITHUB_REF_NAME})" \
+            --notes "Automated release from tag \`${GITHUB_REF_NAME}\`. Channel: **$CHANNEL**." \
+            --target "$GITHUB_SHA" \
+            $( [ "$CHANNEL" = "beta" ] && echo "--prerelease" ) \
+            release/manifest.json \
+            release/app.bin \
+            release/storage.bin \
+            release/recovery.bin
