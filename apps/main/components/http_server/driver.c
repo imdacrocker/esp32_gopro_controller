@@ -122,6 +122,17 @@ static esp_err_t handler_style_css(httpd_req_t *req)
                       "text/css", NULL, "no-cache");
 }
 
+/* GET /updates.js — serve gzipped if client supports it */
+static esp_err_t handler_updates_js(httpd_req_t *req)
+{
+    if (client_accepts_gzip(req)) {
+        return serve_file(req, "/www/updates.js.gz",
+                          "application/javascript", "gzip", "no-cache");
+    }
+    return serve_file(req, "/www/updates.js",
+                      "application/javascript", NULL, "no-cache");
+}
+
 /* ---- Component init ------------------------------------------------------ */
 
 void http_server_init(void)
@@ -145,7 +156,7 @@ void http_server_init(void)
     httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
     config.stack_size        = 12288;
     config.max_open_sockets  = 8;
-    config.max_uri_handlers  = 35;   /* 4 assets + 7 system + 10 cameras + 2 rc + 3 settings + 6 ota = 32, +3 margin */
+    config.max_uri_handlers  = 35;   /* 5 assets + 7 system + 10 cameras + 2 rc + 3 settings + 6 ota = 33, +2 margin */
     config.uri_match_fn      = httpd_uri_match_wildcard;
 
     httpd_handle_t server = NULL;
@@ -172,10 +183,16 @@ void http_server_init(void)
         .method   = HTTP_GET,
         .handler  = handler_style_css,
     };
+    httpd_uri_t uri_updates_js = {
+        .uri      = "/updates.js",
+        .method   = HTTP_GET,
+        .handler  = handler_updates_js,
+    };
     httpd_register_uri_handler(server, &uri_root);
     httpd_register_uri_handler(server, &uri_index);
     httpd_register_uri_handler(server, &uri_app_js);
     httpd_register_uri_handler(server, &uri_style_css);
+    httpd_register_uri_handler(server, &uri_updates_js);
 
     /* API handler registration. */
     api_system_register(server);
