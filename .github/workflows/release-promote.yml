@@ -23,6 +23,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Checkout isn't strictly needed since we use --repo on every gh call,
+      # but in practice gh release create has been observed to 403 here without
+      # any local git context. Cheap to keep.
+      - uses: actions/checkout@v5
+
       - name: Verify source release and resolve its commit
         id: src
         env:
