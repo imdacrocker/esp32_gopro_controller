@@ -14,7 +14,7 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Reported via /api/version. Bump in lockstep with breaking upload-protocol
 # changes (manifest's `min_recovery_version`, see ota_design.md §5).
 CONFIG_APP_PROJECT_VER_FROM_CONFIG=y
-CONFIG_APP_PROJECT_VER="0.1.1"
+CONFIG_APP_PROJECT_VER="1.0.0"
 
 # DHCP server for SoftAP clients
 CONFIG_LWIP_DHCPS=y
