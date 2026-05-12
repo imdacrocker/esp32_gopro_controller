@@ -69,8 +69,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-stable --yes --cleanup-tag || true
+          gh release delete latest-stable --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create latest-stable \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Latest stable (${{ steps.src.outputs.tag }})" \
             --notes "Floating tag for \`${{ steps.src.outputs.tag }}\`." \
             --target "${{ steps.src.outputs.commit }}" \
