@@ -36,9 +36,9 @@ function Get-EspPort {
             $_.InstanceId -match 'VID_10C4&PID_EA60' -or  # CP210x
             $_.InstanceId -match 'VID_1A86'                # CH340
         }
-    $ports = foreach ($d in $candidates) {
+    $ports = @(foreach ($d in $candidates) {
         if ($d.FriendlyName -match '\((COM\d+)\)') { $matches[1] }
-    }
+    })
     if (-not $ports) { throw "No ESP32 serial port detected. Plug in the board or pass -port COMn." }
     if ($ports.Count -gt 1) {
         Write-Host "Multiple ESP boards found ($($ports -join ', ')); using $($ports[0]). Pass -port to override."
