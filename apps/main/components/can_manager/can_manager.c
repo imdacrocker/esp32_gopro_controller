@@ -91,7 +91,7 @@ static struct {
     int64_t  last_esp_us;   /* esp_timer_get_time() snapshot at anchor time */
 } s_utc;
 
-static int8_t s_tz_offset = -7; /* Default to -1 for my home zone.  Sorry rest of the world :P */
+static int8_t s_tz_offset = 0; /* UTC by default; user-configurable via /api/settings/timezone, persisted in NVS. */
 
 static esp_timer_handle_t s_tx_timer;
 static esp_timer_handle_t s_watchdog_timer;

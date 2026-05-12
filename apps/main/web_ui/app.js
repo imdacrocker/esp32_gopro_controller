@@ -33,16 +33,28 @@ async function apiFetch(method, path, body) {
 
 /* ---- Timezone dropdown --------------------------------------------------- */
 
+function formatTzLabel(h) {
+    if (h === 0) return 'UTC';
+    return h > 0 ? `UTC+${h}` : `UTC${h}`;
+}
+
+function updateSystemTimeLabel(h) {
+    const el = document.getElementById('system-time-label');
+    if (el) el.textContent = `System Time (${formatTzLabel(h)})`;
+}
+
 function buildTimezoneDropdown() {
     const sel = document.getElementById('tz-select');
     for (let h = -12; h <= 14; h++) {
         const opt = document.createElement('option');
         opt.value = h;
-        opt.textContent = h === 0 ? 'UTC' : (h > 0 ? `UTC+${h}` : `UTC${h}`);
+        opt.textContent = formatTzLabel(h);
         sel.appendChild(opt);
     }
     sel.addEventListener('change', () => {
-        apiFetch('POST', '/api/settings/timezone', { tz_offset_hours: parseInt(sel.value) })
+        const h = parseInt(sel.value);
+        apiFetch('POST', '/api/settings/timezone', { tz_offset_hours: h })
+            .then(() => updateSystemTimeLabel(h))
             .catch(() => {});
     });
 }
@@ -312,6 +324,7 @@ function openSettings() {
     // Load current timezone
     apiFetch('GET', '/api/settings/timezone').then(d => {
         document.getElementById('tz-select').value = d.tz_offset_hours;
+        updateSystemTimeLabel(d.tz_offset_hours);
     }).catch(() => {});
 }
 
@@ -357,16 +370,7 @@ document.getElementById('reboot-btn').addEventListener('click', function () {
     this.disabled = true;
     this.textContent = 'Rebooting…';
     apiFetch('POST', '/api/reboot').catch(() => {});
-    setTimeout(() => location.reload(), 5000);
-});
-
-// Factory reset
-document.getElementById('reset-btn').addEventListener('click', function () {
-    if (!confirm('Restore Defaults?\n\nThis will erase all paired cameras and settings, then restart the controller. This cannot be undone.')) return;
-    this.disabled = true;
-    this.textContent = 'Resetting…';
-    apiFetch('POST', '/api/factory-reset').catch(() => {});
-    setTimeout(() => location.reload(), 5000);
+    setTimeout(() => location.reload(), 3000);
 });
 
 /* ---- Manage cameras modal ------------------------------------------------ */
@@ -864,6 +868,9 @@ document.getElementById('paired-list').addEventListener('click', e => {
 /* ---- Startup ------------------------------------------------------------- */
 
 buildTimezoneDropdown();
+apiFetch('GET', '/api/settings/timezone')
+    .then(d => updateSystemTimeLabel(d.tz_offset_hours))
+    .catch(() => {});
 refreshTopSection();
 refreshCameraStatus();
 

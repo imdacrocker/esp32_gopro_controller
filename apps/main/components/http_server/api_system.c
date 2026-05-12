@@ -8,7 +8,6 @@
  *   GET  /api/auto-control
  *   POST /api/auto-control
  *   POST /api/reboot
- *   POST /api/factory-reset
  */
 
 #include <stdio.h>
@@ -20,7 +19,6 @@
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 #include "cJSON.h"
 #include "sdkconfig.h"
 #include "can_manager.h"
@@ -173,18 +171,6 @@ static esp_err_t handler_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ---- POST /api/factory-reset --------------------------------------------- */
-
-static esp_err_t handler_factory_reset(httpd_req_t *req)
-{
-    ESP_LOGW(TAG, "factory reset — erasing NVS");
-    send_json(req, "{}");
-    vTaskDelay(pdMS_TO_TICKS(100));
-    nvs_flash_erase();
-    esp_restart();
-    return ESP_OK;
-}
-
 /* ---- Registration -------------------------------------------------------- */
 
 void api_system_register(httpd_handle_t server)
@@ -196,7 +182,6 @@ void api_system_register(httpd_handle_t server)
         { .uri = "/api/auto-control",  .method = HTTP_GET,  .handler = handler_get_auto_control },
         { .uri = "/api/auto-control",  .method = HTTP_POST, .handler = handler_post_auto_control},
         { .uri = "/api/reboot",        .method = HTTP_POST, .handler = handler_reboot           },
-        { .uri = "/api/factory-reset", .method = HTTP_POST, .handler = handler_factory_reset    },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(server, &uris[i]);

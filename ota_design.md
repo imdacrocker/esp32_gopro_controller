@@ -23,7 +23,7 @@ Treat this as the source of truth — companion to `camera_manager_design.md` an
 | Channel storage | Shared NVS namespace `ota`, key `channel`. Both apps read the same value, set from either UI. |
 | Single monorepo | `apps/main/` + `apps/recovery/` + shared top-level `components/{ota_io,wifi_manager}/`, shared `partitions.csv` at root |
 | Daily dev | `.\dev.ps1 -App main\|recovery` wraps build + OTA-flash + monitor |
-| Releases | `release-beta.yml` (manual trigger, auto-versioned `vX.Y.Z-beta.<run_number>` from root `VERSION` file) + `release-promote.yml` (manual, rebuilds beta SHA with clean version stamp) |
+| Releases | `release-beta.yml` (manual trigger, tags `v$VERSION` from root `VERSION` file — bumped before each cut) + `release-promote.yml` (manual, pure pointer-move: re-uses the source release's bytes, no rebuild). Beta and stable always share the same binary; channel switch on the same version is a no-op. |
 
 ---
 
@@ -85,7 +85,7 @@ Browser (phone/laptop)        Cloudflare Worker          GitHub Releases       E
         │── POST /api/ota/commit     ─────────────────────────────────────────────►
         │       (device verifies SHAs, sets boot partition, reboots)              │
         │                           │                          │                 │
-        │── poll GET /api/version until new version answers ─────────────────────►│
+        │── reload page after 3 s (browser reconnects to device's WiFi) ──────────►│
 ```
 
 ---
@@ -400,14 +400,20 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 
 **Deliverables:**
 - Cloudflare Worker `firmware-proxy/` deployed via `wrangler deploy`. Source in Appendix A.
-- `tools/release/make_manifest.py`: runs `idf.py build` for both projects (or just main, if recovery unchanged), hashes `app.bin` and `storage.bin`, emits `manifest.json` per §5.
-- `.github/workflows/release-beta.yml`: manual trigger; reads root `VERSION` file, builds with `${VERSION}-beta.${{ github.run_number }}`, publishes immutable beta release + moves `latest-beta` floating tag.
-- `.github/workflows/release-promote.yml`: manual trigger with input `beta_tag` (e.g. `v0.2.0-beta.5`); checks out that SHA, rebuilds with clean version stamp (no `-beta` suffix), publishes immutable stable release + moves `latest-stable` floating tag.
-- Root `VERSION` file holds the next planned stable line (e.g. `0.2.0`). After each promote, manually bumped (PR `0.3.0`).
+- `tools/release/make_manifest.py`: hashes prebuilt `app.bin` and `storage.bin`, emits `manifest.json` per §5. (Builds happen in CI via `espressif/esp-idf-ci-action`, not in the script.)
+- `.github/workflows/release-beta.yml`: manual trigger; reads root `VERSION` file, refuses to overwrite an existing `v$VERSION` tag, stamps `CONFIG_APP_PROJECT_VER` into `apps/main/sdkconfig.defaults` for this build only, builds both apps, publishes immutable release as prerelease, moves `latest-beta` floating tag.
+- `.github/workflows/release-promote.yml`: manual trigger with input `tag` (e.g. `v0.2.1`); downloads the source release's existing assets, flips that release out of prerelease, moves `latest-stable` floating tag with the same bytes. **No rebuild, no version change.** Beta and stable bytes are byte-identical.
+- Root `VERSION` file holds the next planned version line (e.g. `0.2.1`). Bumped manually before each release-beta run; if not bumped, the workflow's overwrite guard fails the run.
+
+**Release model:** one binary per version. The decision to ship is a *pointer move* (`latest-stable` floats to a chosen tag), not a *rebuild* (avoids the old `-beta.N` → clean-stamp double build). Side benefits: channel switch on the same version is a free no-op since the device's SHA-skip kicks in; CI minutes halved on promote; one tag history per version.
+
+**Recovery version stamping:** the workflow does NOT rewrite recovery's `CONFIG_APP_PROJECT_VER`. Bump that manually in `apps/recovery/sdkconfig.defaults` when recovery code actually changes — independent cadence from the main app.
+
+**Floating tags use `--prerelease`:** both `latest-beta` and `latest-stable` floating releases are marked prerelease (the underlying real release — `vX.Y.Z` — carries the "Latest" badge). Without `--prerelease`, `gh release create` for floating tags hits a 403 from the GitHub Actions bot token despite `contents: write` being granted (verified 2026-05-12). Possibly an internal GitHub-side check that the bot can't create a "non-prerelease release" via Actions.
 
 **Files touched:** `tools/firmware-proxy/` (Worker source, deployed via `wrangler deploy`), new `tools/release/make_manifest.py`, new `.github/workflows/release-beta.yml`, new `.github/workflows/release-promote.yml`, new root `VERSION`.
 
-**Done when:** pushing `v0.1.0-rc.1` results in `https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-beta/manifest.json` returning the expected JSON with CORS headers.
+**Done when:** pushing `v0.2.1` results in `https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-beta/manifest.json` returning the expected JSON with CORS headers; running release-promote against that tag moves `latest-stable` to the same bytes.
 
 ---
 
@@ -444,6 +450,7 @@ Both apps get the same simple flow: pick channel → check → install. Differen
   ```
   ┌─ Updates ─────────────────────────────┐
   │ App version: 0.2.0                    │
+  │ Built:       May 11 2026 22:14:03     │
   │ Recovery:    0.1.0                    │
   │ Channel:     [Stable ▼]               │
   │                                       │
@@ -453,6 +460,7 @@ Both apps get the same simple flow: pick channel → check → install. Differen
   │ [ Restart to Recovery ]               │
   └───────────────────────────────────────┘
   ```
+  The "Built" row carries `esp_app_desc_t.date` + `time` (ESP-IDF auto-stamps at link time). Every `idf.py build` produces a new fingerprint, so dev-channel users can confirm "my flash actually took" without bumping the version manually. `/api/version` carries these as `build_date` and `build_time`.
 - **`apps/main/web_ui/updates.js`** — new module:
   - On panel load: fetch `/api/version` (versions + base URL config) and `/api/ota/channel` (current + available list) in parallel.
   - Channel change: immediate `POST /api/ota/channel`; on failure, revert dropdown and show inline error.
@@ -461,9 +469,9 @@ Both apps get the same simple flow: pick channel → check → install. Differen
     1. `fetch` `app.bin` and `storage.bin` from the cloud (XHR with `progress` events for the download bar).
     2. `POST /api/ota/upload-app` and `POST /api/ota/upload-ui` with `X-Sha256` / `X-Size` headers (XHR `upload.onprogress` for the upload bar).
     3. `POST /api/ota/commit`.
-    4. If response has `rebooting: true`: wait 3 s, then poll `/api/version` every 2 s with 3 s per-request timeout. Stop on first response where `app == manifest.app.version`. Overall ceiling 60 s; on timeout, show *"Device didn't respond after 60 s. Reconnect to **HERO-RC-XXXX** and reload this page to verify."*
+    4. If response has `rebooting: true`: show *"Device rebooting into v<version>…"* and call `setTimeout(() => location.reload(), 3000)` — same fire-and-reload pattern as the Reboot button. The browser reconnects to the device's SoftAP once it comes back up.
     5. If response has `rebooting: false` (UI-only path, only reachable via manual upload edge cases): show *"UI updated. Reload the page to see changes."*
-  - "Restart to Recovery": confirmation modal, then `POST /api/ota/reboot-recovery`. Same reconnect-and-reload message.
+  - "Restart to Recovery": confirmation modal, then `POST /api/ota/reboot-recovery`, then `setTimeout(() => location.reload(), 3000)`.
 - **`apps/main/web_ui/style.css`** — styles for the Updates panel, progress bar, advanced disclosure.
 
 ### Recovery deliverables
@@ -486,7 +494,7 @@ No "you're up to date" or "older version" copy — if the user clicks Install on
 
 ### Files touched
 
-- **Main:** `apps/main/web_ui/index.html`, `apps/main/web_ui/style.css`, new `apps/main/web_ui/updates.js`, `apps/main/web_ui/compress.py` (picks up updates.js), `apps/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/main/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` from sdkconfig), `apps/main/components/http_server/api_ota.c` (channel handlers use `ota_io`).
+- **Main:** `apps/main/web_ui/index.html`, `apps/main/web_ui/style.css`, new `apps/main/web_ui/updates.js`, `apps/main/web_ui/compress.py` (picks up updates.js), `apps/main/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/main/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` + `build_date` + `build_time` from `esp_app_desc_t`), `apps/main/components/http_server/api_ota.c` (channel handlers use `ota_io`), `apps/main/components/http_server/driver.c` (new `/updates.js` URI handler — `compress.py` writes the file to LittleFS but driver.c needs an explicit handler since there's no wildcard asset route; `max_uri_handlers` bumped from 4 → 5 assets).
 - **Recovery:** new `apps/recovery/Kconfig.projbuild`, `apps/recovery/main/recovery.html` (auto-update section), `apps/recovery/components/recovery_http/recovery_http.c` (channel handlers + `ota_base_url`/`ota_repo_path` in `/api/version`), `apps/recovery/components/recovery_http/CMakeLists.txt` (`espressif__cjson` requires).
 - **Shared:** `components/ota_io/include/ota_io.h` (channel helper declarations), new `components/ota_io/ota_settings.c`, `components/ota_io/CMakeLists.txt`.
 

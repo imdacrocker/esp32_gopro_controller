@@ -1951,7 +1951,6 @@ All handlers follow the same structure: parse request -> call one component API 
 | `POST /api/settings/timezone` | `can_manager_set_tz_offset()` |
 | `POST /api/settings/datetime` | `can_manager_set_manual_utc_ms()` -> fires UTC-acquired path. Rejected with `ESP_ERR_INVALID_STATE` only after a live source has already won this session; an NVS-restored anchor at boot does not block manual entry. |
 | `POST /api/reboot` | `esp_restart()` |
-| `POST /api/factory-reset` | NVS erase all -> `esp_restart()` |
 
 ### 20.5 Unified Camera Remove with Slot Compaction
 
@@ -2004,7 +2003,7 @@ Response: 200 OK on success, 409 Conflict if any camera is currently connected
 | `api_cameras.c` | `/api/paired-cameras`, `/api/shutter`, `/api/remove-camera`, `/api/reorder-cameras`, `/api/scan`, `/api/scan-cancel`, `/api/pair`, `/api/cameras` |
 | `api_rc.c` | `/api/rc/discovered`, `/api/rc/add` |
 | `api_settings.c` | `/api/settings/timezone`, `/api/settings/datetime` |
-| `api_system.c` | `/api/logging-state`, `/api/utc`, `/api/auto-control`, `/api/reboot`, `/api/factory-reset` |
+| `api_system.c` | `/api/logging-state`, `/api/utc`, `/api/auto-control`, `/api/reboot` |
 
 
 ---

@@ -8,15 +8,12 @@
  *   - Channel selector POSTs immediately on change (Q2 — "just remembers").
  *   - "Check for updates" fetches the manifest and shows version + Install.
  *   - "Install" downloads both blobs from the cloud, uploads them with two
- *     progress bars, commits, and polls /api/version after reboot.
+ *     progress bars, commits, then reloads the page after a short delay
+ *     while the device reboots into the new firmware.
  */
 
 (function () {
 
-const POLL_INITIAL_DELAY_MS = 3000;
-const POLL_INTERVAL_MS      = 2000;
-const POLL_REQ_TIMEOUT_MS   = 3000;
-const POLL_OVERALL_MS       = 60000;
 const MANIFEST_TIMEOUT_MS   = 10000;
 
 const CHANNEL_LABELS = { stable: 'Stable', beta: 'Beta', dev: 'Dev' };
@@ -26,6 +23,7 @@ let baseUrl = null;          // cached after first load (manifest.ota_base_url)
 let repoPath = null;         // cached after first load (manifest.ota_repo_path)
 let lastChannel = null;      // tracked so we can revert on POST failure
 let lastManifest = null;     // most recent successful manifest fetch
+let currentAppVersion = null; // installed app version, for up-to-date comparison
 let installing = false;
 let panelInited = false;
 
@@ -62,6 +60,7 @@ async function loadPanel() {
     ]);
 
     if (version) {
+        currentAppVersion = version.app || null;
         els.appVersion.textContent      = version.app || 'unknown';
         els.recoveryVersion.textContent = version.recovery || 'unknown';
         els.buildStamp.textContent      = (version.build_date && version.build_time)
@@ -209,6 +208,10 @@ function renderFetchError(e, channel) {
 
 function renderManifestResult(manifest, channel) {
     const v = manifest.app.version;
+    if (currentAppVersion && v === currentAppVersion) {
+        showResult('success', 'Up to date!');
+        return;
+    }
     const released = manifest.released ? ` (released ${manifest.released})` : '';
     const notes = manifest.release_notes_url
         ? ` <a href="${escapeAttr(manifest.release_notes_url)}" target="_blank" rel="noopener">release notes</a>`
@@ -266,15 +269,9 @@ async function onInstallClick() {
         }
 
         showResult('info',
-            `Device rebooting into v${escapeHtml(manifest.app.version)}. Waiting for it to come back up…`);
-        const ok = await pollForVersion(manifest.app.version);
-        if (ok) {
-            showResult('success',
-                `Updated to v${escapeHtml(manifest.app.version)}. Reload the page to use the new UI.`);
-        } else {
-            showResult('error',
-                `Device didn't respond after ${POLL_OVERALL_MS / 1000}s. Reconnect to the camera's WiFi and reload this page to verify.`);
-        }
+            `Device rebooting into v${escapeHtml(manifest.app.version)}…`);
+        setTimeout(() => location.reload(), 3000);
+        return;
     } catch (e) {
         showResult('error', `Install failed: ${escapeHtml(e.message || String(e))}`);
     } finally {
@@ -380,35 +377,6 @@ async function postJson(path, body) {
     return text ? JSON.parse(text) : {};
 }
 
-/* ---- Poll for the new version ------------------------------------------ */
-
-async function pollForVersion(targetVersion) {
-    await sleep(POLL_INITIAL_DELAY_MS);
-    const deadline = Date.now() + POLL_OVERALL_MS - POLL_INITIAL_DELAY_MS;
-    while (Date.now() < deadline) {
-        const v = await fetchVersionWithTimeout();
-        if (v && v.app === targetVersion) return true;
-        await sleep(POLL_INTERVAL_MS);
-    }
-    return false;
-}
-
-async function fetchVersionWithTimeout() {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), POLL_REQ_TIMEOUT_MS);
-    try {
-        const r = await fetch('/api/version', { signal: ctl.signal });
-        if (!r.ok) return null;
-        return await r.json();
-    } catch (_) {
-        return null;
-    } finally {
-        clearTimeout(timer);
-    }
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 /* ---- Restart to recovery ------------------------------------------------ */
 
 async function onRestartRecoveryClick() {
@@ -422,8 +390,8 @@ async function onRestartRecoveryClick() {
     els.recoveryBtn.textContent = 'Restarting…';
     try {
         await postJson('/api/ota/reboot-recovery');
-        showResult('info',
-            "Restarting into recovery. Reconnect to the camera's WiFi and reload this page.");
+        showResult('info', "Restarting into recovery…");
+        setTimeout(() => location.reload(), 3000);
     } catch (e) {
         showResult('error', `Restart failed: ${e.message}`);
         els.recoveryBtn.disabled = false;

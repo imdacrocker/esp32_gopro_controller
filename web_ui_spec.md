@@ -210,7 +210,7 @@ margin: 0 0 0.8em
 ```
 
 **Section title bar:** flex row (`.section-title .section-title-row`) with the title on the left and a Sync button on the right.
-- Left: literal text `System Time (UTC -7)` (the offset is hard-coded in the markup for now).
+- Left: `<span id="system-time-label">System Time (UTC)</span>`. The label is rewritten on startup (and whenever the user changes the dropdown in Settings) from `/api/settings/timezone`, formatted as `UTC`, `UTC+N`, or `UTC-N`. Fresh devices default to `UTC` (offset 0).
 - Right: `<button id="datetime-btn" class="section-title-btn" hidden>Sync</button>` — small outlined blue button matching `--blue`. Hidden by default; revealed only when the system time still needs a manual sync (see "Sync gating" below).
 
 **Body cell** (`.rc-cell`, padding `12px 14px`) contains `#utc-display` — a flex row laid out as:
@@ -434,7 +434,7 @@ Clicking the overlay backdrop (not the modal card) also closes the modal.
   - On change: `POST /api/settings/timezone` with `{ tz_offset_hours: int }`
   - On open: `GET /api/settings/timezone` → sets selected value
 
-The Settings modal no longer contains a "Set Date & Time" row — the manual sync button moved to the System Time section header on the home screen (see §8). `openSettings()` no longer fetches `/api/utc`. The modal now contains only the Time Zone select, the Reboot button, and the Factory Reset button.
+The Settings modal no longer contains a "Set Date & Time" row — the manual sync button moved to the System Time section header on the home screen (see §8). `openSettings()` no longer fetches `/api/utc`. The modal now contains only the Time Zone select and the Reboot button.
 
 **Reboot button:**
 ```
@@ -444,14 +444,7 @@ font-size: 0.88rem, font-weight: 700, min-height: 48px, border-radius: 8px
 ```
 - Confirm dialog: "Reboot Controller?\n\nThe device will restart. Paired cameras and settings will be preserved."
 - On confirm: `POST /api/reboot`, disable button, show "Rebooting…" with dot animation
-- After 5s: `location.reload()`
-
-**Factory Reset button:**
-```
-background: #e74c3c (red)
-```
-- Confirm dialog: "Restore Defaults?\n\nThis will erase all paired cameras and settings, then restart the controller. This cannot be undone."
-- On confirm: `POST /api/factory-reset`, same animation pattern → `location.reload()` after 5s
+- After 3s: `location.reload()`
 
 ---
 
@@ -596,7 +589,6 @@ All polls fire independently via `setInterval`; no coordination or debouncing be
 | GET | `/api/rc/discovered` | — | `[{ addr, ip }]` | Unprobed SoftAP stations whose MAC OUI is on the GoPro allow-list (`GOPRO_RC_OUIS[]` in `api_rc.c`). Non-GoPro stations are filtered out server-side. |
 | POST | `/api/rc/add` | `{ addr, ip }` | `{}` | Reserves the shared pair-attempt machine (`PAIR_TRANSPORT_WIFI_RC`), then registers the slot and primes UDP keepalive + `st` + `cv`. UI polls `/api/pair/status` for `success` / `failed`. Returns `409 Conflict` if a pair attempt is already in flight. |
 | POST | `/api/reboot` | — | `{}` or no response | ESP32 may drop connection before responding |
-| POST | `/api/factory-reset` | — | `{}` or no response | Same as above |
 | GET | `/api/settings/timezone` | — | `{ tz_offset_hours: int }` | |
 | POST | `/api/settings/timezone` | `{ tz_offset_hours: int }` | `{}` | |
 | POST | `/api/settings/datetime` | `{ epoch_ms: number }` | `{}` | Only accepted when `session_synced == false` (no live source has won yet — NVS-restored boot value does not block manual entry). Sets system time from browser clock; triggers `open_gopro_ble_sync_time_all()` and `gopro_wifi_rc_sync_time_all()`. The UI calls this from the Sync button in the System Time section header (see §8); it is no longer reachable from the Settings modal. |
