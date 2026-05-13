@@ -10,6 +10,12 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-05-12
+
+### Fixed
+- Fresh installs no longer fall back to the recovery app if you reboot
+  from the web UI within 30 seconds of flashing the main firmware.
+
 ## [1.0.1] - 2026-05-12
 
 ### Added
@@ -30,6 +36,7 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/imdacrocker/esp32_gopro_controller/releases/tag/v1.0.0
