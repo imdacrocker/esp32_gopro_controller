@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-05-13
+
 ### Fixed:
 
 - CAN controller now automatically recovers from bus-off (e.g. when the device boots before the rest of the vehicle bus is powered up) instead of requiring a reboot.
@@ -43,6 +45,7 @@ First public release.
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
 [Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...HEAD
+[1.0.3]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/imdacrocker/esp32_gopro_controller/releases/tag/v1.0.0
