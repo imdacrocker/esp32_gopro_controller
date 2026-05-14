@@ -46,29 +46,28 @@ Full architecture, components, boot order, core affinity, and radio coexistence 
 
 For a brand-new board (one-time provisioning):
 
-1. Connect your ESP32-CAN-X2 to your computer via USB-C
-2. Go to **<https://espressif.github.io/esp-launchpad/>** in a Chromium based browser
-3. Click the Connect at the top and select the port your board is connected to
-4. Click the DIY tab at the top
-5. Download the recovery-factory.bin file from the latest release
-6. Set the Flash Address to '0x0000' and choose the recovery-factory.bin file
-7. Click Program
-8. Once you see "Leaving...."  Click Reset Device and confirm
+1. Connect your ESP32-CAN-X2 to your computer via USB-C.
+2. Open ESP Launchpad pre-configured for this firmware (Chromium-based browser):
 
+   <a href="https://espressif.github.io/esp-launchpad/?flashConfigURL=https://firmware-proxy.imdacrocker.workers.dev/launchpad.toml">
+     <img alt="Try it with ESP Launchpad" src="https://espressif.github.io/esp-launchpad/assets/try_with_launchpad.png" width="250" height="70">
+   </a>
+
+3. Click **Connect** and pick the serial port the board enumerated on.
+4. Click **Flash** — the merged factory image (bootloader + partition table + recovery + main app + UI) is written in one pass.
+5. When flashing finishes, power-cycle the board.
+
+That's it for USB. The board boots straight into the main app.
 
 Then on your phone or laptop:
 
 1. Join the WiFi network **`HERO-RC-XXXXXX`** (open, no password — last 3 MAC bytes in the SSID).
 2. Open **<http://10.71.79.1/>** in a browser.
-3. On the Recovery page
-   1. If your browser also has connection to the internet, select a channel (Stable is the recommended option) and tap Check for Updates.  Download and install the latest version.
-   2. If you can't connect to the controller AND the internet, first download the app.bin and storage.bin from the latest release.  Choose the appropriate files and upload them
-4. If the controller does not automatically restart after the upload, choose Boot to Main App
+3. Set your UTC offset from the settings menu at the top right.
+4. Add cameras from the Add/Manage cameras menu at the bottom.
+5. Enjoy!
 
-Once in the main app
-1. Set your UTC offset from the settings menu at the top right 
-2. Add cameras from the Add/Manage cameras menu at the bottom
-3. Enjoy!
+> **No internet on the flashing machine?** Download `factory.bin` from the [latest release](https://github.com/imdacrocker/esp32_gopro_controller/releases/latest) and use Launchpad's **DIY** tab to flash it at address `0x0`.
 
 
 Full instructions, manual builds, and recovery flows are in [`docs/development.md`](docs/development.md).

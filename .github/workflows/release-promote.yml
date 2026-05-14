@@ -58,7 +58,8 @@ jobs:
             --pattern 'manifest.json' \
             --pattern 'app.bin' \
             --pattern 'storage.bin' \
-            --pattern 'recovery.bin'
+            --pattern 'recovery.bin' \
+            --pattern 'factory.bin'
 
       - name: Flip source release out of prerelease
         env:
@@ -89,4 +90,4 @@ jobs:
             --title "Latest stable (${{ steps.src.outputs.tag }})" \
             --notes "Floating tag for \`${{ steps.src.outputs.tag }}\`." \
             --target "${{ steps.src.outputs.commit }}" \
-            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin release/factory.bin

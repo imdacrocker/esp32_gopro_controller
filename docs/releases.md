@@ -6,11 +6,12 @@ The full system design is in [`design/ota.md`](design/ota.md). This page is the 
 
 - **Channels.** `stable` and `beta` published online (separate Cloudflare Worker routes). `dev` is local-only via `dev.ps1`.
 - **One binary per version.** Beta and stable use the byte-identical binary for the same `vX.Y.Z` tag — promotion is a pure pointer-move on the `latest-stable` floating tag, not a rebuild.
-- **App + UI ship as a pair.** Each release publishes 4 assets:
+- **App + UI ship as a pair.** Each release publishes 5 assets:
   - `manifest.json` — declares both SHA-256 hashes
   - `app.bin` — the main app
   - `storage.bin` — LittleFS UI image
-  - `recovery.bin` — used only for manual `flash_factory.ps1` reflash, not browser OTA
+  - `recovery.bin` — raw recovery binary; kept for niche reflash scenarios, not browser OTA
+  - `factory.bin` — single-shot fresh-board image (bootloader + partition table + recovery + main + UI). Consumed by ESP Launchpad and `flash_factory.ps1`
 - **Browser is the only outbound proxy.** ESP32 stays a SoftAP; the user's phone/laptop fetches signed manifests + blobs from the Cloudflare Worker and POSTs them to the device. CORS is added by the Worker (GitHub Releases doesn't ship CORS headers).
 
 ---

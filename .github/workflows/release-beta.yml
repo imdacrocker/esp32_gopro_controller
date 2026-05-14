@@ -68,6 +68,24 @@ jobs:
             --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.ver.outputs.tag }}" \
             --output release/manifest.json
 
+      - name: Merge factory image
+        # One-shot image flashable at 0x0 — what ESP Launchpad and
+        # flash_factory.ps1 consume for fresh-board provisioning. Layout
+        # mirrors partitions.csv; ota_data_initial.bin makes the device
+        # land in the main app on first boot (factory recovery still
+        # serves as the bootloader's failsafe).
+        run: |
+          python -m pip install --quiet esptool
+          python -m esptool --chip esp32s3 merge-bin \
+            -o release/factory.bin \
+            --flash_mode dio --flash_size 8MB --flash_freq 80m \
+            0x000000 apps/main/build/bootloader/bootloader.bin \
+            0x008000 apps/main/build/partition_table/partition-table.bin \
+            0x00F000 apps/main/build/ota_data_initial.bin \
+            0x020000 apps/recovery/build/esp32_gopro_canbus_recovery.bin \
+            0x0E0000 apps/main/build/esp32_gopro_canbus_controller_v2.bin \
+            0x290000 apps/main/build/storage.bin
+
       - name: Create immutable release
         # Prerelease=true until release-promote.yml flips it to stable.
         env:
@@ -78,7 +96,7 @@ jobs:
             --notes "Built from \`${GITHUB_SHA::7}\`. Not yet promoted to stable." \
             --target "$GITHUB_SHA" \
             --prerelease \
-            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin release/factory.bin
 
       - name: Move latest-beta floating tag
         # Floating tag is what the Cloudflare Worker proxies to the device.
@@ -92,4 +110,4 @@ jobs:
             --notes "Floating tag for \`${{ steps.ver.outputs.tag }}\`." \
             --target "$GITHUB_SHA" \
             --prerelease \
-            release/manifest.json release/app.bin release/storage.bin release/recovery.bin
+            release/manifest.json release/app.bin release/storage.bin release/recovery.bin release/factory.bin
