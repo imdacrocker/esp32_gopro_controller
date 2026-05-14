@@ -11,7 +11,7 @@
  *   - SetShutter (TLV 0x01) — recording start/stop
  *   - GetStatusValue poll (5 s) — recording status
  *
- * §15 of camera_manager_design.md
+ * §15 of docs/design/camera-manager.md
  */
 #pragma once
 

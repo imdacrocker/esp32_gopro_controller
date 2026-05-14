@@ -5,7 +5,7 @@
 // to github.com and adds the Access-Control-Allow-Origin header that
 // raw GitHub downloads do not include.
 //
-// See ota_design.md §2 (architecture) and §5 (manifest routing).
+// See docs/design/ota.md §2 (architecture) and §5 (manifest routing).
 
 export default {
   async fetch(request) {

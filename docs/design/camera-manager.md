@@ -1927,7 +1927,7 @@ All asset responses include `Cache-Control: no-cache` (forces revalidation on ev
 
 ### 20.4 API Handlers
 
-All handlers follow the same structure: parse request -> call one component API -> write JSON response. The full endpoint contract lives in **`web_ui_spec.md`**, which is the canonical reference for the HTTP API contract. This section only maps endpoints to the component each handler calls into.
+All handlers follow the same structure: parse request -> call one component API -> write JSON response. The full endpoint contract lives in **[`web-ui.md`](web-ui.md)**, which is the canonical reference for the HTTP API contract. This section only maps endpoints to the component each handler calls into.
 
 | Endpoint | Component called |
 |---|---|

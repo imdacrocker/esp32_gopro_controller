@@ -7,7 +7,7 @@ menu "GoPro Controller — OTA"
             Base URL the browser uses to fetch manifests and binaries.
             The Worker proxies github.com and adds CORS headers.
             Path layout: <base>/<owner>/<repo>/releases/download/latest-<channel>/manifest.json
-            See ota_design.md §5 (Manifest format) and Appendix A (Worker source).
+            See docs/design/ota.md §5 (Manifest format) and Appendix A (Worker source).
             Replace the default with your deployed Worker URL.
 
     config OTA_REPO_PATH

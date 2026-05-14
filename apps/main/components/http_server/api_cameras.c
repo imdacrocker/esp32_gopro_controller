@@ -62,7 +62,7 @@ static const char *model_name_str(camera_model_t model)
 }
 
 /*
- * Status mapping mirrors camera_manager state (web_ui_spec §...).
+ * Status mapping mirrors camera_manager state (docs/design/web-ui.md §...).
  *
  * WiFi (RC-emulation) — four states:
  *   disconnected — wifi_status != READY, !wifi_associated

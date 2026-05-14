@@ -14,7 +14,7 @@
  * slot is not yet wifi_ready.  Status-response decode is delegated to
  * rc_parse_st_response() in status.c.
  *
- * §17.2, §17.4, §17.6 of camera_manager_design.md.
+ * §17.2, §17.4, §17.6 of docs/design/camera-manager.md.
  */
 
 #include <string.h>

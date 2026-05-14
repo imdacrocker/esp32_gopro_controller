@@ -8,7 +8,7 @@ menu "GoPro Controller — OTA (recovery)"
             binaries. Must match apps/main/Kconfig.projbuild — both apps
             ship as a pair with the same default. If the URL ever moves,
             users on stale recovery builds fall back to manual upload
-            (per ota_design.md §1).
+            (per docs/design/ota.md §1).
 
     config OTA_REPO_PATH
         string "GitHub <owner>/<repo> path for releases"

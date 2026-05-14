@@ -1,7 +1,7 @@
 /*
  * recovery_http.c — minimal HTTP server for the recovery image.
  *
- * Endpoints (see ota_design.md §6 for full contract):
+ * Endpoints (see docs/design/ota.md §6 for full contract):
  *   GET  /                        — embedded HTML
  *   GET  /api/version             — running firmware identity
  *   POST /api/ota/upload-app      — stream new app image into ota_0

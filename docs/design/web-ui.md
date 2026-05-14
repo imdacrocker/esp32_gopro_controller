@@ -351,7 +351,7 @@ The badge is built by `makeBadge(status)` from a fixed `STATUS_ICON` table (SVG 
 
 A `.status-dot { display: none }` rule is retained as a no-op safeguard for any historical code path that might still emit the old `<span class="status-dot">` element — current rendering uses `.status-icon` exclusively.
 
-**Status mapping** (from `camera_manager` enums; see `camera_manager_design.md` §...):
+**Status mapping** (from `camera_manager` enums; see [`camera-manager.md`](camera-manager.md) §...):
 - `pairing` only applies to BLE cameras (initial add-camera flow before `first_pair_complete`).
 - `connecting` applies to both transports. For BLE: any non-READY state once `first_pair_complete` is set. For RC: the slot is associated to the SoftAP but `wifi_status != WIFI_CAM_READY` — either still waiting on the first UDP response after a fresh associate, or demoted from READY by the keepalive silence watchdog (WoL retry loop active). The slot returns to `idle`/`recording` on the next received UDP datagram, or to `disconnected` if the camera disassociates from the AP.
 - `idle` and `recording` are gated on `wifi_status == WIFI_CAM_READY` (which BLE drivers also flip at the end of their readiness sequence — the field is overloaded as the universal "fully ready" signal).
@@ -540,7 +540,7 @@ Each unidentified device renders as a `.found-camera-row`:
    - State `connecting` → "Connecting to camera…" (default label)
    - State `success` → "Success!", auto-dismiss after 2 s, then `refreshCameraStatus()` repaints the home-screen camera list. The cv-resolved model name surfaces on the home-screen card on its next refresh, even if cv arrived after the modal closed.
    - State `failed` → mapped error label (e.g. `handshake_timeout` → "Camera setup timed out. Try again."); button changes to "OK".
-5. Cancel button → `POST /api/pair/cancel`. Server-side this removes the just-registered slot (RC slots are committed at register time; see §9.1 of `camera_manager_design.md`).
+5. Cancel button → `POST /api/pair/cancel`. Server-side this removes the just-registered slot (RC slots are committed at register time; see §9.1 of [`camera-manager.md`](camera-manager.md)).
 
 ### 13.3 Section 3 — Paired Cameras
 

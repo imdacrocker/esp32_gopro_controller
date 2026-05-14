@@ -12,7 +12,7 @@
  * gopro_model_supports_http_datetime() returns true (Hero4 Black/Silver
  * today).  No BLE is used.
  *
- * §17 of camera_manager_design.md.
+ * §17 of docs/design/camera-manager.md.
  */
 #pragma once
 

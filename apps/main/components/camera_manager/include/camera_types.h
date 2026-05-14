@@ -14,7 +14,7 @@ typedef enum {
     /* GoPro RC-emulation models — IDs match GoPro's official `model_number`
      * field as returned by the HTTP `/gp/gpControl` info JSON (cross-referenced
      * against goprowifihack/CameraCodenames.md).  Cameras self-identify via
-     * the UDP `cv` opcode at pair time (see camera_manager_design.md §17.2.5);
+     * the UDP `cv` opcode at pair time (see docs/design/camera-manager.md §17.2.5);
      * the camera's reported `model_name` string maps to one of these enum
      * values via gopro_model_from_name().
      *

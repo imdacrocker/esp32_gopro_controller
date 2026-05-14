@@ -2,7 +2,7 @@
  * ota_io — shared OTA image-writing primitives used by both the main app
  * (in-place A/B updates) and the recovery app (factory-mediated updates).
  *
- * Implements the §6 contract from ota_design.md: streaming uploads with
+ * Implements the §6 contract from docs/design/ota.md: streaming uploads with
  * SHA-256 verification, NVS-backed SHA-skip, and boot-partition switching.
  *
  * The writers are stateful; one instance per upload. Begin → many writes →

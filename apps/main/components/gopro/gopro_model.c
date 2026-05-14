@@ -3,7 +3,7 @@
  *
  * Currently just `gopro_model_from_name()`: a string-compare lookup mapping
  * GoPro `info.model_name` JSON values to camera_model_t enum values.  Used by
- * the gopro_wifi_rc HTTP identify probe (§17.2.5 of camera_manager_design.md).
+ * the gopro_wifi_rc HTTP identify probe (§17.2.5 of docs/design/camera-manager.md).
  *
  * Naming convention: the strings used in the table are the exact values
  * emitted by the camera's GET /gp/gpControl JSON `info.model_name` field —

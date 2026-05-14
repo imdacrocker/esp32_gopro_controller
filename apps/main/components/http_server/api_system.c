@@ -29,7 +29,7 @@
 static const char *TAG = "http_api_system";
 
 /* ---- GET /api/version ---------------------------------------------------- *
- * Returns running firmware identity per ota_design.md §6.
+ * Returns running firmware identity per docs/design/ota.md §6.
  *
  *   app:               main app version (esp_app_get_description)
  *   ui:                always equal to app per the §1 invariant — they ship

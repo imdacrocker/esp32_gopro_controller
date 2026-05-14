@@ -7,11 +7,11 @@
 # `factory` is the recovery app (sibling project esp32_gopro_canbus_recovery).
 # `ota_0` and `ota_1` are the A/B slots for the main app — `esp_ota_begin`
 #   refuses to write to the running partition, so two slots are needed for
-#   in-place upgrades from the main app's web UI (ota_design.md §6 / §13).
+#   in-place upgrades from the main app's web UI (docs/design/ota.md §6 / §13).
 # `storage` is the LittleFS web UI for the main app.
 # Free 0x740000 .. 0x800000 (~768 KB) reserved for future use.
 #
-# Deviations from ota_design.md §3:
+# Deviations from docs/design/ota.md §3:
 #   - factory grew from 512 KB → 768 KB. WiFi-capable IDF v6 recovery is ~700 KB
 #     minimum (libnet80211 + lwIP + libpp alone are ~290 KB).
 #   - ota_0 shrank from 1.94 MB → 1.69 MB. Main app is ~1.2 MB; comfortable.

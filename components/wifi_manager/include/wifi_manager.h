@@ -8,7 +8,7 @@
 
 /* SoftAP SSID is "<prefix><last-3-MAC-bytes>" so the recovery app and main app
  * advertise the same SSID on the same hardware (same MAC -> same suffix).
- * Auth is OPEN (no PSK) — closed CAN-bus device, no PII. See ota_design.md §1. */
+ * Auth is OPEN (no PSK) — closed CAN-bus device, no PII. See docs/design/ota.md §1. */
 #define AP_SSID_PREFIX       "HERO-RC-"
 
 typedef struct {

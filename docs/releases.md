@@ -1,0 +1,33 @@
+# Releases & OTA
+
+The full system design is in [`design/ota.md`](design/ota.md). This page is the operator's guide: how the model works at a glance, and how to cut and promote a release.
+
+## Model
+
+- **Channels.** `stable` and `beta` published online (separate Cloudflare Worker routes). `dev` is local-only via `dev.ps1`.
+- **One binary per version.** Beta and stable use the byte-identical binary for the same `vX.Y.Z` tag — promotion is a pure pointer-move on the `latest-stable` floating tag, not a rebuild.
+- **App + UI ship as a pair.** Each release publishes 4 assets:
+  - `manifest.json` — declares both SHA-256 hashes
+  - `app.bin` — the main app
+  - `storage.bin` — LittleFS UI image
+  - `recovery.bin` — used only for manual `flash_factory.ps1` reflash, not browser OTA
+- **Browser is the only outbound proxy.** ESP32 stays a SoftAP; the user's phone/laptop fetches signed manifests + blobs from the Cloudflare Worker and POSTs them to the device. CORS is added by the Worker (GitHub Releases doesn't ship CORS headers).
+
+---
+
+## Cutting a release
+
+1. Bump the root `VERSION` file (e.g. `0.2.1` → `0.2.2`), commit, push.
+2. *(only if recovery code changed)* Bump `CONFIG_APP_PROJECT_VER` in `apps/recovery/sdkconfig.defaults` independently.
+3. **Actions → release-beta → Run workflow.** Builds both apps, publishes `v$VERSION` as prerelease, moves `latest-beta` floating tag.
+4. Test on a device: channel = beta → Check for updates → Install. Validates the new bytes.
+5. **Actions → release-promote → Run workflow** with `tag = v$VERSION`. Flips the source release out of prerelease and moves `latest-stable` to the same bytes (no rebuild).
+6. Bump `VERSION` to the next line (e.g. `0.2.3`) so subsequent betas don't collide with the released stable.
+
+---
+
+## Dev-channel version marker
+
+Local builds on `main` carry `CONFIG_APP_PROJECT_VER="0.1.1-dev"` so it's obvious when the device is running an uncommitted/unstamped binary. CI workflows rewrite this line at build time from the tag, so `-dev` never leaks into published releases.
+
+Every `idf.py build` also updates the `build_date`/`build_time` fields in `/api/version`, surfaced as a "Built" row in the Updates panel — that's how you confirm a flash actually took.

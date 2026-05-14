@@ -1,6 +1,6 @@
 'use strict';
 
-/* updates.js — OTA update flow for the main app web UI (ota_design.md §13).
+/* updates.js — OTA update flow for the main app web UI (docs/design/ota.md §13).
  *
  * Lifecycle:
  *   - Loaded after app.js. Auto-binds to the settings button so the panel

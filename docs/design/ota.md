@@ -1,7 +1,7 @@
 # OTA Implementation Design
 
 Cross-session reference for the over-the-air update system.
-Treat this as the source of truth — companion to `camera_manager_design.md` and `web_ui_spec.md`.
+Treat this as the source of truth — companion to [`camera-manager.md`](camera-manager.md) and [`web-ui.md`](web-ui.md).
 
 ---
 

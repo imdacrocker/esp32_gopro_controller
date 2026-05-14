@@ -5,7 +5,7 @@
  * No BLE, no LittleFS, no CAN, no camera_manager — recovery's job is to
  * accept new app + storage images over WiFi and reboot into ota_0.
  *
- * See ota_design.md §9 (Phase 1 — Recovery app).
+ * See docs/design/ota.md §9 (Phase 1 — Recovery app).
  */
 
 #include "nvs_flash.h"

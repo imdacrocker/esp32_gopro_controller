@@ -1,5 +1,5 @@
 /*
- * api_ota.c — OTA endpoints for the main app (ota_design.md §6).
+ * api_ota.c — OTA endpoints for the main app (docs/design/ota.md §6).
  *
  * Endpoints (recovery's /api/ota/boot-main is recovery-only; main has its
  * own /reboot-recovery for the symmetric direction):

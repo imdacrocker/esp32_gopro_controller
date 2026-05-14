@@ -4,7 +4,7 @@
  * timer management.  All functions here run on the work task unless
  * otherwise noted.
  *
- * §17.4, §17.5, §17.6 of camera_manager_design.md.
+ * §17.4, §17.5, §17.6 of docs/design/camera-manager.md.
  */
 
 #include <stdlib.h>

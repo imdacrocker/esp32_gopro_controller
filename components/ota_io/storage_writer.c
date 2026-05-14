@@ -1,6 +1,6 @@
 /*
  * storage_writer.c — streams a LittleFS image into the `storage` data
- * partition with rolling SHA-256 verification (ota_design.md §6
+ * partition with rolling SHA-256 verification (docs/design/ota.md §6
  * "POST /api/ota/upload-ui").
  */
 

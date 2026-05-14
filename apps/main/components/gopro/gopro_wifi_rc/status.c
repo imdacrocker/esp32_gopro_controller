@@ -12,7 +12,7 @@
  * Xtensa LX7, so the single-writer / single-reader pattern (work-task readers
  * via `get_recording_status`) needs no mutex.
  *
- * §17.2.4, §17.4.1, §17.8 of camera_manager_design.md.
+ * §17.2.4, §17.4.1, §17.8 of docs/design/camera-manager.md.
  */
 
 #include <string.h>

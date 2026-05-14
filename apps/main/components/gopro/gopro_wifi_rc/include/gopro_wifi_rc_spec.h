@@ -1,7 +1,7 @@
 /*
  * gopro_wifi_rc_spec.h — Wire-protocol constants for the GoPro WiFi Smart-Remote
  * driver.  Pure constants and command byte templates; no behavioural code lives
- * here.  See camera_manager_design.md §17 for the protocol description.
+ * here.  See docs/design/camera-manager.md §17 for the protocol description.
  *
  * Two transports are used:
  *   - UDP (single bound socket, local port 8383, remote 8484): keepalive,

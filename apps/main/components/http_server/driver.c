@@ -1,7 +1,7 @@
 /*
  * driver.c — http_server init, LittleFS mount, and static asset handlers.
  *
- * §20 of camera_manager_design.md.
+ * §20 of docs/design/camera-manager.md.
  */
 
 #include <stdio.h>
