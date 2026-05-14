@@ -9,7 +9,8 @@ When the RaceCapture starts logging, your GoPros start recording. When it stops,
 ## Features
 
 - **Four GoPros in parallel** — mix any camera combination from Hero2 (with Wifi BackPack) up to a Her13 black.
-- **CAN-bus driven** — Reads RaceCapture logging state at 5 Hz. Auto-start/auto-stop recording follows the vehicle.
+- **CAN-bus driven** — Reads RaceCapture logging state. Auto-start/auto-stop recording follows the vehicle.
+- **Updates Camera Date/Time** - 
 - **Mobile web UI** — Pair cameras, see status, change settings, install updates from any phone connected to the device's SoftAP. No cloud account.
 - **Over-the-air updates** — Stable and beta channel updates, with automatic update checks (for devices with multiple connection capability, eg cellular internet and Wifi to the ESP32)
 - **Recovery partition** — Always-present factory app catches any failed update and exposes a manual-upload web UI as a last resort.

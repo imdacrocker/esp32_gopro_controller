@@ -35,6 +35,15 @@ void gopro_notify_rx(uint16_t conn_handle, uint16_t attr_handle,
         chan = GOPRO_CHAN_QUERY;     chan_name = "query";
     } else if (attr_handle == g->nw_mgmt_resp_notify) {
         chan = GOPRO_CHAN_NW_MGMT;   chan_name = "nw_mgmt";
+    } else if (attr_handle == g->wifi_ap_state_indicate) {
+        /* GP-0005 WiFi AP State — 1-byte indication (0 = AP off, 1 = AP on).
+         * Informational only: the camera proactively pushes this whenever its
+         * WiFi access point toggles.  Nothing in this firmware acts on it. */
+        const char *state = (len >= 1 && data[0] == 1) ? "ON"
+                          : (len >= 1 && data[0] == 0) ? "OFF"
+                          : "unknown";
+        ESP_LOGD(TAG, "slot %d: camera reports WiFi AP is %s", ctx->slot, state);
+        return;
     } else {
         ESP_LOGW(TAG, "slot %d: notify on unregistered handle 0x%04x len=%d",
                  ctx->slot, attr_handle, len);

@@ -93,8 +93,13 @@ All GoPro characteristics use the 128-bit base UUID `b5f9XXXX-aa8d-11e3-9046-000
 | `settings_resp_notify` | `0075` | Notify | Settings responses (acknowledged but not acted on) |
 | `query_write` | `0076` | Write | TLV queries (`GetStatusValue`) |
 | `query_resp_notify` | `0077` | Notify | Query responses (status updates) |
+| `nw_mgmt_write` | `0091` | Write | Network-management protobuf (`RequestPairingFinish`) |
+| `nw_mgmt_resp_notify` | `0092` | Notify | Network-management responses |
+| `wifi_ap_state_indicate` | `0005` | Indicate | WiFi AP state push (0 = off, 1 = on); logged at debug level, no action taken |
 
 CCCDs are subscribed sequentially after characteristic discovery. GoPro cameras do not persist CCCD state across connections — subscriptions are re-sent on every reconnection.
+
+Once the final CCCD ACK arrives, `gatt.c` calls `ble_core_resume_background_scan()` before kicking off the readiness sequence. This lets `ble_core` look for additional paired cameras while the lighter GetHardwareInfo poll is still running for this slot, rather than waiting until the whole readiness sequence is done. With only one configured camera the call is a no-op (`has_disconnected_cameras()` returns false).
 
 ---
 
@@ -112,7 +117,9 @@ on_encrypted(conn_handle, addr)
   → gopro_gatt_start_discovery()
 
 GATT discovery complete
-  → subscribe CCCDs sequentially (3 notify channels)
+  → subscribe CCCDs sequentially (all 128-bit notify/indicate chrs)
+  → ble_core_resume_background_scan()   (lets a second paired camera connect
+                                          while this slot finishes readiness)
   → gopro_readiness_start()
 
 GetHardwareInfo poll  (up to 10 retries × 3 s)

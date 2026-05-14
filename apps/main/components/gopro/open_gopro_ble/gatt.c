@@ -56,6 +56,7 @@ static const chr_map_entry_t k_chr_map[] = {
     { GOPRO_CHR_QUERY_RESP_NOTIFY_UUID,   HANDLE_OFF(query_resp_notify)    },
     { GOPRO_CHR_NW_MGMT_WRITE_UUID,       HANDLE_OFF(nw_mgmt_write)        },
     { GOPRO_CHR_NW_MGMT_RESP_NOTIFY_UUID, HANDLE_OFF(nw_mgmt_resp_notify)  },
+    { GOPRO_CHR_WIFI_AP_STATE_UUID,       HANDLE_OFF(wifi_ap_state_indicate) },
 };
 #define CHR_MAP_LEN  (sizeof(k_chr_map) / sizeof(k_chr_map[0]))
 
@@ -212,6 +213,9 @@ static void gopro_gatt_write_next_cccd(gopro_ble_ctx_t *ctx)
 
     if (cur >= total) {
         ESP_LOGI(TAG, "slot %d: all CCCDs subscribed (%d)", ctx->slot, total);
+        /* Heavy GATT traffic for this slot is done — let ble_core look for
+         * other paired cameras while readiness polling continues. */
+        ble_core_resume_background_scan();
         gopro_readiness_start(ctx);
         return;
     }

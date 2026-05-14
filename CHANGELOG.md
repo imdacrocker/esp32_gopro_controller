@@ -12,7 +12,9 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ### Fixed:
 
-CAN controller now automatically recovers from bus-off (e.g. when the device boots before the rest of the vehicle bus is powered up) instead of requiring a reboot.
+- CAN controller now automatically recovers from bus-off (e.g. when the device boots before the rest of the vehicle bus is powered up) instead of requiring a reboot.
+- Second paired BLE camera now connects automatically while the first camera is still in use. Previously the background scan stayed dormant after the first camera came up, so the second slot remained disconnected until the first camera went away.
+- Hero 9+ no longer floods the log with "notify on unregistered handle" warnings. The camera's WiFi AP state notifications (GP-0005) are now recognised and logged at debug level instead.
 
 ## [1.0.2] - 2026-05-12
 

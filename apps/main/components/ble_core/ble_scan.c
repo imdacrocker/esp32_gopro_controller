@@ -125,6 +125,12 @@ static int scan_event_cb(struct ble_gap_event *event, void *arg)
  * that this call requires no knowledge of bonded addresses.  The design
  * permits this as a behaviorally-identical fallback (§12.4).
  * -------------------------------------------------------------------------*/
+/* Public alias — see ble_core.h for the call-site contract. */
+void ble_core_resume_background_scan(void)
+{
+    start_scan_if_needed();
+}
+
 void start_scan_if_needed(void)
 {
     if (s_connecting || s_discovering) {

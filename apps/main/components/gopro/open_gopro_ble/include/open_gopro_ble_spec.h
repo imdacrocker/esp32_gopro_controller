@@ -51,6 +51,10 @@
 #define GOPRO_CHR_NW_MGMT_WRITE_UUID       GOPRO_UUID128_INIT(0x91)  /* GP-0091 Write */
 #define GOPRO_CHR_NW_MGMT_RESP_NOTIFY_UUID GOPRO_UUID128_INIT(0x92)  /* GP-0092 Notify */
 
+/* WiFi AP State (GP-0001 service) — Read/Indicate, single-byte payload
+ * (0 = AP off, 1 = AP on).  Camera pushes this whenever its WiFi AP toggles. */
+#define GOPRO_CHR_WIFI_AP_STATE_UUID       GOPRO_UUID128_INIT(0x05)  /* GP-0005 Indicate */
+
 /* CCCD descriptor UUID (standard BLE) */
 #define BLE_GATT_DSC_CLT_CFG_UUID16  0x2902
 

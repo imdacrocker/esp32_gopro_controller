@@ -26,6 +26,7 @@ typedef struct {
     uint16_t query_resp_notify;
     uint16_t nw_mgmt_write;
     uint16_t nw_mgmt_resp_notify;
+    uint16_t wifi_ap_state_indicate;  /* GP-0005, separate GP-0001 service */
 } gopro_gatt_handles_t;
 
 /* ---- Per-slot driver context (§15.4) ------------------------------------- */

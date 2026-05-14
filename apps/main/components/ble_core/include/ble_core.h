@@ -91,3 +91,17 @@ void ble_core_purge_unknown_bonds(const ble_addr_t keep[], int keep_count);
  * trigger an automatic reconnect.
  */
 void ble_core_remove_bond(const ble_addr_t *addr);
+
+/*
+ * Resume the background reconnect scan if any paired camera is still
+ * disconnected.  No-op if a connect attempt is in progress, a discovery
+ * scan is running, or has_disconnected_cameras() returns false.
+ *
+ * Intended call site: after a successful first-camera readiness milestone
+ * (e.g. all CCCDs subscribed) so the controller can begin looking for
+ * additional configured cameras without contending with the in-progress
+ * pairing/discovery traffic.
+ *
+ * Must be called from the NimBLE host task (e.g. a NimBLE callback).
+ */
+void ble_core_resume_background_scan(void);

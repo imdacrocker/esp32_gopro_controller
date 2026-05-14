@@ -194,6 +194,20 @@ Async — posts to the NimBLE event queue.
 
 ---
 
+#### `ble_core_resume_background_scan`
+
+```c
+void ble_core_resume_background_scan(void);
+```
+
+Re-enter the background reconnect-scan state. No-op if a connect attempt is already in progress, a discovery scan is running, or `has_disconnected_cameras()` returns false.
+
+A successful first-camera connection does not, on its own, restart the background scan — the GAP `CONNECT` event simply clears `s_connecting`. Higher-level drivers must call this once the first camera's heavy GATT traffic (CCCD subscription) has settled so that additional configured cameras can be discovered without contending with the in-progress pairing sequence. `open_gopro_ble` invokes it at the end of CCCD subscription.
+
+**Must be called from the NimBLE host task** — typically from inside a NimBLE callback. Not posted through the event queue; the caller is responsible for being on the right task.
+
+---
+
 ## Scan State Machine
 
 Two scan modes run exclusively:

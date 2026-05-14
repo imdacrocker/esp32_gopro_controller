@@ -1178,8 +1178,11 @@ All handles are 128-bit GoPro UUIDs of the form `b5f9XXXX-aa8d-11e3-9046-0002a5d
 | `settings_resp_notify` | `0075` | Notify | Settings responses (acknowledged but not acted on) |
 | `query_write` | `0076` | Write | TLV queries (`GetStatusValue`) |
 | `query_resp_notify` | `0077` | Notify | Query responses (status updates) |
+| `nw_mgmt_write` | `0091` | Write | Network-management protobuf (`RequestPairingFinish`) |
+| `nw_mgmt_resp_notify` | `0092` | Notify | Network-management responses |
+| `wifi_ap_state_indicate` | `0005` | Indicate | WiFi AP state push (0/1); logged at debug level only |
 
-CCCD subscriptions are required on every connection — GoPro cameras do not persist CCCD state.
+CCCD subscriptions are required on every connection — GoPro cameras do not persist CCCD state. The discovery loop subscribes to **every** 128-bit notify/indicate characteristic it finds and matches the UUID to a handle field for routing; unmatched UUIDs are still subscribed but their notifications are logged and dropped, so adding a new camera characteristic in the future starts as a recognised log line rather than a silent miss.
 
 ### 15.4 Per-Camera Driver Context (`gopro_ble_ctx_t`)
 
@@ -1233,8 +1236,12 @@ on_encrypted(conn_handle, addr)
 GATT discovery
   1. ble_gattc_disc_all_svcs -> for each service:
      ble_gattc_disc_all_chrs -> record GP-00XX handles into ctx->gatt
-  2. Subscribe CCCDs on every notify/indicate characteristic (3 in our table)
-  3. All CCCDs done -> gopro_readiness_start(ctx)
+  2. Subscribe CCCDs on every notify/indicate characteristic
+     (4 notify channels GP-0073/0075/0077/0092 + GP-0005 WiFi AP State indicate)
+  3. All CCCDs done -> ble_core_resume_background_scan()
+                       (lets a second paired camera connect while this slot
+                        finishes readiness; no-op if no other slots disconnected)
+                    -> gopro_readiness_start(ctx)
 
 Readiness poll
   -> Send GetHardwareInfo (TLV 0x3C) to cmd_write (GP-0072) immediately
