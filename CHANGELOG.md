@@ -10,6 +10,12 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-05-16
+
+### Fixed:
+
+- Fixed a bug where the can_manager could override the requested camera status even if automatic logging was turned off
+
 ## [1.0.3] - 2026-05-13
 
 ### Fixed:
@@ -44,7 +50,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.0...v1.0.1
