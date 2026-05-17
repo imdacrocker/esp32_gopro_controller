@@ -134,7 +134,12 @@ static void watchdog_cb(void *arg)
 {
     /* 5 s elapsed without a 0x600 frame — suppress mismatch correction. */
     s_logging_state = LOGGING_STATE_UNKNOWN;
-    camera_manager_set_desired_recording_all(DESIRED_RECORDING_UNKNOWN);
+    /* When auto-control is off, leave each slot's desired_recording alone so
+     * manual /api/shutter intent (and the mismatch-correction safety net that
+     * goes with it) survive a CAN bus dropout. */
+    if (camera_manager_get_auto_control()) {
+        camera_manager_set_desired_recording_all(DESIRED_RECORDING_UNKNOWN);
+    }
     /* Callback is NOT fired with UNKNOWN (§14.2). */
 }
 
@@ -152,11 +157,15 @@ static void handle_logging_cmd(const can_rx_item_t *item)
     esp_timer_stop(s_watchdog_timer);
     esp_timer_start_once(s_watchdog_timer, WATCHDOG_TIMEOUT_US);
 
-    /* Notify camera_manager (idempotent — see §13.2). */
-    camera_manager_set_desired_recording_all(
-        state == LOGGING_STATE_LOGGING
-            ? DESIRED_RECORDING_START
-            : DESIRED_RECORDING_STOP);
+    /* When auto-control is off, the bus reports its state but must not drive
+     * camera recording intent — otherwise a 0x600 frame arriving right after a
+     * manual /api/shutter would flip desired_recording straight back. */
+    if (camera_manager_get_auto_control()) {
+        camera_manager_set_desired_recording_all(
+            state == LOGGING_STATE_LOGGING
+                ? DESIRED_RECORDING_START
+                : DESIRED_RECORDING_STOP);
+    }
 
     if (s_cbs.on_logging_state) {
         s_cbs.on_logging_state(state, s_cbs.on_logging_state_arg);
