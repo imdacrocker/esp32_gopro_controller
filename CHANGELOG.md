@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-05-16
+
 ### Fixed
 - **Fresh installs from `factory.bin` (ESP Launchpad / `flash_factory.ps1`)
   now boot directly into the main app instead of recovery.** ESP-IDF
@@ -113,7 +115,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...v1.0.3
