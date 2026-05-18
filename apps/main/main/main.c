@@ -12,6 +12,7 @@
 #include "gopro_wifi_rc.h"
 #include "can_manager.h"
 #include "http_server.h"
+#include "log_ring.h"
 
 static const char *TAG = "main";
 
@@ -81,6 +82,12 @@ static void on_station_ip_assigned(const uint8_t mac[6], uint32_t ip)
 
 void app_main(void)
 {
+    /* Diagnostic log capture (docs/design/log-capture.md). Must run before
+     * any other init so pre-NVS boot logs are captured. The ring starts
+     * ENABLED so this early window is caught; if the user's persisted
+     * preference is OFF (the default) the load call below will clear it. */
+    log_ring_init();
+
     ESP_LOGI(TAG, "boot: NimBLE core=%d, WiFi core=%d, channel=%d",
              CONFIG_BT_NIMBLE_PINNED_TO_CORE,
              CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0 ? 0 : 1,
@@ -92,6 +99,11 @@ void app_main(void)
         nvs_flash_erase();
         nvs_flash_init();
     }
+
+    /* Apply the persisted "Enable Logging" toggle. Default is OFF, so on a
+     * fresh device the small handful of pre-NVS log lines captured above
+     * are cleared here. */
+    log_ring_load_persisted_enabled();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());

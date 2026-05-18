@@ -115,21 +115,6 @@
     <div class="modal-section-title">Updates</div>
 
     <div class="settings-row">
-      <span class="settings-row-label">App version</span>
-      <span class="settings-row-value" id="upd-app-version">…</span>
-    </div>
-
-    <div class="settings-row">
-      <span class="settings-row-label">Built</span>
-      <span class="settings-row-value" id="upd-build-stamp">…</span>
-    </div>
-
-    <div class="settings-row">
-      <span class="settings-row-label">Recovery</span>
-      <span class="settings-row-value" id="upd-recovery-version">…</span>
-    </div>
-
-    <div class="settings-row">
       <span class="settings-row-label">Channel</span>
       <select class="settings-select" id="upd-channel-select" disabled>
         <option value="stable">Stable</option>
@@ -141,14 +126,47 @@
 
     <div id="upd-result" class="upd-result" hidden></div>
 
-    <details class="settings-advanced">
-      <summary>Advanced</summary>
-      <button class="settings-recovery-btn" id="upd-recovery-btn">Restart to Recovery</button>
-    </details>
+    <button class="settings-action-btn" id="advanced-btn">Advanced Settings</button>
+
+    <button class="settings-action-btn" id="about-btn">About</button>
 
     <button class="settings-reboot-btn" id="reboot-btn">Reboot</button>
   </div>
 </div>
+
+<!-- Advanced settings modal -->
+<div class="modal-overlay" id="advanced-overlay">
+  <div class="settings-modal">
+    <div class="modal-header">
+      <span class="modal-title">Advanced</span>
+      <button class="modal-done-btn" id="advanced-done">Done</button>
+    </div>
+
+    <div class="modal-section-title">Logging</div>
+
+    <div class="settings-row">
+      <span class="settings-row-label">Enable Logging</span>
+      <div class="toggle-wrap" id="log-toggle-wrap">
+        <div class="toggle-track" id="log-toggle-track">
+          <div class="toggle-thumb"></div>
+        </div>
+        <div class="toggle-state" id="log-toggle-state">Off</div>
+      </div>
+    </div>
+
+    <div id="log-controls" hidden>
+      <div class="settings-hint" id="log-stats-line" style="color:var(--text-secondary,#555);border-bottom:none;padding-top:2px"></div>
+      <button class="settings-action-btn" id="log-download-btn">Download log</button>
+      <button class="settings-action-btn" id="log-email-btn">Email log</button>
+      <button class="settings-action-btn" id="log-clear-btn">Clear log</button>
+    </div>
+
+    <div class="modal-section-title">Recovery</div>
+
+    <button class="settings-recovery-btn" id="upd-recovery-btn">Restart to Recovery</button>
+  </div>
+</div>
+
 
 <!-- Manage cameras modal (bottom sheet) -->
 <div class="modal-overlay" id="modal-overlay">

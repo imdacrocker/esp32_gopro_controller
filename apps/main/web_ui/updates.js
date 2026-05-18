@@ -61,9 +61,11 @@ async function loadPanel() {
 
     if (version) {
         currentAppVersion = version.app || null;
-        els.appVersion.textContent      = version.app || 'unknown';
-        els.recoveryVersion.textContent = version.recovery || 'unknown';
-        els.buildStamp.textContent      = (version.build_date && version.build_time)
+        /* Version display elements were removed when About moved to a native
+         * alert() — guard against missing DOM. */
+        if (els.appVersion)      els.appVersion.textContent      = version.app || 'unknown';
+        if (els.recoveryVersion) els.recoveryVersion.textContent = version.recovery || 'unknown';
+        if (els.buildStamp)      els.buildStamp.textContent      = (version.build_date && version.build_time)
             ? `${version.build_date} ${version.build_time}`
             : '—';
         if (version.ota_base_url && version.ota_repo_path) {

@@ -74,6 +74,101 @@ document.getElementById('can-bitrate-select').addEventListener('change', () => {
         .catch(() => {});
 });
 
+/* ---- Logging settings ---------------------------------------------------- */
+
+const SUPPORT_EMAIL = 'imdacrocker@gmail.com';
+
+function formatBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function applyLogEnabled(enabled) {
+    const track    = document.getElementById('log-toggle-track');
+    const state    = document.getElementById('log-toggle-state');
+    const controls = document.getElementById('log-controls');
+    if (enabled) {
+        track.classList.add('on');
+        state.textContent = 'On';
+        state.style.color = 'var(--green)';
+        controls.hidden   = false;
+        refreshLogStats();
+    } else {
+        track.classList.remove('on');
+        state.textContent = 'Off';
+        state.style.color = 'var(--gray-light)';
+        controls.hidden   = true;
+    }
+}
+
+function refreshLogStats() {
+    apiFetch('GET', '/api/logs/stats').then(d => {
+        const line = document.getElementById('log-stats-line');
+        if (!line) return;
+        const used = formatBytes(d.used);
+        const cap  = formatBytes(d.capacity);
+        let txt = `Ring: ${used} used / ${cap}`;
+        if (d.lines_dropped_total > 0) {
+            txt += ` · ${d.lines_dropped_total} dropped`;
+            line.style.color = 'var(--orange-dark)';
+        } else {
+            line.style.color = 'var(--text-secondary, #555)';
+        }
+        line.textContent = txt;
+    }).catch(() => {});
+}
+
+document.getElementById('log-toggle-wrap').addEventListener('click', () => {
+    const track   = document.getElementById('log-toggle-track');
+    const desired = !track.classList.contains('on');
+    // Optimistic UI; revert on failure.
+    applyLogEnabled(desired);
+    apiFetch('POST', '/api/settings/logging-enabled', { enabled: desired })
+        .then(d => applyLogEnabled(d.enabled))
+        .catch(() => {
+            applyLogEnabled(!desired);
+            setStatus('Failed to update logging setting');
+        });
+});
+
+document.getElementById('log-download-btn').addEventListener('click', () => {
+    window.location = '/api/logs/download';
+});
+
+document.getElementById('log-email-btn').addEventListener('click', () => {
+    const subject = 'GoPro Controller log';
+    const body =
+        'WHAT I WAS TRYING TO DO:\n\n\n' +
+        'WHAT HAPPENED:\n\n\n' +
+        'WHAT I EXPECTED INSTEAD:\n\n\n' +
+        '------------------------------------------------------------\n' +
+        'PLEASE ATTACH the log file that was just downloaded.\n' +
+        'Look in your Downloads folder for a file named like\n' +
+        'gopro-ctrl-XXXXXX-YYYYMMDD...txt\n' +
+        '------------------------------------------------------------\n\n' +
+        'PRIVACY NOTE: the attached log file contains device\n' +
+        'identifiers (MAC addresses of cameras paired with this\n' +
+        'controller, SSIDs of nearby GoPro WiFi networks, and the\n' +
+        'controller’s own network name). It does not contain WiFi\n' +
+        'passwords or location data. Please remove anything you\n' +
+        'consider sensitive before sending.\n';
+    const url = `mailto:${SUPPORT_EMAIL}` +
+        `?subject=${encodeURIComponent(subject)}` +
+        `&body=${encodeURIComponent(body)}`;
+    window.location = '/api/logs/download';
+    setTimeout(() => { window.location = url; }, 400);
+});
+
+document.getElementById('log-clear-btn').addEventListener('click', () => {
+    apiFetch('GET', '/api/logs/stats').then(d => {
+        if (!confirm(`Clear ${formatBytes(d.used)} of captured log data?`)) return;
+        apiFetch('POST', '/api/logs/clear')
+            .then(() => refreshLogStats())
+            .catch(() => setStatus('Failed to clear log'));
+    });
+});
+
 /* ---- Auto-control toggle ------------------------------------------------- */
 
 function applyAutoControl(enabled) {
@@ -349,11 +444,60 @@ function openSettings() {
         const hint = document.getElementById('can-bitrate-hint');
         if (hint) hint.hidden = true;
     }).catch(() => {});
+
 }
 
 function closeSettings() {
     settingsOverlay.classList.remove('open');
 }
+
+/* ---- Advanced modal ------------------------------------------------------ *
+ * Opening Advanced dismisses Settings so the two are never stacked. Closing
+ * Advanced (Done or click-outside) reopens Settings so the user lands back
+ * where they came from. */
+
+const advancedOverlay = document.getElementById('advanced-overlay');
+
+document.getElementById('advanced-btn').addEventListener('click', () => {
+    closeSettings();
+    openAdvanced();
+});
+document.getElementById('advanced-done').addEventListener('click', () => {
+    closeAdvanced();
+    settingsOverlay.classList.add('open');
+});
+advancedOverlay.addEventListener('click', e => {
+    if (e.target === advancedOverlay) {
+        closeAdvanced();
+        settingsOverlay.classList.add('open');
+    }
+});
+
+function openAdvanced() {
+    advancedOverlay.classList.add('open');
+    apiFetch('GET', '/api/settings/logging-enabled').then(d => {
+        applyLogEnabled(!!d.enabled);
+    }).catch(() => {});
+}
+
+function closeAdvanced() {
+    advancedOverlay.classList.remove('open');
+}
+
+/* ---- About dialog -------------------------------------------------------- *
+ * Uses the browser's native alert() for a simple OK-only dialog. */
+
+document.getElementById('about-btn').addEventListener('click', () => {
+    apiFetch('GET', '/api/version').then(v => {
+        const built = (v.build_date && v.build_time)
+            ? `${v.build_date} ${v.build_time}` : '—';
+        alert(
+            `Main App:     ${v.app || 'unknown'}\n` +
+            `Built:        ${built}\n` +
+            `Recovery App: ${v.recovery || 'unknown'}`
+        );
+    }).catch(() => alert('Failed to load version info.'));
+});
 
 // Sync system time from browser
 document.getElementById('datetime-btn').addEventListener('click', () => {

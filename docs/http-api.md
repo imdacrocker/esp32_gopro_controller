@@ -46,6 +46,24 @@ Full request/response contracts (bodies, error codes, state diagrams) are in [`d
 | GET | `/api/settings/timezone` | Current UTC offset in whole hours |
 | POST | `/api/settings/timezone` | Set UTC offset (`−12` to `+14`) |
 | POST | `/api/settings/datetime` | Set system time manually (only when no live source has won this boot session) |
+| GET | `/api/settings/can-bitrate` | Current CAN bus baud rate (bps) |
+| POST | `/api/settings/can-bitrate` | Set CAN bus baud rate; persisted to NVS, applied on reboot |
+| GET | `/api/settings/logging-enabled` | Whether the diagnostic log ring is capturing |
+| POST | `/api/settings/logging-enabled` | `{ enabled: bool }` — flip the toggle. ON → OFF additionally clears the ring before responding. Persisted to NVS. |
+
+## Diagnostic logs
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/logs/download` | Streams the current ring contents as `text/plain` with a header block (device MAC, firmware, captured-UTC, uptime, ring stats). `Content-Disposition: attachment; filename="gopro-ctrl-<MAC6>-<stamp>.txt"`. Chunked transfer — no large heap allocation. |
+| POST | `/api/logs/clear` | Empties the ring. Returns `{ cleared_bytes: N }`. Lifetime counters preserved. |
+| GET | `/api/logs/stats` | `{ capacity, used, bytes_written_total, lines_dropped_total, enabled }` |
+
+Endpoints respond normally even when logging is disabled (ring will simply
+be empty). The web UI hides the Download / Email / Clear buttons in the
+disabled state — but the endpoints are not gated server-side.
+
+See [`design/log-capture.md`](design/log-capture.md) for the full design.
 
 ## OTA
 
