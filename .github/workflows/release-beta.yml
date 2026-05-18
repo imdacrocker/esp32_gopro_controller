@@ -69,12 +69,14 @@ jobs:
             --output release/manifest.json
 
       - name: Stamp ota_data_initial to select ota_0
-        # IDF emits ota_data_initial.bin as all-0xFF, which the bootloader
-        # interprets as "boot factory" when a factory partition exists.
-        # Rewrite it to a valid seq=1 entry so first boot lands in the
-        # main app instead of recovery.
+        # IDF emits apps/main/build/ota_data_initial.bin as all-0xFF, which
+        # the bootloader interprets as "boot factory" when a factory
+        # partition exists. We emit a valid seq=1 entry into release/ —
+        # writing into apps/main/build/ would fail with EACCES because the
+        # esp-idf-ci-action runs the build inside Docker and files there
+        # are owned by the container UID, not the runner user.
         run: |
-          python tools/release/make_factory_otadata.py apps/main/build/ota_data_initial.bin
+          python tools/release/make_factory_otadata.py release/ota_data_initial.bin
 
       - name: Merge factory image
         # One-shot image flashable at 0x0 — what ESP Launchpad and
@@ -89,7 +91,7 @@ jobs:
             --flash_mode dio --flash_size 8MB --flash_freq 80m \
             0x000000 apps/main/build/bootloader/bootloader.bin \
             0x008000 apps/main/build/partition_table/partition-table.bin \
-            0x00F000 apps/main/build/ota_data_initial.bin \
+            0x00F000 release/ota_data_initial.bin \
             0x020000 apps/recovery/build/esp32_gopro_canbus_recovery.bin \
             0x0E0000 apps/main/build/esp32_gopro_canbus_controller_v2.bin \
             0x290000 apps/main/build/storage.bin
