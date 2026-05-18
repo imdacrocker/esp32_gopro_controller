@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-05-16
+
 ### Added
 - **Diagnostic log capture for user reports.** A 64 KB in-RAM ring buffer
   collects all `ESP_LOG` output (DEBUG and above). Toggle "Enable Logging"
@@ -93,7 +95,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.1...v1.0.2
