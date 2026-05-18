@@ -505,7 +505,9 @@ button {
 
 .modal-overlay.open { display: flex; }
 
-#settings-overlay { align-items: flex-start; justify-content: center; }
+#settings-overlay,
+#advanced-overlay,
+#about-overlay    { align-items: flex-start; justify-content: center; }
 #modal-overlay    { align-items: flex-end;   justify-content: center; }
 
 .modal-header {
@@ -752,43 +754,10 @@ button {
   transition: width 0.2s ease;
 }
 
-.settings-advanced {
-  margin: 16px 16px 0;
-  padding: 0;
-  border-top: 1px solid var(--gray-border-light);
-}
-
-.settings-advanced > summary {
-  display: flex;
-  align-items: center;
-  padding: 14px 0;
-  min-height: 48px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-secondary, #666);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.06);
-}
-
-.settings-advanced > summary:active { background: rgba(0, 0, 0, 0.04); }
-
-.settings-advanced > summary::-webkit-details-marker { display: none; }
-
-.settings-advanced > summary::before {
-  content: "▶";
-  font-size: 0.85rem;
-  margin-right: 10px;
-  transition: transform 0.15s ease;
-}
-
-.settings-advanced[open] > summary::before { transform: rotate(90deg); }
-
 .settings-recovery-btn {
   display: block;
-  width: 100%;
-  margin: 0 0 12px;
+  width: calc(100% - 32px);
+  margin: 12px 16px 0;
   background: var(--orange-dark);
   border: none;
   color: var(--white);

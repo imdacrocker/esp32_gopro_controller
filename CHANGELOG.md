@@ -10,6 +10,36 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Added
+- **Diagnostic log capture for user reports.** A 64 KB in-RAM ring buffer
+  collects all `ESP_LOG` output (DEBUG and above). Toggle "Enable Logging"
+  in Settings → Advanced Settings to start capturing, then download the
+  log as a text file or hand it to the **Email log** button — which kicks
+  off a download and opens your mail app pre-filled to the maintainer with
+  attach-the-file instructions and a privacy notice covering what the log
+  contains. Off by default; persisted across reboots. See
+  [`docs/design/log-capture.md`](docs/design/log-capture.md).
+- **About dialog** in Settings showing main app version, build date/time,
+  and recovery app version.
+- **Soft recovery fallback.** If the LittleFS storage partition is wiped
+  or corrupted (auto-reformatted empty), the main app now reboots into
+  recovery automatically rather than serving a blank "no UI" page. The
+  user can re-upload the web UI from recovery's embedded form without
+  needing serial access.
+
+### Changed
+- **Settings menu reorganized.** Logging controls, Restart-to-Recovery,
+  and other power-user controls moved into a new **Advanced Settings**
+  modal. The "App version / Built / Recovery" rows moved into the new
+  About dialog. The collapsing "Advanced" disclosure is gone — Advanced
+  Settings is now a blue button. Opening Advanced Settings dismisses the
+  Settings modal so the two don't stack; closing Advanced Settings returns
+  you to Settings.
+- Web UI static-asset reads now log a clear diagnostic to the serial
+  console (with errno + free-heap state) when `fopen` or `fread` fails,
+  rather than silently falling back to the "Web UI not flashed"
+  placeholder. (The placeholder still serves for genuinely missing files.)
+
 ## [1.0.4] - 2026-05-16
 
 ### Fixed:

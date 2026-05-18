@@ -55,6 +55,13 @@ CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y    # ceiling for runtime override (§22.6)
 CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
 CONFIG_LOG_COLORS=y                   # ANSI colors over USB serial
 
+# Diagnostic log ring buffer (docs/design/log-capture.md).
+# Kept at 64 KB because 128 KB starved the heap (largest contiguous block
+# dropped to ~7.7 KB, smaller than the smallest web UI file). To enlarge,
+# move the ring to PSRAM rather than growing static DRAM. See §10 of
+# docs/design/log-capture.md.
+CONFIG_LOG_RING_SIZE_KB=64
+
 ## POWER SETTINGS
 # Decrease brownout sensitivity from 7 to 5
 #CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y

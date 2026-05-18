@@ -54,7 +54,8 @@ The two apps are independent ESP-IDF projects with their own `CMakeLists.txt` an
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                          app_main                               │
-│  NVS → netif → event loop → components → AP → http_server      │
+│  log_ring → NVS → netif → event loop → components → AP →        │
+│             http_server                                         │
 │  (30 s rollback timer disarmed once http_server is up)          │
 └────────┬──────────────────────────┬────────────────────────────┘
          │                          │
@@ -122,7 +123,8 @@ BLE and WiFi are pinned to opposite cores to reduce cache thrashing and radio co
 | [`open_gopro_ble`](../apps/main/components/gopro/open_gopro_ble/README.md) | Discovery, pairing, BLE control driver for Hero 9+ |
 | [`gopro_wifi_rc`](../apps/main/components/gopro/gopro_wifi_rc/README.md) | RC-emulation driver over WiFi (Hero 4) |
 | [`can_manager`](../apps/main/components/can_manager/README.md) | TWAI node, 0x600/0x602 RX, 0x601 TX at 5 Hz, GPS UTC, NVS persistence |
-| [`http_server`](../apps/main/components/http_server) | esp_httpd, LittleFS web UI, all `/api/` handlers |
+| [`http_server`](../apps/main/components/http_server) | esp_httpd, LittleFS web UI, all `/api/` handlers, soft recovery fallback when LittleFS is empty |
+| [`log_ring`](../apps/main/components/log_ring) | In-RAM diagnostic log ring buffer for user reports; vprintf hook, NVS-persisted enable toggle (default OFF). See [`design/log-capture.md`](design/log-capture.md) |
 
 ### Recovery-app only (`apps/recovery/components/`)
 
@@ -136,7 +138,9 @@ BLE and WiFi are pinned to opposite cores to reduce cache thrashing and radio co
 
 ```c
 app_main()
+ 0. log_ring_init()                          ← installs vprintf hook BEFORE NVS
  1. nvs_flash_init()
+ 1a. log_ring_load_persisted_enabled()       ← applies NVS toggle (default OFF)
  2. esp_netif_init()
  3. esp_event_loop_create_default()
  4. camera_manager_init()
@@ -148,7 +152,7 @@ app_main()
 10. wifi_manager_set_callbacks(...)
 11. wifi_manager_init()
 12. wifi_manager_wait_for_ap_ready()
-13. http_server_init()
+13. http_server_init()                       ← also: reboots to factory if /www/index.html is missing
 14. arm 30 s one-shot timer → esp_ota_mark_app_valid_cancel_rollback()
 ```
 

@@ -16,6 +16,7 @@ void api_rc_register(httpd_handle_t server);
 void api_settings_register(httpd_handle_t server);
 void api_system_register(httpd_handle_t server);
 void api_ota_register(httpd_handle_t server);
+void api_logs_register(httpd_handle_t server);
 
 /* ---- Shared helpers ------------------------------------------------------ */
 

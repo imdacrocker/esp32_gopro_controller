@@ -36,7 +36,8 @@ report flow. Companion to [`camera-manager.md`](camera-manager.md),
 | Topic | Decision |
 |---|---|
 | Capture scope | All `ESP_LOG*` output, hooked via `esp_log_set_vprintf` |
-| Storage | **64 KB static RAM ring** in internal SRAM (`.bss`), oldest-line eviction |
+| Storage | **64 KB static RAM ring** in internal SRAM (`.bss`), oldest-line eviction. (Started at 64 KB; bumped to 128 KB after first field test, then reverted: 128 KB shrank the largest contiguous heap block to ~7.7 KB and broke `read_file()` for every web UI asset. To enlarge further, move the ring to PSRAM rather than growing `.bss`.) |
+| Noisy-tag silencing | A short allow-list of known-noisy ESP-IDF internal tags (`httpd_*`, `vfs_calls`, `efuse`, `intr_alloc`, `temperature_sensor_hal`, `nvs`) is held at `ESP_LOG_INFO` even though the global runtime level is `DEBUG`. Cuts ring volume by ~85% — the first field test was 99.9% IDF internals with zero useful content. |
 | Persistence | None. Reboot clears the ring. |
 | Console behaviour | UART continues to show INFO+ only; ring receives DEBUG+ |
 | Compile-time max level | `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` (VERBOSE excluded) |
@@ -48,6 +49,8 @@ report flow. Companion to [`camera-manager.md`](camera-manager.md),
 | Email recipient | Hard-coded `imdacrocker@gmail.com` for v1 (Kconfig'd for later override) |
 | Email body | Templated mailto with privacy warning + bold attach-the-file instruction |
 | Compression on download | Skipped for v1. Add later if attachment size becomes a problem. |
+| User-facing kill switch | "Enable Logging" toggle in the **Advanced Settings** modal (one step deeper than the gear menu — gear → Advanced Settings). Default **OFF**. Persisted in NVS. When OFF: hook stops writing to ring, ring is cleared, and the Download/Email/Clear buttons are hidden. |
+| Setting location | The toggle and three action buttons live inside the Advanced Settings modal, alongside Restart-to-Recovery. (Originally placed directly in Settings; relocated 2026-05-17 when Advanced Settings became its own modal.) |
 | Authentication | None |
 
 ---
@@ -57,17 +60,26 @@ report flow. Companion to [`camera-manager.md`](camera-manager.md),
 ```
   any task                        ┌──────────────────┐
   calls ESP_LOGx ───► esp_log ───►│ log_tee vprintf  │──► stdout (UART)
-                                  │  hook            │     [I/W/E only]
+                                  │  hook            │     [I/W/E only, always]
                                   │                  │
-                                  │                  │──► log_ring  (RAM, 64 KB)
-                                  └──────────────────┘     [all levels]
-                                                                 ▲
-                                                                 │
-                                  ┌──────────────────────────────┘
-                                  │
-   browser ── GET /api/logs/download ──► api_logs.c ──► log_ring_snapshot()
+                                  │  if enabled:     │──► log_ring  (RAM, 64 KB)
+                                  │                  │     [all levels]
+                                  └──────────────────┘
+                                           ▲
+                                           │ s_enabled (atomic bool)
+                                           │
+                                  ┌────────┴──────────────────────┐
+                                  │                               │
+   browser ── POST /api/settings/logging-enabled ──► api_settings ─┤
+                                                                   │
+   browser ── GET /api/logs/download ──► api_logs.c ──► log_ring_stream()
    browser ── POST /api/logs/clear  ──► api_logs.c ──► log_ring_clear()
 ```
+
+The hook is **always installed at boot** regardless of the toggle state — this
+guarantees the UART console keeps working and that flipping the toggle ON
+mid-session immediately starts capturing without a reboot. The toggle only
+gates the ring write; UART echo is unconditional.
 
 The `log_ring` component owns the buffer, the `vprintf` hook, the mutex, and
 the snapshot/clear API. `http_server` is the only other component that depends
@@ -84,13 +96,35 @@ Lives at `apps/main/components/log_ring/`. Recovery does **not** depend on it
 
 ```c
 /* Install the esp_log vprintf hook and raise the runtime level to DEBUG.
+ * Does NOT load the NVS-persisted enable state — call log_ring_set_enabled()
+ * after NVS is up. The ring starts enabled by default so any logs emitted
+ * before NVS init are still captured.
  * Idempotent. Safe to call as the very first line of app_main(). */
 esp_err_t log_ring_init(void);
 
-/* Snapshot the current ring contents into a freshly-malloc'd, null-terminated
- * heap buffer. Returns ESP_OK and sets *out / *out_len. Caller frees(*out).
- * Returned bytes are chronological (oldest first). */
-esp_err_t log_ring_snapshot(char **out, size_t *out_len);
+/* Enable/disable ring capture at runtime. When transitioning ON→OFF, the
+ * ring is cleared as part of the same call. Does NOT touch NVS — call
+ * log_ring_save_enabled_to_nvs() separately to persist. UART echo is
+ * unaffected; this only gates writes into the ring. */
+void log_ring_set_enabled(bool enabled);
+
+bool log_ring_is_enabled(void);
+
+/* Persist the current enable state to NVS (namespace "logring", key "enabled"). */
+esp_err_t log_ring_save_enabled_to_nvs(void);
+
+/* Read the persisted enable state from NVS and apply it via
+ * log_ring_set_enabled(). Missing key → default OFF.
+ * Call once at boot, immediately after nvs_flash_init(). */
+void log_ring_load_persisted_enabled(void);
+
+/* Stream the ring contents to a callback in ~2 KB chunks. The internal
+ * mutex is taken only per-chunk, so log writes can interleave; any bytes
+ * evicted mid-stream are skipped. No heap allocation — chosen over the
+ * earlier "malloc the whole snapshot" plan after a 64 KB malloc failed
+ * against a fragmented heap (200 KB free total but no contiguous block). */
+typedef esp_err_t (*log_ring_write_cb_t)(void *arg, const char *data, size_t n);
+esp_err_t log_ring_stream(log_ring_write_cb_t cb, void *arg);
 
 /* Reset head/tail; counters preserved except 'used' which goes to 0. */
 void log_ring_clear(void);
@@ -120,6 +154,7 @@ static uint64_t       s_total_dropped;
 static uint32_t       s_oldest_ts_ms;
 static SemaphoreHandle_t s_mtx;               /* recursive: no — hook never re-enters */
 static vprintf_like_t s_chain;                /* previous vprintf, called for UART echo */
+static atomic_bool    s_enabled = true;       /* toggle; starts ON for boot capture */
 ```
 
 ### Eviction rule
@@ -152,10 +187,13 @@ static int log_tee(const char *fmt, va_list args)
     if (n <= 0) return n;
     if ((size_t)n >= sizeof(buf)) n = sizeof(buf) - 1;
 
-    ring_write(buf, (size_t)n);
+    if (atomic_load(&s_enabled)) {
+        ring_write(buf, (size_t)n);
+    }
 
     /* Echo to UART for INFO and above only. ESP-IDF formats each line as
-     * "<LEVEL_CHAR> (<ts>) <tag>: <msg>\n", so buf[0] is the level letter. */
+     * "<LEVEL_CHAR> (<ts>) <tag>: <msg>\n", so buf[0] is the level letter.
+     * UART echo is unconditional — independent of the ring's enable flag. */
     if (buf[0] != 'D' && buf[0] != 'V') {
         fwrite(buf, 1, (size_t)n, stdout);
         fflush(stdout);
@@ -206,6 +244,28 @@ endmenu
 
 ---
 
+## 4a. Enable-toggle persistence
+
+User-visible toggle in the Settings modal, persisted across reboots via NVS.
+
+| Property | Value |
+|---|---|
+| NVS namespace | `logring` (owned by the `log_ring` component) |
+| NVS key | `enabled` |
+| Type | `u8` (0 = disabled, 1 = enabled) |
+| Default if key missing | `0` (disabled) |
+| Behaviour on ON → OFF | `log_ring_clear()` runs as part of `log_ring_set_enabled(false)`, atomically with the flag flip, so by the time a reader sees the flag as false the ring is also empty. |
+| Behaviour on OFF → ON | Flag flips. Ring is already empty (cleared on the previous OFF transition, or empty from boot). Capture resumes immediately. |
+| Boot behaviour | Hook installs with `s_enabled=true` so very-early boot logs are captured. After NVS init, `app_main` calls `log_ring_load_persisted_enabled()` which reads the NVS key and applies the toggle; if the persisted value is OFF (the default), the boot logs are cleared at that moment. Acceptable tradeoff — early boot logs are mostly noise, and the alternative (defer the hook until after NVS) drops messages from `nvs_flash_init()` itself, which is exactly the kind of failure a user might be trying to report. |
+
+NVS persistence is owned by `log_ring` itself, matching the codebase pattern
+where each component manages its own persistent settings (e.g. `can_manager`
+owns timezone and CAN-bitrate NVS). `api_settings.c` just calls
+`log_ring_set_enabled()` + `log_ring_save_enabled_to_nvs()` on POST and
+`log_ring_is_enabled()` on GET.
+
+---
+
 ## 5. sdkconfig changes
 
 Add to `apps/main/sdkconfig.defaults`:
@@ -230,8 +290,16 @@ subsequent subsystem.
 ```c
 void app_main(void)
 {
-    log_ring_init();                /* installs hook + raises level to DEBUG */
+    log_ring_init();                /* installs hook + raises level to DEBUG; ring starts enabled */
     ESP_ERROR_CHECK(nvs_flash_init());
+
+    /* Apply the persisted logging toggle. Done here, immediately after NVS,
+     * so subsequent subsystem init logs honour the user's setting. If the
+     * persisted value is OFF (the default for a fresh device), the small
+     * handful of pre-NVS log lines already captured will be cleared by this
+     * call — acceptable. */
+    log_ring_load_persisted_enabled();
+
     /* ... existing boot order continues ... */
 }
 ```
@@ -291,6 +359,27 @@ Free the snapshot before returning.
   }
   ```
 
+### `GET /api/settings/logging-enabled`
+
+- Lives in `api_settings.c` alongside the other settings endpoints.
+- Returns `{ "enabled": true|false }` from NVS (defaults to `true` if unset).
+
+### `POST /api/settings/logging-enabled`
+
+- Body: `{ "enabled": true|false }`.
+- Writes NVS, calls `log_ring_set_enabled()`, returns the new state.
+- When transitioning to `false`, the ring is cleared inside
+  `log_ring_set_enabled()` before the function returns — by the time the HTTP
+  response goes out, the data is already gone.
+
+### Behaviour when logging is disabled
+
+- `GET /api/logs/download`, `POST /api/logs/clear`, `GET /api/logs/stats` all
+  still respond normally. Download returns just the header block followed by
+  an empty body. The UI hides the buttons in the disabled state, but the
+  endpoints are not gated server-side — if someone hits them directly nothing
+  bad happens, they just get an empty ring.
+
 ### Out of v1 scope
 
 - `GET /api/logs` (inline view) — UI can fetch the download URL via XHR if it
@@ -303,24 +392,73 @@ Free the snapshot before returning.
 
 ## 8. Web UI
 
-New section in the existing single-page app, placed near the bottom (above the
-fixed action bar). Follows the existing visual conventions documented in
-[`web-ui.md`](web-ui.md).
+All log-related controls live inside the **Advanced Settings** modal —
+reachable via gear icon → Advanced Settings button. There is no standalone
+Diagnostics section on the home page. Follows the visual conventions
+documented in [`web-ui.md`](web-ui.md) §12.2.
 
-### Section markup (conceptual)
+### Advanced Settings modal — Logging section
 
 ```
-┌─ Diagnostics ──────────────────────────────────────────┐
-│                                                        │
-│  [ Download log ]  [ Email log ]  [ Clear log ]        │
-│                                                        │
-│  Ring: 11.2 KB used / 64 KB · 0 dropped                │
-│                                                        │
-└────────────────────────────────────────────────────────┘
+┌─ Advanced ───────────────────────────────────────────────┐
+│  ── Logging ──────────────────────────────────────────── │
+│                                                          │
+│  Enable Logging                          [ ●━━○ ON ]     │
+│                                                          │
+│  (when ON, the rest of the section is visible:)          │
+│                                                          │
+│  Ring: 11.2 KB used / 64 KB · 0 dropped                  │
+│                                                          │
+│  [ Download log ]                                        │
+│  [ Email log ]                                           │
+│  [ Clear log ]                                           │
+│                                                          │
+│  ── Recovery ─────────────────────────────────────────── │
+│                                                          │
+│  [ Restart to Recovery ]   (orange)                      │
+└──────────────────────────────────────────────────────────┘
 ```
 
-Stats line polled from `GET /api/logs/stats` on section render and after
-Clear. Dropped count rendered in orange when non-zero.
+Opening Advanced Settings dismisses the Settings modal (the two never
+stack). Closing Advanced returns to Settings.
+
+When the toggle is **OFF**, the stats line and all three buttons are hidden
+(via the existing `[hidden]` convention from `web-ui.md` §2). The toggle
+itself stays visible so the user can turn it back on.
+
+### Toggle interaction
+
+- Advanced opens → fetch `GET /api/settings/logging-enabled`, set toggle state.
+- User flips toggle → optimistic UI update, `POST
+  /api/settings/logging-enabled` with new value. On failure, revert with a
+  toast.
+- When transitioning ON → OFF, the buttons hide immediately (no animation
+  needed). The server-side `log_ring_clear()` runs as part of the POST.
+- When transitioning OFF → ON, the buttons appear and the stats line begins
+  showing the (empty) ring filling up.
+
+### Button behaviours
+
+**Download log**
+```js
+window.location = '/api/logs/download';
+```
+
+**Email log** — combined behaviour:
+```js
+window.location = '/api/logs/download';
+setTimeout(() => { window.location = mailtoUrl; }, 400);
+```
+
+**Clear log** — confirm dialog ("Clear 11.2 KB of captured log data?") →
+`POST /api/logs/clear` → re-poll stats.
+
+### Stats polling
+
+`GET /api/logs/stats` is called when Advanced opens (only if toggle is ON),
+and again after a Clear. No background polling — the modal is short-lived
+and live updates aren't worth the noise. Dropped count rendered in orange
+when non-zero.
 
 ### Button behaviours
 
@@ -410,14 +548,20 @@ before sending. A pre-shipping pass over every `ESP_LOGx` call site should
 confirm no secret material ever reaches the formatter. This is a one-time
 audit, not a recurring task — but worth re-running after large refactors.
 
+**Kill switch.** The "Enable Logging" toggle in the Advanced Settings modal
+lets a privacy-conscious user disable capture entirely. Toggling OFF clears the ring
+immediately and persists the preference across reboots, so once off it stays
+off until the user opts back in. UART output is unaffected (developer
+console).
+
 ---
 
 ## 10. Sizing & cost
 
 | Resource | Cost |
 |---|---|
-| RAM (static) | 64 KB ring + ~40 B mutex + ~40 B counters ≈ 64.1 KB |
-| RAM (heap, transient) | One snapshot allocation per download ≈ up to 64 KB |
+| RAM (static) | 64 KB ring + ~40 B mutex + ~50 B counters ≈ 64.1 KB. **Hard ceiling on internal-DRAM rings is ~64 KB on this build** — 128 KB starved the heap. Bigger needs PSRAM. |
+| RAM (heap, transient) | None — downloads stream from a 2 KB stack buffer |
 | Flash (code) | log_ring + api_logs ≈ 2 KB |
 | Flash (DEBUG strings) | +1–3 KB across all components, varies with how chatty existing code is |
 | CPU | One memcpy + mutex pair per log line. Negligible relative to existing serial output. |
@@ -434,12 +578,15 @@ ring without sacrificing capture history.
 
 | Condition | Behaviour |
 |---|---|
-| Snapshot malloc fails | `/api/logs/download` returns 500 with a short text body. Ring untouched. |
 | Mutex take fails in hook | Line dropped, `lines_dropped_total` incremented, UART echo still attempted. |
-| Browser cancels download mid-stream | esp_http_server tears the socket; snapshot buffer is freed by the handler's cleanup path. |
+| Browser cancels download mid-stream | `httpd_resp_send_chunk` returns non-OK, `log_ring_stream` propagates it back, handler terminates the chunked response. No heap to clean up. |
 | Ring fills during a busy moment | Oldest whole lines evicted to make room. `lines_dropped_total` ticks up. The UI surfaces this as the orange "dropped" indicator so testers know context was lost. |
+| Writes evict bytes during a download | Stream skips ahead past the evicted absolute byte range. Result: a slightly-truncated file, never duplicated content, never a malloc failure. |
 | `ESP_EARLY_LOGx` from boot ROM | Not captured (uses pre-vprintf path). Acceptable — these are static strings from the bootloader, not interesting for app diagnostics. |
 | Log line >256 bytes | Truncated at 256. Truncation is silent. |
+| Logging disabled mid-session | Ring cleared as part of the same call. An in-flight download stream that already snapshotted the end-of-range will keep sending until that range is reached; new requests see an empty ring. |
+| NVS read fails at boot | Treat as `enabled=true` (default). Logged via `ESP_LOGW` from `api_settings`. |
+| NVS write fails on toggle | API returns 500, UI reverts the toggle and shows a toast. The in-memory flag is **not** updated, so behaviour stays consistent with what NVS holds. |
 
 ---
 
@@ -464,16 +611,32 @@ ring without sacrificing capture history.
 
 ## 13. Implementation order
 
-1. Create `log_ring` component (header, ring, hook, Kconfig, CMakeLists).
-2. Add `log_ring_init()` as the first line of `app_main`. Verify UART output
-   is unchanged and DEBUG lines appear in a snapshot from a temporary debug
-   endpoint.
-3. Flip the two sdkconfig defaults (`LOG_MAXIMUM_LEVEL_DEBUG`,
-   `LOG_DEFAULT_LEVEL_INFO`).
-4. Add `api_logs.c`, register from `driver.c`, bump `max_uri_handlers`.
-5. One-time audit pass over `ESP_LOG*` callers for secret material.
-6. Add the Diagnostics section to the web UI with the three buttons and the
-   stats line.
-7. Update [`web-ui.md`](web-ui.md) §-by-§ to reflect the new section, and
-   update [`memory/project_http_server.md`](../../memory/project_http_server.md)
-   with the three new endpoints and `max_uri_handlers` value.
+1. Create `log_ring` component: `include/log_ring.h`, `log_ring.c`, `Kconfig`,
+   `CMakeLists.txt`. Owns the ring, the vprintf hook, the enable flag, **and
+   its own NVS persistence** (namespace `logring`, key `enabled`).
+2. Wire `log_ring_init()` as the first call in `app_main`, and
+   `log_ring_load_persisted_enabled()` immediately after `nvs_flash_init()`.
+   Add `log_ring` to `apps/main/main/CMakeLists.txt` REQUIRES.
+3. **sdkconfig:** existing defaults already pair `LOG_DEFAULT_LEVEL_INFO=y`
+   with `LOG_MAXIMUM_LEVEL_VERBOSE=y` — no change needed.
+4. Add `api_logs.c` (three endpoints), register from `driver.c`, bump
+   `max_uri_handlers`. Add `log_ring` to `http_server` REQUIRES.
+5. Add `GET`/`POST /api/settings/logging-enabled` to `api_settings.c` —
+   these are thin wrappers around `log_ring_is_enabled()`,
+   `log_ring_set_enabled()`, and `log_ring_save_enabled_to_nvs()`.
+6. One-time audit pass over `ESP_LOG*` callers for secret material.
+7. Add the Logging section inside the Advanced Settings modal (web UI): the
+   toggle, the conditionally-rendered stats line, and the three buttons.
+8. Update [`web-ui.md`](web-ui.md) §12.2 to reflect the new Advanced modal,
+   and update
+   [`memory/project_http_server.md`](../../memory/project_http_server.md)
+   with the new endpoints and `max_uri_handlers` value.
+
+**Status as of 2026-05-17:** firmware + web UI both implemented. Capture
+ON/OFF, download, email handoff, and clear all functional. Field-tested with
+a HERO13 Black; ring volume calibrated against real captures (silenced
+tags: `httpd*`, `vfs_calls`, `efuse`, `intr_alloc`, `temperature_sensor_hal`,
+`nvs`, `event`).
+
+Steps 1–5 are firmware (this PR). Step 6 is housekeeping. Steps 7–8 are
+the web-UI follow-up after the API has been exercised in dev.

@@ -1,0 +1,11 @@
+menu "Log Ring"
+
+config LOG_RING_SIZE_KB
+    int "Ring buffer size (KB)"
+    default 64
+    range 8 256
+    help
+        Size of the in-RAM log ring buffer. Consumes static (.bss) memory.
+        Larger values capture more history at the cost of internal SRAM.
+
+endmenu

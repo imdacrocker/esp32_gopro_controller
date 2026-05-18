@@ -17,6 +17,7 @@ Treat this as the source of truth — companion to [`camera-manager.md`](camera-
 | `min_recovery_version` | Removed — no client- or server-side enforcement. Add back if a real incompatibility ever emerges. |
 | SHA-skip | Recovery skips writing partitions whose existing SHA already matches incoming (free ergonomic upgrade) |
 | Hardware recovery button | Future TODO — see §15 |
+| Soft recovery fallback (UI-missing) | `http_server_init` checks `stat("/www/index.html")` after LittleFS mount; if missing or zero-size, calls `esp_ota_set_boot_partition(factory)` and reboots. Covers the case where `erase-flash` wiped the storage partition or LittleFS corrupted enough to auto-reformat empty — the main app would otherwise be a brick (no UI, no way to upload a new one). See `http_server/driver.c` `reboot_to_factory()`. |
 | SoftAP credentials | Shared SSID/PSK baked into `wifi_manager` defaults; both apps inherit |
 | Auto-update reach | **Both** main and recovery offer the auto-update flow (channel picker → check → install). Recovery additionally keeps the manual file-upload form. |
 | OTA base URL | Compile-time only via each app's own `CONFIG_OTA_BASE_URL`. No runtime override; if the URL ever moves, ship a new release and users on stale recovery fall back to manual upload. |

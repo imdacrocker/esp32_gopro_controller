@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "log_ring.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        freertos
+        nvs_flash
+)

@@ -426,25 +426,54 @@ padding: 0 0 1.5em
 
 Clicking the overlay backdrop (not the modal card) also closes the modal.
 
-**Section 1 — Device:**
-- Title: "DEVICE", `0.65rem`, UPPERCASE, color `#999`
-- Single row: label "Time Zone" left, `<select>` right
-  - Select options: UTC-12 … UTC+14 (whole hours), populated by `buildTimezoneDropdown()` on page load
-  - Labels: "UTC-12" … "UTC" … "UTC+14"
+### 12.1 Sections (top to bottom)
+
+**Device**
+- Time Zone — `<select>` UTC-12 … UTC+14 (whole hours), populated by `buildTimezoneDropdown()` on page load.
   - On change: `POST /api/settings/timezone` with `{ tz_offset_hours: int }`
-  - On open: `GET /api/settings/timezone` → sets selected value
+  - On open: `GET /api/settings/timezone` → selects value
+- CAN Baud Rate — `<select>` with 50k/100k/125k/250k/500k/1M options.
+  - On change: `POST /api/settings/can-bitrate` with `{ bitrate_bps: N }` and reveal an orange "Reboot to apply new CAN baud rate" hint until the bitrate matches the value at open.
+  - On open: `GET /api/settings/can-bitrate` → selects value, hides hint.
 
-The Settings modal no longer contains a "Set Date & Time" row — the manual sync button moved to the System Time section header on the home screen (see §8). `openSettings()` no longer fetches `/api/utc`. The modal now contains only the Time Zone select and the Reboot button.
+**Updates**
+- Channel `<select>` (`stable` / `beta`). On change: `POST /api/ota/channel`.
+- "Check for updates" `.settings-action-btn` (blue, full-width minus margins).
+- `#upd-result` block — populated by `updates.js` when a check completes (info / success / error states).
 
-**Reboot button:**
+**Action buttons** (each a blue `.settings-action-btn`, stacked, full-width minus 16 px side margins):
+- **Advanced Settings** → opens the Advanced modal (§12.2). Dismisses Settings on open so the two are never stacked; closing Advanced reopens Settings.
+- **About** → opens a native browser `alert()` (no modal) with three lines: "Main App: <version>", "Built: <date> <time>", "Recovery App: <version>". Just an OK button. Backed by `GET /api/version`.
+
+**Reboot button** (bottom of modal, orange):
 ```
 display: block, width: calc(100% - 32px), margin: 16px 16px 0
-background: #e67e22 (orange), color: #fff
+background: #e67e22 (orange-dark), color: #fff
 font-size: 0.88rem, font-weight: 700, min-height: 48px, border-radius: 8px
 ```
 - Confirm dialog: "Reboot Controller?\n\nThe device will restart. Paired cameras and settings will be preserved."
 - On confirm: `POST /api/reboot`, disable button, show "Rebooting…" with dot animation
 - After 3s: `location.reload()`
+
+### 12.2 Advanced Settings Modal
+
+Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings. Always exactly one of {Settings, Advanced} is visible — never both.
+
+- Opened from the "Advanced Settings" button in Settings; Settings closes simultaneously.
+- Closed via the Done button or click-outside; Settings reopens.
+
+**Logging section** — collects diagnostic logs for support reports. See [`log-capture.md`](log-capture.md) for the full design.
+- Enable Logging toggle (reuses `.toggle-wrap` styling from the home-screen Auto Control toggle).
+  - On open: `GET /api/settings/logging-enabled` → applies state.
+  - On toggle click: optimistic UI update, `POST /api/settings/logging-enabled` with `{ enabled: bool }`. Reverts on error.
+- When ON: a stats line "Ring: X used / Y · N dropped" appears (orange if `dropped > 0`), polled from `GET /api/logs/stats`. Three buttons appear below:
+  - **Download log** → `window.location = '/api/logs/download'` (browser saves text file).
+  - **Email log** → triggers download, then 400 ms later opens `mailto:imdacrocker@gmail.com` with subject `GoPro Controller log` and a body templated with WHAT-I-WAS-DOING / WHAT-HAPPENED / WHAT-I-EXPECTED placeholders + bold "attach the file you just downloaded" instruction + privacy notice listing what the log contains (MACs, SSIDs) and excludes (passwords, GPS).
+  - **Clear log** → confirms with byte count, `POST /api/logs/clear`, refreshes stats.
+- When OFF: stats line and three buttons hidden; only the toggle is visible.
+
+**Recovery section**
+- **Restart to Recovery** button — orange `.settings-recovery-btn`. Calls `POST /api/ota/reboot-recovery` and reloads after a short delay. Used when a user needs to upload firmware / web UI bundles via the recovery app's embedded form (e.g. when the storage partition is empty).
 
 ---
 

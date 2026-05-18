@@ -7,6 +7,8 @@
  *   POST /api/settings/datetime
  *   GET  /api/settings/can-bitrate
  *   POST /api/settings/can-bitrate
+ *   GET  /api/settings/logging-enabled
+ *   POST /api/settings/logging-enabled
  */
 
 #include <stdio.h>
@@ -14,6 +16,7 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "can_manager.h"
+#include "log_ring.h"
 #include "http_server_internal.h"
 
 static const char *TAG = "http_api_settings";
@@ -154,16 +157,71 @@ static esp_err_t handler_post_can_bitrate(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- GET /api/settings/logging-enabled ----------------------------------- */
+
+static esp_err_t handler_get_logging_enabled(httpd_req_t *req)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "{\"enabled\":%s}",
+             log_ring_is_enabled() ? "true" : "false");
+    send_json(req, buf);
+    return ESP_OK;
+}
+
+/* ---- POST /api/settings/logging-enabled ---------------------------------- */
+/*
+ * Body: {"enabled": true|false}.
+ * When transitioning ON -> OFF the ring is cleared inside
+ * log_ring_set_enabled() before this returns, so by the time the response
+ * goes out the captured data is already gone.
+ */
+static esp_err_t handler_post_logging_enabled(httpd_req_t *req)
+{
+    char body[64];
+    if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+        return ESP_FAIL;
+    }
+    cJSON *item = cJSON_GetObjectItem(root, "enabled");
+    if (!cJSON_IsBool(item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing enabled");
+        return ESP_FAIL;
+    }
+    bool desired = cJSON_IsTrue(item);
+    cJSON_Delete(root);
+
+    log_ring_set_enabled(desired);
+    esp_err_t err = log_ring_save_enabled_to_nvs();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "logging-enabled NVS save failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs save failed");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "logging %s", desired ? "ENABLED" : "DISABLED");
+
+    char reply[32];
+    snprintf(reply, sizeof(reply), "{\"enabled\":%s}", desired ? "true" : "false");
+    send_json(req, reply);
+    return ESP_OK;
+}
+
 /* ---- Registration -------------------------------------------------------- */
 
 void api_settings_register(httpd_handle_t server)
 {
     static const httpd_uri_t uris[] = {
-        { .uri = "/api/settings/timezone",    .method = HTTP_GET,  .handler = handler_get_timezone    },
-        { .uri = "/api/settings/timezone",    .method = HTTP_POST, .handler = handler_post_timezone   },
-        { .uri = "/api/settings/datetime",    .method = HTTP_POST, .handler = handler_post_datetime   },
-        { .uri = "/api/settings/can-bitrate", .method = HTTP_GET,  .handler = handler_get_can_bitrate  },
-        { .uri = "/api/settings/can-bitrate", .method = HTTP_POST, .handler = handler_post_can_bitrate },
+        { .uri = "/api/settings/timezone",        .method = HTTP_GET,  .handler = handler_get_timezone        },
+        { .uri = "/api/settings/timezone",        .method = HTTP_POST, .handler = handler_post_timezone       },
+        { .uri = "/api/settings/datetime",        .method = HTTP_POST, .handler = handler_post_datetime       },
+        { .uri = "/api/settings/can-bitrate",     .method = HTTP_GET,  .handler = handler_get_can_bitrate     },
+        { .uri = "/api/settings/can-bitrate",     .method = HTTP_POST, .handler = handler_post_can_bitrate    },
+        { .uri = "/api/settings/logging-enabled", .method = HTTP_GET,  .handler = handler_get_logging_enabled },
+        { .uri = "/api/settings/logging-enabled", .method = HTTP_POST, .handler = handler_post_logging_enabled},
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(server, &uris[i]);
