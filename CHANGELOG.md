@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-18
+
 ### Fixed
 - **Hero10 (and other BLE-control cameras) no longer flap between
   recording / not-recording in the UI while actually recording, and the
@@ -126,7 +128,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.3...v1.0.4
