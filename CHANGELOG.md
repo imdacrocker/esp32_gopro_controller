@@ -10,6 +10,17 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Fixed
+- **Hero10 (and other BLE-control cameras) no longer flap between
+  recording / not-recording in the UI while actually recording, and the
+  camera no longer beeps every ~12 s during a take.** The BLE recording
+  status poll was querying status ID 8, which is `Busy` per the OpenGoPro
+  spec (transient menu-transition / settings-write state), not the
+  recording flag. On Hero10 it stayed `0` for the entire duration of a
+  recording, so the mismatch-correction loop kept re-issuing
+  `SetShutter(ON)` after the 10 s grace expired. The poll now uses status
+  ID 10 (`Encoding`), which is the actual recording flag.
+
 ## [1.0.6] - 2026-05-16
 
 ### Fixed
