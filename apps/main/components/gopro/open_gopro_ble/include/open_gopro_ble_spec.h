@@ -176,12 +176,16 @@ static const uint8_t k_gopro_keepalive_pkt[4] = {
  * Payload TLV: [cmd_id, status_id_1, status_id_2, ...]
  * Response: [cmd_id, status, (id, len, value)*]
  *
- * Status ID 8 = system_record_mode_active (0 = idle, 1 = recording).
+ * Status ID 10 = Encoding (0 = idle, 1 = recording). Previously we queried
+ * ID 8, but that is "Busy" per the OpenGoPro spec — it tracks transient
+ * camera-busy state (menu transitions, settings writes), not the recording
+ * flag, so on Hero10 it stayed 0 while recording and tripped the mismatch
+ * poll into spurious SetShutter retries.
  *
  * Spec: https://gopro.github.io/OpenGoPro/ble/features/query.html#get-status-value
  */
 #define GOPRO_QUERY_GET_STATUS_VALUE  0x13u
-#define GOPRO_STATUS_ID_ENCODING_ACTIVE  0x08u
+#define GOPRO_STATUS_ID_ENCODING_ACTIVE  0x0Au
 
 /* Recording status poll cadence — matches RC-emulation poll. */
 #define GOPRO_STATUS_POLL_INTERVAL_MS  5000u

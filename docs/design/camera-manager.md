@@ -592,7 +592,7 @@ BLE scan → connect → bond → MTU exchange → subscribe to notifications
   → SetCameraControlStatus(EXTERNAL)     (3 s timeout; sequence proceeds either way)
   → camera_manager_on_camera_ready()      → WIFI_CAM_READY
   → SetDateTime (best-effort; deferred via datetime_pending_utc if not session-synced)
-  → start 5 s GetStatusValue poll        (status ID 8 = system_record_mode_active)
+  → start 5 s GetStatusValue poll        (status ID 10 = Encoding)
   → BLE keepalive (0x42 every 3 s) maintains link supervision indefinitely
 ```
 
@@ -1013,7 +1013,7 @@ Each driver is responsible for keeping its own cache fresh through whatever inte
 
 | Camera category | Cache update mechanism |
 |---|---|
-| BLE-control (Hero 9+) | `open_gopro_ble` issues `GetStatusValue` (TLV 0x13, status ID 8 = `system_record_mode_active`) on the Query channel every 5 s; response handler updates `cached_status` |
+| BLE-control (Hero 9+) | `open_gopro_ble` issues `GetStatusValue` (TLV 0x13, status ID 10 = `Encoding`) on the Query channel every 5 s; response handler updates `cached_status` |
 | RC-emulation (Hero 3 / 4 / 5 / 6 / 7) | `gopro_wifi_rc` issues UDP binary `st` opcode (port 8484) every 5 s; reply byte 13 (power) and byte 15 (recording state) → `recording_status` (see §17.2.4) |
 
 The per-slot timer is stopped when the slot leaves `WIFI_CAM_READY` and restarted when it re-enters it.
@@ -1038,7 +1038,7 @@ if desired_recording == STOP   && status == ACTIVE            → call driver->s
 
 10 s comfortably covers the worst-case time for the camera to reflect the new state in its status report:
 
-- BLE-control cameras stream status notifications, but a freshly-issued `SetShutter` may take several seconds before the next `system_record_mode_active` notification fires.
+- BLE-control cameras stream status notifications, but a freshly-issued `SetShutter` may take several seconds before the next `Encoding` (status ID 10) notification fires.
 - WiFi RC cameras are polled by the driver every 5 s, so the cache may be up to one full poll interval stale.
 
 A shorter window risked re-issuing a Start to a camera that was already recording but hadn't yet told us — which on Hero4 in RC mode has been observed to flip the camera back off. After the grace deadline expires, the next poll re-evaluates and re-arms the deadline if it still has work to do, so the self-healing "missed shutter" safety net is preserved; it just runs on a slower beat.
@@ -1156,7 +1156,7 @@ All callbacks are invoked from the RX task context. Implementations must not blo
 - **Pairing & GATT setup**: register newly bonded cameras with `camera_manager`, run the explicit MTU exchange (Hero 13 doesn't initiate one itself), discover services and characteristics across the full handle range, and subscribe CCCDs sequentially.
 - **Readiness sequence (V1-style, §15.5)**: `GetHardwareInfo` poll → `SetCameraControlStatus(EXTERNAL)` handshake → `camera_manager_on_camera_ready(slot)` → `SetDateTime` → start the 5 s status poll. The connection sequence proceeds even if the `SetCameraControlStatus` response times out — a silent camera should not stall setup.
 - **Recording control**: `SetShutter` (TLV 0x01) on GP-0072 from the `start_recording` / `stop_recording` vtable entries.
-- **Recording status poll**: `GetStatusValue` (TLV 0x13, status ID 8 = `system_record_mode_active`) on GP-0076 every 5 s; cached value exposed via `get_recording_status`.
+- **Recording status poll**: `GetStatusValue` (TLV 0x13, status ID 10 = `Encoding`) on GP-0076 every 5 s; cached value exposed via `get_recording_status`.
 - **Date / time**: `SetDateTime` (TLV 0x0D) on GP-0072. Best-effort; gated on `can_manager_utc_is_session_synced()` so an NVS-restored UTC anchor at boot cannot push stale time to the camera. If UTC isn't session-synced when the readiness sequence completes, the slot's `datetime_pending_utc` flag is set and `open_gopro_ble_sync_time_all()` consumes it when UTC arrives.
 - **BLE keepalive**: send `0x42` to GP-0074 every 3 seconds. Required to maintain the BLE link supervision timer and prevent camera auto-sleep.
 
@@ -1304,7 +1304,9 @@ The optimistic `cached_status` update means the next mismatch poll cycle (§13.3
 
 ### 15.7 Recording Status Poll
 
-A per-slot 5 s `esp_timer` (`status_poll_timer`) issues `GetStatusValue` on GP-0076. The request payload is fixed at 3 bytes: `{ 0x02, 0x13, 0x08 }` (GPBS header len=2, cmd_id=0x13, status_id=8).
+A per-slot 5 s `esp_timer` (`status_poll_timer`) issues `GetStatusValue` on GP-0076. The request payload is fixed at 3 bytes: `{ 0x02, 0x13, 0x0A }` (GPBS header len=2, cmd_id=0x13, status_id=10 = `Encoding`).
+
+> Historical note: earlier revisions used status ID 8, but per the OpenGoPro spec that is `Busy` (transient menu-transition / settings-write state), not the recording flag. On Hero10 it read `0` for the entire duration of a recording and the mismatch poll repeatedly re-issued `SetShutter(ON)`, causing the UI to flap between recording/not-recording and the camera to beep on each rejected retry.
 
 The response on GP-0077 has the form:
 
@@ -1312,7 +1314,7 @@ The response on GP-0077 has the form:
 [cmd_id, status, (id, len, value)*]
 ```
 
-`status.c` strips the 2-byte TLV header and walks the body looking for `id == 0x08`; the byte that follows the length is `0` (idle) or `1` (recording). `cached_status` is updated only when the value changes, to avoid log spam.
+`status.c` strips the 2-byte TLV header and walks the body looking for `id == 0x0A`; the byte that follows the length is `0` (idle) or `1` (recording). `cached_status` is updated only when the value changes, to avoid log spam.
 
 The first poll fires immediately on `gopro_status_poll_start()` so `cached_status` updates within ~one MTU latency rather than waiting the full 5 s.
 

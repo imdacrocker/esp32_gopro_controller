@@ -2,7 +2,7 @@
  * status.c — GetStatusValue periodic poll for recording state.
  *
  * After camera-ready, a per-slot 5 s timer issues a GetStatusValue (TLV 0x13)
- * on the Query channel asking for status ID 8 (system_record_mode_active).
+ * on the Query channel asking for status ID 10 (Encoding).
  * The response arrives on query_resp_notify (GP-0077) and is dispatched to
  * gopro_status_handle_response() by query.c.
  *
@@ -23,7 +23,7 @@ static const char *TAG = "gopro_ble/status";
  * GetStatusValue request payload (3 bytes):
  *   [0] 0x02     GPBS header (general, len=2)
  *   [1] 0x13     cmd_id = GetStatusValue
- *   [2] 0x08     status_id = system_record_mode_active
+ *   [2] 0x0A     status_id = Encoding (0 = idle, 1 = recording)
  */
 static const uint8_t k_get_status_pkt[3] = {
     0x02u,
@@ -82,8 +82,8 @@ void gopro_status_poll_stop(gopro_ble_ctx_t *ctx)
  *   for each requested status:
  *     [id (1B), len (1B), value (len B)]
  *
- * We requested only status ID 8, so the body should be either empty (if the
- * camera couldn't supply it) or [0x08, 0x01, 0x00|0x01].
+ * We requested only status ID 10, so the body should be either empty (if the
+ * camera couldn't supply it) or [0x0A, 0x01, 0x00|0x01].
  */
 void gopro_status_handle_response(gopro_ble_ctx_t *ctx,
                                    const uint8_t *body, uint16_t body_len)

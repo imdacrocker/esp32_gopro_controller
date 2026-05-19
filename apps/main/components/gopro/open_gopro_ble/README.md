@@ -18,7 +18,7 @@ All recording control travels over BLE — there is no HTTPS path. The BLE conne
   4. `SetDateTime` (best-effort; deferred via `datetime_pending_utc` if UTC isn't session-synced yet).
   5. Start the 5 s `GetStatusValue` poll.
 - **Recording control** — `SetShutter` TLV 0x01 to GP-0072 (`{0x03, 0x01, 0x01, 0x00|0x01}`).
-- **Recording status poll** — `GetStatusValue` TLV 0x13 on GP-0076 every 5 s, requesting status ID 8 (`system_record_mode_active`). Cached value is exposed via `camera_driver_t.get_recording_status()`.
+- **Recording status poll** — `GetStatusValue` TLV 0x13 on GP-0076 every 5 s, requesting status ID 10 (`Encoding`; 0 = idle, 1 = recording). Cached value is exposed via `camera_driver_t.get_recording_status()`.
 - **UTC sync** — `open_gopro_ble_sync_time_all()` sends `SetDateTime` to every connected slot when UTC becomes session-synced (called from `on_utc_acquired`). `SetDateTime` itself is gated on `can_manager_utc_is_session_synced()`, so an NVS-restored boot value cannot push stale time to a camera.
 - **BLE keepalive** — send TLV cmd `0x5B` with value `0x42` (`{0x03, 0x5B, 0x01, 0x42}`) to GP-0074 every 3 s to maintain the link supervision timer and prevent camera auto-sleep.
 
@@ -163,12 +163,14 @@ Written to GP-0072. The driver vtable `start_recording` / `stop_recording` set `
 ### GetStatusValue (TLV 0x13)
 
 ```
-Request:  [0x02, 0x13, 0x08]   (header len=2, cmd 0x13, status_id 8)
-Response: [cmd_id, status, 0x08, 0x01, value]
+Request:  [0x02, 0x13, 0x0A]   (header len=2, cmd 0x13, status_id 10)
+Response: [cmd_id, status, 0x0A, 0x01, value]
                             └── id ┘ └─len─┘ └─v─┘
 ```
 
-Status ID 8 is `system_record_mode_active` (0 = idle, 1 = recording). Polled every 5 s on `query_write` (GP-0076); response arrives on `query_resp_notify` (GP-0077). The poll fires once immediately on start so `cached_status` updates within ~half an MTU latency rather than waiting the full 5 s.
+Status ID 10 is `Encoding` (0 = idle, 1 = recording). Polled every 5 s on `query_write` (GP-0076); response arrives on `query_resp_notify` (GP-0077). The poll fires once immediately on start so `cached_status` updates within ~half an MTU latency rather than waiting the full 5 s.
+
+> Earlier revisions polled status ID 8, but per the OpenGoPro spec that is `Busy` (transient camera-busy state during menu transitions / settings writes), not the recording flag. On Hero10 it stayed 0 while recording, causing the mismatch poll to re-issue `SetShutter(ON)` and the UI to flap between recording/not-recording states.
 
 ### SetCameraControlStatus(EXTERNAL) (Protobuf)
 
