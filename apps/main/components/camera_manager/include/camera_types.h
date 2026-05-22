@@ -40,6 +40,7 @@ typedef enum {
 
     /* GoPro BLE */
     CAMERA_MODEL_GOPRO_HERO7_BLACK  = 30,
+    CAMERA_MODEL_GOPRO_HERO8_BLACK  = 50,
     CAMERA_MODEL_GOPRO_HERO9_BLACK  = 55,
     CAMERA_MODEL_GOPRO_HERO10_BLACK = 57,
     CAMERA_MODEL_GOPRO_HERO11_BLACK = 58,
@@ -124,6 +125,7 @@ typedef enum {
     PAIR_ERROR_HANDSHAKE_TIMEOUT,  /* SetThirdPartyClient/SetCameraControlStatus failed */
     PAIR_ERROR_DISCONNECTED,       /* BLE dropped before reaching READY */
     PAIR_ERROR_CANCELLED,          /* POST /api/pair/cancel */
+    PAIR_ERROR_PAIR_COMPLETE_FAIL, /* Legacy wireless/pair/complete handshake failed */
     PAIR_ERROR_INTERNAL,           /* Catch-all */
 } pair_attempt_error_t;
 

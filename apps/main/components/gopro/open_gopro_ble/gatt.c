@@ -57,6 +57,8 @@ static const chr_map_entry_t k_chr_map[] = {
     { GOPRO_CHR_NW_MGMT_WRITE_UUID,       HANDLE_OFF(nw_mgmt_write)        },
     { GOPRO_CHR_NW_MGMT_RESP_NOTIFY_UUID, HANDLE_OFF(nw_mgmt_resp_notify)  },
     { GOPRO_CHR_WIFI_AP_STATE_UUID,       HANDLE_OFF(wifi_ap_state_indicate) },
+    { GOPRO_CHR_WIFI_AP_SSID_UUID,        HANDLE_OFF(wifi_ap_ssid)         },
+    { GOPRO_CHR_WIFI_AP_PASSWORD_UUID,    HANDLE_OFF(wifi_ap_password)     },
 };
 #define CHR_MAP_LEN  (sizeof(k_chr_map) / sizeof(k_chr_map[0]))
 

@@ -38,3 +38,39 @@ int wifi_manager_get_connected_stations(wifi_mgr_sta_info_t *out, int max_count)
 void wifi_manager_set_callbacks(wifi_mgr_station_associated_cb_t   on_associated,
                                  wifi_mgr_station_disconnected_cb_t  on_disconnected,
                                  wifi_mgr_station_ip_assigned_cb_t   on_ip_assigned);
+
+/* ---- AP/STA mode switch (legacy GoPro pair-complete flow) -------------- */
+
+typedef enum {
+    WIFI_MGR_OK            = 0,
+    WIFI_MGR_ERR_BUSY,         /* Another sta_join is already in progress */
+    WIFI_MGR_ERR_ASSOC_FAIL,   /* STA failed to associate with the AP */
+    WIFI_MGR_ERR_DHCP_TIMEOUT, /* Associated but DHCP did not complete */
+    WIFI_MGR_ERR_INTERNAL,     /* esp_wifi_* call failed */
+} wifi_mgr_err_t;
+
+/**
+ * Pause the SoftAP, switch the radio into STA mode, join the named AP, and
+ * wait for DHCP to complete.  Blocking, runs on the caller's task.
+ *
+ * Connected SoftAP clients will see their link drop; they will reconnect
+ * automatically once `wifi_manager_sta_leave()` brings the AP back up.
+ *
+ * @param ssid       AP SSID (NUL-terminated).
+ * @param password   WPA2 PSK (NUL-terminated, empty string for open AP).
+ * @param[out] gw_out  On success, set to the gateway IP (camera-side endpoint).
+ * @param timeout_ms Wall-clock budget for the full join (assoc + DHCP).
+ *
+ * On any failure the radio is returned to SoftAP mode before this returns.
+ */
+wifi_mgr_err_t wifi_manager_sta_join(const char *ssid,
+                                      const char *password,
+                                      uint32_t   *gw_out,
+                                      uint32_t    timeout_ms);
+
+/**
+ * Disconnect from the joined STA and bring the SoftAP back up.  Idempotent —
+ * safe to call even if no sta_join is in flight.  Blocks until the AP is
+ * re-advertising or AP_READY_TIMEOUT_MS elapses.
+ */
+void wifi_manager_sta_leave(void);

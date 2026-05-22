@@ -1,3 +1,17 @@
+menu "GoPro Controller — Identity"
+
+    config DEVICE_IDENTITY_NAME
+        string "Controller identity name"
+        default "ESP32 Controller"
+        help
+            Single source of truth for the controller's display name. Used as:
+              - NimBLE GAP device name (BLE adverts and connections)
+              - GoPro RequestPairingFinish phone_name protobuf field
+              - GoPro legacy wireless/pair/complete `deviceName` URL parameter
+            Keep it short ASCII — it ends up on the camera UI and in URLs.
+
+endmenu
+
 menu "GoPro Controller — OTA"
 
     config OTA_BASE_URL

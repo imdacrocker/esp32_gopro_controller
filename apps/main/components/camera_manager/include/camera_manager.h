@@ -247,6 +247,15 @@ bool camera_manager_has_disconnected_cameras(void);
  */
 esp_err_t camera_manager_mark_first_pair_complete(int slot);
 
+/*
+ * Clear first_pair_complete on the slot and persist to NVS.  Used by the
+ * web UI "Re-pair" affordance to force the legacy wireless/pair/complete
+ * orchestration to re-run on the next BLE reconnect — e.g. after the user
+ * runs Reset Connections on the camera and the camera-side app entry is
+ * wiped.  Returns ESP_OK whether the flag was already false or not.
+ */
+esp_err_t camera_manager_clear_first_pair_complete(int slot);
+
 /* ==========================================================================
  * Pair-attempt state machine (BLE add-camera flow)
  *

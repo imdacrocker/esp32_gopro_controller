@@ -55,6 +55,16 @@
  * (0 = AP off, 1 = AP on).  Camera pushes this whenever its WiFi AP toggles. */
 #define GOPRO_CHR_WIFI_AP_STATE_UUID       GOPRO_UUID128_INIT(0x05)  /* GP-0005 Indicate */
 
+/* WiFi AP SSID / Password (GP-0001 service) — Read, encryption-required.
+ * Verified on a real Hero7 (firmware HD7.01.01.90.71):
+ *   GP-0002 = SSID,  GP-0003 = password.
+ * (Konrad's goprowifihack docs have these reversed — they may be different
+ * on older models or his table is simply mistaken.)
+ * Reading either also triggers SMP bonding on legacy Hero5–Hero8 if it has
+ * not already happened. */
+#define GOPRO_CHR_WIFI_AP_SSID_UUID        GOPRO_UUID128_INIT(0x02)  /* GP-0002 Read */
+#define GOPRO_CHR_WIFI_AP_PASSWORD_UUID    GOPRO_UUID128_INIT(0x03)  /* GP-0003 Read */
+
 /* CCCD descriptor UUID (standard BLE) */
 #define BLE_GATT_DSC_CLT_CFG_UUID16  0x2902
 
@@ -112,6 +122,23 @@
  * harmlessly, so it is sent unconditionally.
  */
 #define GOPRO_CMD_SET_THIRD_PARTY_CLIENT  0x50u
+
+/*
+ * SetWifi / AP Control (0x17) — toggle the camera's WiFi AP.
+ * Written to: cmd_write (GP-0072)
+ * Response on: cmd_resp_notify (GP-0073)
+ * TLV payload: [GPBS_hdr=3, cmd=0x17, param_len=1, value]
+ *   value: 0x00 = AP off, 0x01 = AP on
+ *
+ * Used by the legacy-BLE pair-complete orchestration (Hero6/7/8): we bring
+ * the camera AP up, switch our radio to STA, issue the legacy
+ * `wireless/pair/complete` HTTP call to register the controller in the
+ * camera's paired-apps list, then bring our AP back up and turn the camera
+ * AP back off.
+ */
+#define GOPRO_CMD_SET_WIFI    0x17u
+#define GOPRO_WIFI_ON         0x01u
+#define GOPRO_WIFI_OFF        0x00u
 
 /*
  * SetMode (0x02) — legacy mode selection.

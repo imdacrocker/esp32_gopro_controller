@@ -123,11 +123,6 @@ static void complete_connection_sequence(gopro_ble_ctx_t *ctx)
     ESP_LOGI(TAG, "slot %d: camera ready — completing connection sequence", slot);
 
     camera_manager_on_camera_ready(slot);
-    /* First successful readiness completion stamps first_pair_complete=true
-     * in NVS so future reconnects render as "Connecting" instead of
-     * "Pairing".  Idempotent — cheap re-save when already set. */
-    camera_manager_mark_first_pair_complete(slot);
-    pair_attempt_advance(PAIR_ATTEMPT_SUCCESS);
 
     /* Date/time best-effort — gopro_control_set_datetime() returns silently
      * when UTC is not session-synced.  If deferred, the flag will trigger a
@@ -145,6 +140,31 @@ static void complete_connection_sequence(gopro_ble_ctx_t *ctx)
     }
 
     gopro_status_poll_start(ctx);
+
+    /* Legacy wireless/pair/complete handshake (Hero6/7/8): only on first
+     * successful BLE pair.  The orchestration task marks first_pair_complete
+     * and advances pair_attempt to SUCCESS itself; on failure it tears the
+     * link down and removes the slot. */
+    camera_model_t     model = camera_manager_get_model(slot);
+    camera_slot_info_t info;
+    bool need_pair_complete = false;
+    if (gopro_model_needs_wifi_pair_complete(model) &&
+        camera_manager_get_slot_info(slot, &info) == ESP_OK &&
+        !info.first_pair_complete) {
+        need_pair_complete = true;
+    }
+
+    if (need_pair_complete) {
+        ESP_LOGI(TAG, "slot %d: first pair — kicking off wireless/pair/complete",
+                 slot);
+        gopro_pair_complete_run(ctx);
+    } else {
+        /* First successful readiness completion stamps first_pair_complete=true
+         * in NVS so future reconnects render as "Connecting" instead of
+         * "Pairing".  Idempotent — cheap re-save when already set. */
+        camera_manager_mark_first_pair_complete(slot);
+        pair_attempt_advance(PAIR_ATTEMPT_SUCCESS);
+    }
 }
 
 /* ---- Stage 3: branch by model after SetThirdPartyClient settles --------- */
@@ -342,9 +362,16 @@ static void gopro_on_hw_info_ok(gopro_ble_ctx_t *ctx, uint32_t model_num)
     /* Tell the camera the initial pairing flow is complete — clears the
      * on-screen pairing prompt on supported models (Hero11 Mini / Hero12 /
      * Hero13 / Max 2 / Lit Hero).  Fire-and-forget; older models without a
-     * Network Management characteristic skip this internally.  Hero7 also
-     * acks this even though it's not officially supported. */
-    gopro_control_send_pairing_finish(ctx);
+     * Network Management characteristic skip this internally.
+     *
+     * Skipped for cameras that need the legacy wireless/pair/complete
+     * handshake (Hero6/7/8) — Hero7 acks the protobuf and dismisses its
+     * pairing prompt, but that intermediate "pair-screen-dismissed-but-not-
+     * registered" state interferes with the camera-side app registration
+     * we drive over HTTP shortly afterwards. */
+    if (!gopro_model_needs_wifi_pair_complete(model)) {
+        gopro_control_send_pairing_finish(ctx);
+    }
 
     /* Legacy SetMode(Video) — sent before SetThirdPartyClient so the camera
      * is in the correct mode by the time we declare the app paired.  Newer

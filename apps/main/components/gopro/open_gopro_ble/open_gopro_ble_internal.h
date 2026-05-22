@@ -27,6 +27,8 @@ typedef struct {
     uint16_t nw_mgmt_write;
     uint16_t nw_mgmt_resp_notify;
     uint16_t wifi_ap_state_indicate;  /* GP-0005, separate GP-0001 service */
+    uint16_t wifi_ap_ssid;            /* GP-0002, encryption-required Read */
+    uint16_t wifi_ap_password;        /* GP-0003, encryption-required Read */
 } gopro_gatt_handles_t;
 
 /* ---- Per-slot driver context (§15.4) ------------------------------------- */
@@ -149,8 +151,27 @@ int  gopro_control_send_third_party_client(gopro_ble_ctx_t *ctx);
  */
 int  gopro_control_send_set_mode_video(gopro_ble_ctx_t *ctx);
 
+/*
+ * Send SetWifi (TLV cmd 0x17) to toggle the camera's WiFi AP.  Used by the
+ * legacy pair-complete orchestration in pair_complete.c.
+ */
+int  gopro_control_send_set_wifi(gopro_ble_ctx_t *ctx, bool on);
+
 /* Start the 3-second periodic BLE keepalive timer. */
 void gopro_keepalive_start(gopro_ble_ctx_t *ctx);
+
+/* ---- Legacy WiFi pair-complete (pair_complete.c) ------------------------ */
+
+/*
+ * Run the legacy wireless/pair/complete handshake for cameras that need it
+ * (Hero6/7/8 — see gopro_model_needs_wifi_pair_complete).  Spawns a one-shot
+ * task that reads SSID + password over BLE, briefly switches the radio to
+ * STA mode to issue the HTTP call on the camera's AP, then returns to AP.
+ * On success: marks first_pair_complete and advances pair_attempt to
+ * SUCCESS.  On any failure: terminates the BLE link, fails the pair attempt
+ * with PAIR_ERROR_PAIR_COMPLETE_FAIL, and removes the slot.
+ */
+void gopro_pair_complete_run(gopro_ble_ctx_t *ctx);
 
 /* Stop and delete the keepalive timer.  Safe if never started. */
 void gopro_keepalive_stop(gopro_ble_ctx_t *ctx);

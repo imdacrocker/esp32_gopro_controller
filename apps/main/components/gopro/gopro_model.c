@@ -44,6 +44,7 @@ static const struct {
     /* "HERO7 Black" verified against a real Hero7 (firmware HD7.01.01.90.00):
      * UDP `cv` reply byte 32 onwards = 0x0b "HERO7 Black". */
     { "HERO7 Black",   CAMERA_MODEL_GOPRO_HERO7_BLACK   },
+    { "HERO8 Black",   CAMERA_MODEL_GOPRO_HERO8_BLACK   },
     { "HERO 2018",     CAMERA_MODEL_GOPRO_HERO_2018     },
 };
 
