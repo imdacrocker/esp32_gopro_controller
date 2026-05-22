@@ -49,6 +49,7 @@ static const char *model_name_str(camera_model_t model)
     case CAMERA_MODEL_GOPRO_HERO_2018:        return "GoPro HERO (2018)";
     case CAMERA_MODEL_GOPRO_HERO_LEGACY_RC:   return "GoPro Hero (legacy)";
     case CAMERA_MODEL_GOPRO_HERO7_BLACK:      return "GoPro Hero7 Black";
+    case CAMERA_MODEL_GOPRO_HERO8_BLACK:      return "GoPro Hero8 Black";
     case CAMERA_MODEL_GOPRO_HERO9_BLACK:      return "GoPro Hero9 Black";
     case CAMERA_MODEL_GOPRO_HERO10_BLACK:     return "GoPro Hero10 Black";
     case CAMERA_MODEL_GOPRO_HERO11_BLACK:     return "GoPro Hero11 Black";
@@ -128,6 +129,7 @@ static const char *pair_error_str(pair_attempt_error_t e)
     case PAIR_ERROR_HANDSHAKE_TIMEOUT:  return "handshake_timeout";
     case PAIR_ERROR_DISCONNECTED:       return "disconnected";
     case PAIR_ERROR_CANCELLED:          return "cancelled";
+    case PAIR_ERROR_PAIR_COMPLETE_FAIL: return "pair_complete_failed";
     case PAIR_ERROR_INTERNAL:           return "internal";
     default:                            return "unknown";
     }
@@ -254,6 +256,45 @@ static esp_err_t handler_shutter(httpd_req_t *req)
     char resp[40];
     snprintf(resp, sizeof(resp), "{\"dispatched\":%d}", dispatched);
     send_json(req, resp);
+    return ESP_OK;
+}
+
+/* ---- POST /api/repair-camera --------------------------------------------- *
+ *
+ * Clears `first_pair_complete` on a slot so the legacy wireless/pair/complete
+ * orchestration re-runs on the next BLE reconnect.  For use after the user
+ * runs Reset Connections on a Hero6/7/8 camera and the camera-side app entry
+ * is wiped — without this, our firmware would assume the bond is registered
+ * and the camera would silently refuse commands after power-cycle.
+ */
+
+static esp_err_t handler_repair_camera(httpd_req_t *req)
+{
+    char body[64];
+    if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+        return ESP_FAIL;
+    }
+    cJSON *slot_item = cJSON_GetObjectItem(root, "slot");
+    if (!cJSON_IsNumber(slot_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing 'slot'");
+        return ESP_FAIL;
+    }
+    int external = (int)cJSON_GetNumberValue(slot_item);
+    int slot = external - 1;
+    cJSON_Delete(root);
+
+    esp_err_t err = camera_manager_clear_first_pair_complete(slot);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid slot");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Cam %d marked for re-pair on next reconnect", external);
+    send_json(req, "{}");
     return ESP_OK;
 }
 
@@ -541,6 +582,7 @@ void api_cameras_register(httpd_handle_t server)
         { .uri = "/api/paired-cameras",   .method = HTTP_GET,  .handler = handler_paired_cameras  },
         { .uri = "/api/shutter",          .method = HTTP_POST, .handler = handler_shutter         },
         { .uri = "/api/remove-camera",    .method = HTTP_POST, .handler = handler_remove_camera   },
+        { .uri = "/api/repair-camera",    .method = HTTP_POST, .handler = handler_repair_camera   },
         { .uri = "/api/reorder-cameras",  .method = HTTP_POST, .handler = handler_reorder_cameras },
         { .uri = "/api/cameras",          .method = HTTP_GET,  .handler = handler_cameras         },
         { .uri = "/api/scan",             .method = HTTP_POST, .handler = handler_scan            },

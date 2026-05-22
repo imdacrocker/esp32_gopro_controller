@@ -27,6 +27,8 @@ typedef struct {
     uint16_t nw_mgmt_write;
     uint16_t nw_mgmt_resp_notify;
     uint16_t wifi_ap_state_indicate;  /* GP-0005, separate GP-0001 service */
+    uint16_t wifi_ap_ssid;            /* GP-0002, encryption-required Read */
+    uint16_t wifi_ap_password;        /* GP-0003, encryption-required Read */
 } gopro_gatt_handles_t;
 
 /* ---- Per-slot driver context (§15.4) ------------------------------------- */
@@ -149,8 +151,35 @@ int  gopro_control_send_third_party_client(gopro_ble_ctx_t *ctx);
  */
 int  gopro_control_send_set_mode_video(gopro_ble_ctx_t *ctx);
 
+/*
+ * Send SetWifi (TLV cmd 0x17) to toggle the camera's WiFi AP.  Used by the
+ * legacy pair-complete orchestration in pair_complete.c.
+ */
+int  gopro_control_send_set_wifi(gopro_ble_ctx_t *ctx, bool on);
+
+/*
+ * Send Wireless Band setting (ID 178) to force the camera AP onto 2.4 GHz
+ * (band=GOPRO_WIFI_BAND_2_4GHZ) or 5 GHz (band=GOPRO_WIFI_BAND_5GHZ).
+ * Fire-and-forget — response on settings_resp_notify is not awaited by
+ * this call.  Returns 0 on enqueue success, -1 on no-link.
+ */
+int  gopro_control_send_set_wifi_band(gopro_ble_ctx_t *ctx, uint8_t band);
+
 /* Start the 3-second periodic BLE keepalive timer. */
 void gopro_keepalive_start(gopro_ble_ctx_t *ctx);
+
+/* ---- Legacy WiFi pair-complete (pair_complete.c) ------------------------ */
+
+/*
+ * Run the legacy wireless/pair/complete handshake for cameras that need it
+ * (Hero6/7/8 — see gopro_model_needs_wifi_pair_complete).  Spawns a one-shot
+ * task that reads SSID + password over BLE, briefly switches the radio to
+ * STA mode to issue the HTTP call on the camera's AP, then returns to AP.
+ * On success: marks first_pair_complete and advances pair_attempt to
+ * SUCCESS.  On any failure: terminates the BLE link, fails the pair attempt
+ * with PAIR_ERROR_PAIR_COMPLETE_FAIL, and removes the slot.
+ */
+void gopro_pair_complete_run(gopro_ble_ctx_t *ctx);
 
 /* Stop and delete the keepalive timer.  Safe if never started. */
 void gopro_keepalive_stop(gopro_ble_ctx_t *ctx);
@@ -169,6 +198,24 @@ void gopro_status_poll_stop(gopro_ble_ctx_t *ctx);
  */
 void gopro_status_handle_response(gopro_ble_ctx_t *ctx,
                                    const uint8_t *body, uint16_t body_len);
+
+/*
+ * One-shot blocking query of status ID 76 (WirelessBand).  Sends
+ * GetStatusValue(76) on the Query channel and waits up to timeout_ms for the
+ * response to be parsed by gopro_status_handle_response.
+ *
+ *   *out_known   = true if the camera included a WirelessBand entry,
+ *                  false on timeout / camera silently dropped the ID.
+ *   *out_is_5ghz = true if the byte was 0x01 (5 GHz), false otherwise.
+ *
+ * Must be called from a real FreeRTOS task (it blocks on a semaphore).
+ * Only one query may be in flight at a time.  Returns ESP_OK whether the
+ * camera answered or not — check *out_known to disambiguate.
+ */
+esp_err_t gopro_status_query_band_blocking(gopro_ble_ctx_t *ctx,
+                                            uint32_t  timeout_ms,
+                                            bool     *out_known,
+                                            bool     *out_is_5ghz);
 
 /* ---- Response reassembly (query.c) --------------------------------------- */
 

@@ -310,7 +310,78 @@ static inline bool gopro_model_requires_manual_id(camera_model_t model) {
 
 `gopro_model_requires_manual_id` and `gopro_model_uses_rc_emulation` share the same implementation today but are intentionally separate — the questions they answer may diverge as more models are added.
 
-Pre-Hero 9 BLE control (Hero 5, Hero 7) is reportedly functional but not officially supported by Open GoPro. `gopro_model_uses_ble_control()` enumerates only the officially-supported list; older models can be added once verified on hardware.
+### 5.3 Legacy BLE control and the WiFi pair-complete handshake
+
+Hero6, Hero7, and Hero8 accept BLE pairing at the SMP level but do **not** register the controller in their paired-apps list until the controller hits a legacy HTTP endpoint on the camera's own WiFi AP:
+
+```
+GET http://10.5.5.9/gp/gpControl/command/wireless/pair/complete?success=1&deviceName=<CONFIG_DEVICE_IDENTITY_NAME>
+```
+
+Without this step the BLE bond is volatile: commands work in the current session but the camera UI shows "no connection" and the bond is invalidated on camera power-cycle.
+
+Two new predicates gate the behavior:
+
+- `gopro_model_needs_wifi_pair_complete(model)` — true for Hero6/7/8. Drives the one-shot orchestration in `apps/main/components/gopro/open_gopro_ble/pair_complete.c`.
+- `gopro_model_uses_legacy_ble(model)` — Hero7 today; can be extended to Hero5/6/8 once verified. Drives the legacy `SetMode(Video)` cmd 0x02 (instead of Hero9+'s Load Preset Group cmd 0x3E) and skips `SetCameraControlStatus` (which legacy cameras reject with INVALID_PARAM).
+
+Hero6/7/8 are intentionally absent from `gopro_model_uses_rc_emulation()` to avoid the dual-transport ambiguity (without a persisted-transport field on the slot, the RC driver would steal these slots on reload by main.c boot order). Existing RC-paired slots for these models after the upgrade become orphaned — the user must remove and re-pair via BLE.
+
+Hero5 BLE control is reportedly functional but currently absent from `uses_ble_control()` pending on-hardware verification.
+
+---
+
+### 5.4 Pair-complete orchestration (Hero6/7/8 first-pair only)
+
+When `complete_connection_sequence` runs for a `needs_wifi_pair_complete` model with `first_pair_complete == false`, it spawns a one-shot task (`pair_complete_task` in `pair_complete.c`) that drives the WiFi handshake:
+
+```
+1. Read SSID  from GP-0002 over BLE (encryption-required read)
+2. Read password from GP-0003 over BLE
+3. Query status 76 (WirelessBand) — fail-fast if camera reports 5 GHz
+4. (non-legacy_ble models only) Write setting 178 (WirelessBand=2.4 GHz) on the settings channel,
+   wait 5 s for camera to re-advertise.  Skipped on Hero7 — firmware HD7.01.01.90.71 rejects with INVALID_PARAM.
+5. wifi_manager_sta_join(ssid, password, &gw_ip, 15000)  — pauses SoftAP, switches to STA, joins camera AP
+6. esp_http_client_perform(GET wireless/pair/complete?success=1&deviceName=<CONFIG_DEVICE_IDENTITY_NAME>)
+   - ESP_ERR_HTTP_INCOMPLETE_DATA with 2xx status is treated as success
+     (Hero7 returns malformed chunked encoding; the body is irrelevant — the camera registered us when it processed the request headers)
+7. wifi_manager_sta_leave()  — STA down, SoftAP restored on channel 11
+8. camera_manager_mark_first_pair_complete(slot)
+9. pair_attempt_advance(PAIR_ATTEMPT_SUCCESS)
+```
+
+Any step failure → `fail_and_cleanup`: `pair_attempt_fail(PAIR_ERROR_PAIR_COMPLETE_FAIL, ...)`, `ble_gap_terminate`, `camera_manager_remove_slot`. No automatic retry — user must re-initiate pairing from the UI.
+
+**Watchdog:** the default 20 s `pair_attempt` watchdog is too short for this path (BLE setup ~15 s + orchestration ~16-25 s). `pair_complete_task` calls `pair_attempt_reset_watchdog(60000)` at entry so the watchdog still catches genuine hangs but doesn't trip on normal operation.
+
+**SoftAP downtime:** ~5-15 s during the dance. Clients reconnect automatically when the AP returns. This is one-time-per-camera onboarding cost, not recurring — subsequent reconnects after camera/ESP32 reboot are pure BLE.
+
+**5 GHz fail-fast:** the ESP32-S3 radio is 2.4 GHz only. If status 76 reports the camera is on 5 GHz, `pair_attempt_info.error_message` is set to `"Camera on 5 GHz; set Wi-Fi Band to 2.4 GHz, re-pair"` and surfaces verbatim through the web UI. The user fixes the camera's Preferences → Connections → Wi-Fi Band setting and re-pairs.
+
+**Re-pair affordance:** `POST /api/repair-camera {"slot": N}` calls `camera_manager_clear_first_pair_complete(slot)` so the orchestration re-runs on the next BLE reconnect. For use after the user runs Reset Connections on the camera and the camera-side app entry is wiped.
+
+**Skipped commands on legacy_ble cameras:**
+- `RequestPairingFinish` (Feature 0x03 / Action 0x01) — dismisses the camera's pairing-screen prompt prematurely and interferes with the HTTP registration. Other (Hero11 Mini / Hero12 / Hero13 / Max 2 / Lit Hero) models still receive it.
+- `SetCameraControlStatus` (Feature 0xF1 / Action 0x69) — legacy cameras reject with INVALID_PARAM.
+
+### 5.5 wifi_manager STA-switch API
+
+To support the pair-complete dance, `components/wifi_manager/wifi_manager.c` exposes a blocking AP-down/STA-join/AP-up cycle:
+
+```c
+wifi_mgr_err_t wifi_manager_sta_join(const char *ssid, const char *password,
+                                      uint32_t *gw_out, uint32_t timeout_ms);
+void           wifi_manager_sta_leave(void);
+```
+
+Implementation pauses the SoftAP via `esp_wifi_stop` (gated by a `s_target_mode` flag so the existing `WIFI_EVENT_AP_STOP` auto-restart doesn't fight the deliberate pause), switches to `WIFI_MODE_STA`, applies the camera AP config, and blocks on `STA_GOT_IP_BIT` or `STA_DISCONNECTED_BIT` until timeout. `sta_leave` is idempotent and always returns the radio to SoftAP mode.
+
+### 5.6 Centralized device identity
+
+`CONFIG_DEVICE_IDENTITY_NAME` (Kconfig under "GoPro Controller — Identity", default `"ESP32 Controller"`) is the single source of truth used by:
+- NimBLE GAP device name (BLE adverts and connections)
+- `RequestPairingFinish` protobuf `phone_name` field
+- `wireless/pair/complete` URL `deviceName=` parameter (URL-encoded by `pair_complete.c`)
 
 ---
 
@@ -1383,7 +1454,7 @@ Historical context: this component was an `esp_http_client`-based HTTPS driver t
 
 ## 17. gopro_wifi_rc
 
-WiFi Remote Control emulation driver for the GoPro "Smart Remote" UDP protocol, accepted by Hero3 / Hero3+ / Hero4 / Hero5 / Hero7 / Hero8 as a backwards-compatible control channel. All recurring traffic — keepalive, status poll, shutter — is short binary UDP datagrams between this device's SoftAP (src port 8383) and the camera (dst port 8484). HTTP is used **only** for the optional date/time set on cameras that run an HTTP server on their STA-interface IP (Hero4+); it is not on the critical control path. Camera slot persistence stays in `camera_manager`; MAC OUI spoofing in `wifi_manager`; WoL drives reconnect for cameras that sleep while still associated to the SoftAP.
+WiFi Remote Control emulation driver for the GoPro "Smart Remote" UDP protocol, accepted by Hero2 / Hero3 / Hero3+ / Hero4 / Hero5 / HERO 2018 as a backwards-compatible control channel. (Hero6/Hero7/Hero8 also accept Smart Remote pairing but are routed via BLE — see §5.3.) All recurring traffic — keepalive, status poll, shutter — is short binary UDP datagrams between this device's SoftAP (src port 8383) and the camera (dst port 8484). HTTP is used **only** for the optional date/time set on cameras that run an HTTP server on their STA-interface IP (Hero4+); it is not on the critical control path. Camera slot persistence stays in `camera_manager`; MAC OUI spoofing in `wifi_manager`; WoL drives reconnect for cameras that sleep while still associated to the SoftAP.
 
 ### 17.1 Responsibilities
 
@@ -2332,7 +2403,7 @@ The following are explicitly NOT in the unit test plan — they are validated ma
 
 The following will be designed in subsequent sessions:
 - **Live telemetry:** Battery percentage, storage remaining, and other camera-reported values. Will be polled via the same BLE Query channel mechanism as the recording-status poll (`GetStatusValue` with additional status IDs), cached in the slot, and added to `camera_slot_info_t`.
-- **Pre-Hero 9 BLE control:** Hero 5 and Hero 7 are reportedly functional over BLE despite not being officially supported by Open GoPro. Verify on hardware and add to `gopro_model_uses_ble_control()` if confirmed.
+- **Pre-Hero 9 BLE control:** Hero6, Hero7, Hero8 are enumerated in `gopro_model_uses_ble_control()` and use the legacy wireless/pair/complete handshake (see §5.3–5.4). Hero7 is verified on hardware (firmware HD7.01.01.90.71); Hero6 and Hero8 are listed on the assumption they share the same legacy pairing model — verify on hardware and adjust the predicate if not. Hero5 is reportedly functional but currently absent pending verification.
 - **Additional `gopro_model.h` capability helpers:** Further behavioral differences (BLE feature support per generation, status poll intervals, etc.) documented as cameras are tested.
 
 ### 24.1 Multi-manufacturer hooks (deferred)

@@ -5,6 +5,7 @@ idf_component_register(
         "gatt.c"
         "readiness.c"
         "control.c"
+        "pair_complete.c"
         "status.c"
         "query.c"
         "notify.c"
@@ -21,4 +22,7 @@ idf_component_register(
         camera_manager
         can_manager
         ble_core
+        wifi_manager
+        esp_http_client
+        esp_netif
 )

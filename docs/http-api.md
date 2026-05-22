@@ -24,6 +24,7 @@ Full request/response contracts (bodies, error codes, state diagrams) are in [`d
 | GET | `/api/paired-cameras` | All configured camera slots with connection + recording status |
 | POST | `/api/shutter` | Start or stop recording (all cameras or a specific slot) |
 | POST | `/api/remove-camera` | Remove a paired camera (compacts slot array) |
+| POST | `/api/repair-camera` | Clear `first_pair_complete` so the legacy WiFi pair-complete handshake re-runs on the next BLE reconnect (Hero6/7/8 — use after the camera's Reset Connections wipes its paired-apps list) |
 | POST | `/api/reorder-cameras` | Reorder camera slots (cameras must be disconnected first) |
 | GET | `/api/cameras` | BLE scan results (GoPro cameras advertising `0xFEA6`) |
 | POST | `/api/scan` | Start BLE discovery scan |

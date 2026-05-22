@@ -12,8 +12,8 @@
  * Intentionally free of ESP-IDF headers so this file can be included by
  * host-side unit tests (§23.2).
  *
- * Hero5/Hero7 BLE control is reportedly functional but not officially
- * supported by Open GoPro and not enumerated here until verified on hardware.
+ * Hero4-class BLE control is not implemented.  Hero5 BLE-control is reportedly
+ * functional but not enumerated here until verified on hardware.
  */
 #pragma once
 
@@ -39,6 +39,7 @@ static inline bool gopro_model_is_gopro(camera_model_t model)
         || model == CAMERA_MODEL_GOPRO_HERO_2018
         || model == CAMERA_MODEL_GOPRO_HERO_LEGACY_RC
         || model == CAMERA_MODEL_GOPRO_HERO7_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO8_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO9_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO10_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO11_BLACK
@@ -52,15 +53,19 @@ static inline bool gopro_model_is_gopro(camera_model_t model)
 /**
  * Camera connects by emulating a GoPro WiFi Remote AP.
  *
- * Hero2 through Hero7 (and likely Hero8, untested) all accept the original
+ * Hero2 through Hero5 (and HERO 2018 / Hero4 Session) accept the original
  * Smart Remote pairing flow as a STA on our SoftAP.  Hero4 onwards in this
  * mode also reply to the binary UDP `cv` (camera version) opcode with a
  * length-prefixed firmware + model_name payload — that's how we identify the
- * specific model without HTTP.  Hero7 is shared with the BLE block in
- * `uses_ble_control` because it's identified by the same enum value
- * regardless of pairing path; the WiFi RC driver registers first in main.c
- * boot order, so a Hero7 paired via the SoftAP picks up the RC driver
- * (BLE Hero7 is frozen anyway — see `gopro_model_is_frozen`).
+ * specific model without HTTP.
+ *
+ * Hero6/Hero7/Hero8 also accept the Smart-Remote pairing flow, but we route
+ * them via BLE (`uses_ble_control`) because BLE pairing supports full state
+ * (start/stop/status) where RC-emulation only sends keepalive + shutter.
+ * The dual-transport ambiguity is acknowledged but not disambiguated by a
+ * persisted-transport field — listing a model in both helpers would cause
+ * the RC driver to win on reload by main.c boot order, so we keep these
+ * three out of `uses_rc_emulation`.
  */
 static inline bool gopro_model_uses_rc_emulation(camera_model_t model)
 {
@@ -77,8 +82,6 @@ static inline bool gopro_model_uses_rc_emulation(camera_model_t model)
         || model == CAMERA_MODEL_GOPRO_HERO4_SESSION
         || model == CAMERA_MODEL_GOPRO_HERO5_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO5_SESSION
-        || model == CAMERA_MODEL_GOPRO_HERO6_BLACK
-        || model == CAMERA_MODEL_GOPRO_HERO7_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO_2018
         || model == CAMERA_MODEL_GOPRO_HERO_LEGACY_RC;
 }
@@ -90,10 +93,8 @@ static inline bool gopro_model_uses_rc_emulation(camera_model_t model)
  * `rc_send_datetime()`.
  *
  * Hero4 Black/Silver in Smart-Remote mode are confirmed working (Lua trace).
- * Hero7 in Smart-Remote mode silently drops port-80 SYNs (verified via probe
- * diagnostic), so it stays out of this list.  Hero3-class never had STA-side
- * HTTP at all.  Add Hero4 Session / Hero5 / Hero6 / HERO 2018 once verified
- * on hardware.
+ * Hero3-class never had STA-side HTTP at all.  Add Hero4 Session / Hero5
+ * once verified on hardware.
  */
 static inline bool gopro_model_supports_http_datetime(camera_model_t model)
 {
@@ -118,7 +119,9 @@ camera_model_t gopro_model_from_name(const char *model_name);
 /** Camera is controlled over BLE (no WiFi association required). */
 static inline bool gopro_model_uses_ble_control(camera_model_t model)
 {
-    return model == CAMERA_MODEL_GOPRO_HERO7_BLACK
+    return model == CAMERA_MODEL_GOPRO_HERO6_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO7_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO8_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO9_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO10_BLACK
         || model == CAMERA_MODEL_GOPRO_HERO11_BLACK
@@ -138,12 +141,14 @@ static inline bool gopro_model_uses_udp_keepalive(camera_model_t model)
 /**
  * Camera predates the OpenGoPro spec and uses the legacy BLE control protocol.
  *
- * Implications today:
+ * Implications:
  *   - Initial mode is selected with SetMode (TLV cmd 0x02) rather than
  *     Load Preset Group (cmd 0x3E) used on newer cameras.
+ *   - `SetCameraControlStatus` (Feature 0xF1 / Action 0x69) is skipped
+ *     (legacy cameras return INVALID_PARAM).
  *
- * Add Hero5/6/8 here once their model_num values are confirmed against
- * GetHardwareInfo on real hardware.
+ * Hero5/Hero6/Hero8 are reasonable candidates for this list but stay out
+ * until verified on hardware.
  */
 static inline bool gopro_model_uses_legacy_ble(camera_model_t model)
 {
@@ -151,19 +156,39 @@ static inline bool gopro_model_uses_legacy_ble(camera_model_t model)
 }
 
 /**
+ * Camera requires the legacy WiFi pair-complete handshake before it will
+ * register the controller in its paired-apps list.  Concretely: after BLE
+ * SMP+GATT setup, the controller must connect to the camera's WiFi AP and
+ * issue
+ *     GET http://10.5.5.9/gp/gpControl/command/wireless/pair/complete
+ *         ?success=1&deviceName=<CONFIG_DEVICE_IDENTITY_NAME>
+ * Without this step the BLE bond is volatile — commands still work in real
+ * time but the camera UI shows "no connection" and the bond is invalidated
+ * on camera power-cycle.
+ *
+ * Verified on Hero7 (firmware HD7.01.01.90.71).  Hero6 and Hero8 are listed
+ * on the assumption that they share the legacy BLE app-pairing model; remove
+ * if hardware testing proves otherwise.  Hero5 may also need this — add once
+ * verified.
+ */
+static inline bool gopro_model_needs_wifi_pair_complete(camera_model_t model)
+{
+    return model == CAMERA_MODEL_GOPRO_HERO6_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO7_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO8_BLACK;
+}
+
+/**
  * Camera is recognised but support is intentionally frozen — when one is
  * detected after pairing, the BLE connection is dropped and the slot is
- * removed.  Other Hero7-related code (legacy predicate, SetMode sender,
- * SetThirdPartyClient wait) is kept for future investigation.
+ * removed.
  *
- * Hero7 (firmware HD7.01.01.90.00 and similar): the camera never clears its
- * "Pairing…" screen and rejects SetShutter with status 0x02, even when driven
- * by reference implementations like gopro-ble-py.  Suspected to require an
- * undocumented authenticated handshake added in later Hero7 firmware.
+ * No models are currently frozen.  Predicate kept for future use.
  */
 static inline bool gopro_model_is_frozen(camera_model_t model)
 {
-    return model == CAMERA_MODEL_GOPRO_HERO7_BLACK;
+    (void)model;
+    return false;
 }
 
 /**

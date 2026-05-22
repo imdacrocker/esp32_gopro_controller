@@ -16,6 +16,7 @@
 #include "esp_timer.h"
 #include "open_gopro_ble_internal.h"
 #include "can_manager.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "gopro_ble/ctrl";
 
@@ -119,8 +120,9 @@ int gopro_control_send_set_cam_ctrl(gopro_ble_ctx_t *ctx)
  *   [7..] phoneName bytes
  *
  * Spec requires phoneName non-empty but states the value has no effect.
+ * phoneName comes from CONFIG_DEVICE_IDENTITY_NAME so it stays in sync with
+ * the NimBLE GAP device name and the legacy wireless/pair/complete deviceName.
  */
-#define GOPRO_PAIRING_FINISH_PHONE_NAME  "ESP32 Controller"
 
 int gopro_control_send_pairing_finish(gopro_ble_ctx_t *ctx)
 {
@@ -134,7 +136,7 @@ int gopro_control_send_pairing_finish(gopro_ble_ctx_t *ctx)
         return -1;
     }
 
-    const char *name      = GOPRO_PAIRING_FINISH_PHONE_NAME;
+    const char *name      = CONFIG_DEVICE_IDENTITY_NAME;
     uint8_t     name_len  = (uint8_t)strlen(name);
     uint8_t     payload   = (uint8_t)(2u    /* feature + action */
                                     + 2u    /* tag + value (result) */
@@ -199,6 +201,54 @@ int gopro_control_send_set_mode_video(gopro_ble_ctx_t *ctx)
     };
 
     ESP_LOGI(TAG, "slot %d: -> SetMode(Video)", ctx->slot);
+    return ble_core_gatt_write(ctx->conn_handle, ctx->gatt.cmd_write,
+                                pkt, sizeof(pkt));
+}
+
+/* ---- Wireless Band setting (force camera AP to 2.4 / 5 GHz) ------------- */
+
+int gopro_control_send_set_wifi_band(gopro_ble_ctx_t *ctx, uint8_t band)
+{
+    if (ctx->conn_handle == GOPRO_CONN_NONE || ctx->gatt.settings_write == 0) {
+        ESP_LOGW(TAG, "slot %d: SetWifiBand skipped — not connected", ctx->slot);
+        return -1;
+    }
+
+    /* TLV: [GPBS hdr=3, setting_id=0xB2, param_len=1, value=0|1]
+     * Same wire format as keepalive — settings IDs share the cmd byte slot. */
+    uint8_t pkt[4] = {
+        0x03u,
+        GOPRO_SETTING_WIRELESS_BAND,
+        0x01u,
+        band,
+    };
+
+    ESP_LOGI(TAG, "slot %d: -> SetWifiBand(%s)",
+             ctx->slot,
+             band == GOPRO_WIFI_BAND_2_4GHZ ? "2.4 GHz" :
+             band == GOPRO_WIFI_BAND_5GHZ   ? "5 GHz"   : "?");
+    return ble_core_gatt_write(ctx->conn_handle, ctx->gatt.settings_write,
+                                pkt, sizeof(pkt));
+}
+
+/* ---- SetWifi (camera AP on/off) ----------------------------------------- */
+
+int gopro_control_send_set_wifi(gopro_ble_ctx_t *ctx, bool on)
+{
+    if (ctx->conn_handle == GOPRO_CONN_NONE || ctx->gatt.cmd_write == 0) {
+        ESP_LOGW(TAG, "slot %d: SetWifi skipped — not connected", ctx->slot);
+        return -1;
+    }
+
+    /* TLV: [GPBS hdr=3, cmd=0x17, param_len=1, value=0|1] */
+    uint8_t pkt[4] = {
+        0x03u,
+        GOPRO_CMD_SET_WIFI,
+        0x01u,
+        on ? GOPRO_WIFI_ON : GOPRO_WIFI_OFF,
+    };
+
+    ESP_LOGI(TAG, "slot %d: -> SetWifi(%s)", ctx->slot, on ? "ON" : "OFF");
     return ble_core_gatt_write(ctx->conn_handle, ctx->gatt.cmd_write,
                                 pkt, sizeof(pkt));
 }

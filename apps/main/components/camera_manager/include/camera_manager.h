@@ -247,6 +247,15 @@ bool camera_manager_has_disconnected_cameras(void);
  */
 esp_err_t camera_manager_mark_first_pair_complete(int slot);
 
+/*
+ * Clear first_pair_complete on the slot and persist to NVS.  Used by the
+ * web UI "Re-pair" affordance to force the legacy wireless/pair/complete
+ * orchestration to re-run on the next BLE reconnect — e.g. after the user
+ * runs Reset Connections on the camera and the camera-side app entry is
+ * wiped.  Returns ESP_OK whether the flag was already false or not.
+ */
+esp_err_t camera_manager_clear_first_pair_complete(int slot);
+
 /* ==========================================================================
  * Pair-attempt state machine (BLE add-camera flow)
  *
@@ -271,6 +280,18 @@ esp_err_t camera_manager_mark_first_pair_complete(int slot);
  *   addr_type is BLE-specific; pass 0 for RC. */
 esp_err_t pair_attempt_begin(const uint8_t addr[6], uint8_t addr_type,
                               pair_attempt_transport_t transport);
+
+/*
+ * Restart the in-flight pair-attempt watchdog with a new timeout.  Used by
+ * long-running post-BLE phases (e.g. the legacy wireless/pair/complete WiFi
+ * handshake in open_gopro_ble/pair_complete.c) to extend their deadline
+ * beyond the default 20-second BLE-setup watchdog.
+ *
+ * No-op if no attempt is in flight.  The watchdog is automatically disarmed
+ * by advance(SUCCESS) / fail() / cancel() — callers don't need to clear it
+ * themselves.
+ */
+void pair_attempt_reset_watchdog(uint32_t timeout_ms);
 
 /* True if a non-terminal pair attempt is in flight and its target address
  * matches addr.  Drivers use this to decide whether to drive the state

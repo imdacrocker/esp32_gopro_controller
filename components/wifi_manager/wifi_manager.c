@@ -14,7 +14,18 @@
 
 static const char *TAG = "wifi_mgr";
 
-#define AP_STARTED_BIT  BIT0
+/* Event-group bits */
+#define AP_STARTED_BIT        BIT0
+#define STA_GOT_IP_BIT        BIT1
+#define STA_DISCONNECTED_BIT  BIT2
+
+/* Tracks which mode the manager is *trying* to be in.  WIFI_EVENT_AP_STOP
+ * only auto-restarts the AP when this is MODE_AP — during a deliberate
+ * sta_join the value is MODE_STA and the auto-restart is suppressed. */
+typedef enum {
+    MODE_AP  = 0,
+    MODE_STA = 1,
+} target_mode_t;
 
 typedef struct {
     bool     active;
@@ -24,6 +35,11 @@ typedef struct {
 
 static EventGroupHandle_t                  s_wifi_events;
 static esp_netif_t                        *s_ap_netif;
+static esp_netif_t                        *s_sta_netif;     /* created on first sta_join */
+static wifi_config_t                       s_ap_config;     /* saved at init so we can re-apply */
+static target_mode_t                       s_target_mode;
+static bool                                s_sta_busy;
+static uint32_t                            s_sta_gw_ip;     /* last STA gateway IP */
 static sta_entry_t                         s_stations[AP_MAX_CONN];
 
 static wifi_mgr_station_associated_cb_t    s_on_associated;
@@ -68,9 +84,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             break;
 
         case WIFI_EVENT_AP_STOP:
-            ESP_LOGW(TAG, "AP stopped unexpectedly — restarting");
             xEventGroupClearBits(s_wifi_events, AP_STARTED_BIT);
-            esp_wifi_start();
+            if (s_target_mode == MODE_AP) {
+                ESP_LOGW(TAG, "AP stopped unexpectedly — restarting");
+                esp_wifi_start();
+            } else {
+                ESP_LOGI(TAG, "AP stopped (deliberate, switching to STA)");
+            }
             break;
 
         case WIFI_EVENT_AP_STACONNECTED: {
@@ -101,17 +121,32 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             break;
         }
 
+        case WIFI_EVENT_STA_DISCONNECTED:
+            /* Only flagged for the in-flight sta_join; passive disconnects
+             * (e.g. signal loss before sta_leave fires) are harmless. */
+            xEventGroupSetBits(s_wifi_events, STA_DISCONNECTED_BIT);
+            ESP_LOGI(TAG, "STA disconnected");
+            break;
+
         default:
             break;
         }
 
-    } else if (base == IP_EVENT && event_id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
-        ip_event_assigned_ip_to_client_t *ev = event_data;
-        sta_entry_t *slot = find_station(ev->mac);
-        if (slot) slot->ip_addr = ev->ip.addr;
-        if (s_on_ip_assigned) s_on_ip_assigned(ev->mac, ev->ip.addr);
-        ESP_LOGI(TAG, "station " MACSTR " assigned " IPSTR,
-                 MAC2STR(ev->mac), IP2STR(&ev->ip));
+    } else if (base == IP_EVENT) {
+        if (event_id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
+            ip_event_assigned_ip_to_client_t *ev = event_data;
+            sta_entry_t *slot = find_station(ev->mac);
+            if (slot) slot->ip_addr = ev->ip.addr;
+            if (s_on_ip_assigned) s_on_ip_assigned(ev->mac, ev->ip.addr);
+            ESP_LOGI(TAG, "station " MACSTR " assigned " IPSTR,
+                     MAC2STR(ev->mac), IP2STR(&ev->ip));
+        } else if (event_id == IP_EVENT_STA_GOT_IP) {
+            ip_event_got_ip_t *ev = event_data;
+            s_sta_gw_ip = ev->ip_info.gw.addr;
+            xEventGroupSetBits(s_wifi_events, STA_GOT_IP_BIT);
+            ESP_LOGI(TAG, "STA got IP " IPSTR " gw " IPSTR,
+                     IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.gw));
+        }
     }
 }
 
@@ -138,6 +173,8 @@ void wifi_manager_init(void)
         WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
 
@@ -187,6 +224,9 @@ void wifi_manager_init(void)
     ap_config.ap.max_connection   = AP_MAX_CONN;
     ap_config.ap.pmf_cfg.required = false;
 
+    s_ap_config   = ap_config;
+    s_target_mode = MODE_AP;
+
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -221,4 +261,169 @@ int wifi_manager_get_connected_stations(wifi_mgr_sta_info_t *out, int max_count)
         }
     }
     return n;
+}
+
+/* ---- AP/STA mode switch ------------------------------------------------- */
+
+static esp_err_t bring_ap_back_up(void)
+{
+    s_target_mode = MODE_AP;
+    xEventGroupClearBits(s_wifi_events, AP_STARTED_BIT);
+
+    esp_err_t err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "bring_ap: esp_wifi_stop rc=0x%x", err);
+    }
+
+    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "bring_ap: set_mode(AP) rc=0x%x", err);
+        return err;
+    }
+    err = esp_wifi_set_config(WIFI_IF_AP, &s_ap_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "bring_ap: set_config rc=0x%x", err);
+        return err;
+    }
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "bring_ap: esp_wifi_start rc=0x%x", err);
+        return err;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_events, AP_STARTED_BIT,
+                                            pdFALSE, pdTRUE,
+                                            pdMS_TO_TICKS(AP_READY_TIMEOUT_MS));
+    if (!(bits & AP_STARTED_BIT)) {
+        ESP_LOGW(TAG, "bring_ap: AP did not start within %d ms", AP_READY_TIMEOUT_MS);
+    }
+    return ESP_OK;
+}
+
+wifi_mgr_err_t wifi_manager_sta_join(const char *ssid,
+                                      const char *password,
+                                      uint32_t   *gw_out,
+                                      uint32_t    timeout_ms)
+{
+    if (!ssid) return WIFI_MGR_ERR_INTERNAL;
+    if (s_sta_busy) {
+        ESP_LOGW(TAG, "sta_join: already busy");
+        return WIFI_MGR_ERR_BUSY;
+    }
+    s_sta_busy = true;
+
+    ESP_LOGI(TAG, "sta_join: target SSID=\"%s\", timeout=%lums",
+             ssid, (unsigned long)timeout_ms);
+
+    /* Lazily create the STA netif on first use. */
+    if (s_sta_netif == NULL) {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+    }
+
+    /* Pause the AP — set target first so WIFI_EVENT_AP_STOP doesn't auto-restart. */
+    s_target_mode = MODE_STA;
+    xEventGroupClearBits(s_wifi_events,
+                          AP_STARTED_BIT | STA_GOT_IP_BIT | STA_DISCONNECTED_BIT);
+    s_sta_gw_ip = 0;
+
+    esp_err_t err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGE(TAG, "sta_join: esp_wifi_stop rc=0x%x", err);
+        bring_ap_back_up();
+        s_sta_busy = false;
+        return WIFI_MGR_ERR_INTERNAL;
+    }
+
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sta_join: set_mode(STA) rc=0x%x", err);
+        bring_ap_back_up();
+        s_sta_busy = false;
+        return WIFI_MGR_ERR_INTERNAL;
+    }
+
+    wifi_config_t sta_cfg = {0};
+    strlcpy((char *)sta_cfg.sta.ssid, ssid, sizeof(sta_cfg.sta.ssid));
+    if (password) {
+        strlcpy((char *)sta_cfg.sta.password, password,
+                sizeof(sta_cfg.sta.password));
+    }
+    sta_cfg.sta.threshold.authmode = (password && password[0])
+                                      ? WIFI_AUTH_WPA2_PSK
+                                      : WIFI_AUTH_OPEN;
+
+    err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sta_join: set_config rc=0x%x", err);
+        bring_ap_back_up();
+        s_sta_busy = false;
+        return WIFI_MGR_ERR_INTERNAL;
+    }
+
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sta_join: esp_wifi_start rc=0x%x", err);
+        bring_ap_back_up();
+        s_sta_busy = false;
+        return WIFI_MGR_ERR_INTERNAL;
+    }
+
+    err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sta_join: esp_wifi_connect rc=0x%x", err);
+        bring_ap_back_up();
+        s_sta_busy = false;
+        return WIFI_MGR_ERR_ASSOC_FAIL;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_events,
+        STA_GOT_IP_BIT | STA_DISCONNECTED_BIT,
+        pdFALSE, pdFALSE,
+        pdMS_TO_TICKS(timeout_ms));
+
+    if (bits & STA_GOT_IP_BIT) {
+        if (gw_out) *gw_out = s_sta_gw_ip;
+        esp_ip4_addr_t gw_print = { .addr = s_sta_gw_ip };
+
+        /* Best-effort: pull the actual channel + RSSI from the driver so the
+         * caller can confirm which band the camera ended up on (2.4 GHz =
+         * channels 1-14; 5 GHz = 36+). */
+        wifi_ap_record_t ap = {0};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            ESP_LOGI(TAG, "sta_join: success, gw=" IPSTR
+                          " ch=%u rssi=%d band=%s",
+                     IP2STR(&gw_print), (unsigned)ap.primary, (int)ap.rssi,
+                     ap.primary >= 36 ? "5 GHz" : "2.4 GHz");
+        } else {
+            ESP_LOGI(TAG, "sta_join: success, gw=" IPSTR " (ap_info unavailable)",
+                     IP2STR(&gw_print));
+        }
+        return WIFI_MGR_OK;  /* leave radio in STA mode for caller's HTTP work */
+    }
+
+    /* Failure path: either DISCONNECTED fired, or we timed out. */
+    if (bits & STA_DISCONNECTED_BIT) {
+        ESP_LOGW(TAG, "sta_join: assoc failed");
+    } else {
+        ESP_LOGW(TAG, "sta_join: DHCP timeout after %lums",
+                 (unsigned long)timeout_ms);
+    }
+    bring_ap_back_up();
+    s_sta_busy = false;
+    return (bits & STA_DISCONNECTED_BIT) ? WIFI_MGR_ERR_ASSOC_FAIL
+                                          : WIFI_MGR_ERR_DHCP_TIMEOUT;
+}
+
+void wifi_manager_sta_leave(void)
+{
+    if (!s_sta_busy) {
+        return;
+    }
+    ESP_LOGI(TAG, "sta_leave: returning to AP mode");
+
+    esp_wifi_disconnect();  /* best-effort */
+    bring_ap_back_up();
+    s_sta_busy  = false;
+    s_sta_gw_ip = 0;
 }

@@ -55,6 +55,16 @@
  * (0 = AP off, 1 = AP on).  Camera pushes this whenever its WiFi AP toggles. */
 #define GOPRO_CHR_WIFI_AP_STATE_UUID       GOPRO_UUID128_INIT(0x05)  /* GP-0005 Indicate */
 
+/* WiFi AP SSID / Password (GP-0001 service) — Read, encryption-required.
+ * Verified on a real Hero7 (firmware HD7.01.01.90.71):
+ *   GP-0002 = SSID,  GP-0003 = password.
+ * (Konrad's goprowifihack docs have these reversed — they may be different
+ * on older models or his table is simply mistaken.)
+ * Reading either also triggers SMP bonding on legacy Hero5–Hero8 if it has
+ * not already happened. */
+#define GOPRO_CHR_WIFI_AP_SSID_UUID        GOPRO_UUID128_INIT(0x02)  /* GP-0002 Read */
+#define GOPRO_CHR_WIFI_AP_PASSWORD_UUID    GOPRO_UUID128_INIT(0x03)  /* GP-0003 Read */
+
 /* CCCD descriptor UUID (standard BLE) */
 #define BLE_GATT_DSC_CLT_CFG_UUID16  0x2902
 
@@ -112,6 +122,40 @@
  * harmlessly, so it is sent unconditionally.
  */
 #define GOPRO_CMD_SET_THIRD_PARTY_CLIENT  0x50u
+
+/*
+ * Wireless Band (setting ID 178 / 0xB2) — pick 2.4 GHz vs 5 GHz for the
+ * camera's WiFi AP.  Written to: settings_write (GP-0074).  Response on:
+ * settings_resp_notify (GP-0075) — standard [setting_id, status] format.
+ * TLV payload: [GPBS_hdr=3, setting_id=0xB2, param_len=1, value]
+ *   value: 0x00 = 2.4 GHz, 0x01 = 5 GHz
+ *
+ * Officially documented on Hero9+ but the legacy-BLE pair-complete flow
+ * sends it to Hero6/7/8 as well — accepted on cameras that support the
+ * setting, rejected (status 0x02) otherwise.  We use it to force the
+ * camera AP onto 2.4 GHz so our SoftAP (locked to channel 11) can still
+ * function in APSTA mode during the pair-complete handshake.
+ */
+#define GOPRO_SETTING_WIRELESS_BAND   0xB2u
+#define GOPRO_WIFI_BAND_2_4GHZ        0x00u
+#define GOPRO_WIFI_BAND_5GHZ          0x01u
+
+/*
+ * SetWifi / AP Control (0x17) — toggle the camera's WiFi AP.
+ * Written to: cmd_write (GP-0072)
+ * Response on: cmd_resp_notify (GP-0073)
+ * TLV payload: [GPBS_hdr=3, cmd=0x17, param_len=1, value]
+ *   value: 0x00 = AP off, 0x01 = AP on
+ *
+ * Used by the legacy-BLE pair-complete orchestration (Hero6/7/8): we bring
+ * the camera AP up, switch our radio to STA, issue the legacy
+ * `wireless/pair/complete` HTTP call to register the controller in the
+ * camera's paired-apps list, then bring our AP back up and turn the camera
+ * AP back off.
+ */
+#define GOPRO_CMD_SET_WIFI    0x17u
+#define GOPRO_WIFI_ON         0x01u
+#define GOPRO_WIFI_OFF        0x00u
 
 /*
  * SetMode (0x02) — legacy mode selection.
@@ -186,6 +230,23 @@ static const uint8_t k_gopro_keepalive_pkt[4] = {
  */
 #define GOPRO_QUERY_GET_STATUS_VALUE  0x13u
 #define GOPRO_STATUS_ID_ENCODING_ACTIVE  0x0Au
+
+/*
+ * Status ID 76 (0x4C) — current Wireless Band the camera AP is operating on.
+ * Read-only counterpart to setting 178 (which Hero7 rejects).  Value byte:
+ *   0x00 = 2.4 GHz, 0x01 = 5 GHz.
+ * Worth reading on legacy-BLE cameras before the pair-complete WiFi switch:
+ * if the camera reports 5 GHz, our 2.4-GHz-only ESP32 STA cannot join and
+ * we can surface a precise "set Wi-Fi Band to 2.4 GHz on the camera" error
+ * instead of waiting through three failed STA attempts.
+ *
+ * Officially Hero9+ in the OpenGoPro spec, but statuses are usually more
+ * permissive than settings on older firmware — try and fall through if the
+ * camera doesn't include the id=0x4C entry in its response.
+ */
+#define GOPRO_STATUS_ID_WIRELESS_BAND    0x4Cu
+#define GOPRO_WIRELESS_BAND_2_4GHZ       0x00u
+#define GOPRO_WIRELESS_BAND_5GHZ         0x01u
 
 /* Recording status poll cadence — matches RC-emulation poll. */
 #define GOPRO_STATUS_POLL_INTERVAL_MS  5000u

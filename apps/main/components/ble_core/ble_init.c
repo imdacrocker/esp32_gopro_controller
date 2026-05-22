@@ -1,5 +1,6 @@
 #include "ble_core_internal.h"
 
+#include "sdkconfig.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -48,7 +49,7 @@ void ble_core_init(void)
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
     ble_svc_gap_init();
-    ble_svc_gap_device_name_set("ESP32 Controller");
+    ble_svc_gap_device_name_set(CONFIG_DEVICE_IDENTITY_NAME);
 
     nimble_port_freertos_init(ble_host_task);
 }

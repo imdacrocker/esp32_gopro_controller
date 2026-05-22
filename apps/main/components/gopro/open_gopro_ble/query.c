@@ -162,10 +162,19 @@ static void dispatch(gopro_ble_ctx_t *ctx, gopro_channel_t chan,
 
     case GOPRO_CHAN_SETTINGS:
         if (len >= GOPRO_RESP_HDR_LEN) {
-            ESP_LOGD(TAG, "slot %d: settings resp cmd=0x%02x status=0x%02x",
-                     ctx->slot,
-                     data[GOPRO_RESP_CMD_IDX],
-                     data[GOPRO_RESP_STATUS_IDX]);
+            uint8_t setting_id = data[GOPRO_RESP_CMD_IDX];
+            uint8_t status     = data[GOPRO_RESP_STATUS_IDX];
+            /* Keepalive (0x5B) fires every 3 s — keep it at DEBUG.  Everything
+             * else (band changes, mode changes, etc.) is rare enough to log
+             * at INFO so the pair-complete diagnostic doesn't need a custom
+             * response handler. */
+            if (setting_id == GOPRO_CMD_KEEPALIVE) {
+                ESP_LOGD(TAG, "slot %d: keepalive ack status=0x%02x",
+                         ctx->slot, status);
+            } else {
+                ESP_LOGI(TAG, "slot %d: settings resp id=0x%02x status=0x%02x",
+                         ctx->slot, setting_id, status);
+            }
         }
         break;
 

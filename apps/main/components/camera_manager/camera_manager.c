@@ -560,6 +560,31 @@ esp_err_t camera_manager_mark_first_pair_complete(int slot)
     return err;
 }
 
+esp_err_t camera_manager_clear_first_pair_complete(int slot)
+{
+    if (!slot_valid(slot)) return ESP_ERR_INVALID_ARG;
+    lock();
+    if (!s_slots[slot].is_configured) {
+        unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_slots[slot].first_pair_complete) {
+        unlock();
+        return ESP_OK;
+    }
+    s_slots[slot].first_pair_complete = false;
+    esp_err_t err = save_slot_to_nvs(slot);
+    unlock();
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "slot %d: first_pair_complete cleared", slot);
+    } else {
+        ESP_LOGW(TAG, "slot %d: first_pair_complete clear failed: %s",
+                 slot, esp_err_to_name(err));
+    }
+    return err;
+}
+
 /* ================================================================
  * Queries
  * ================================================================ */
