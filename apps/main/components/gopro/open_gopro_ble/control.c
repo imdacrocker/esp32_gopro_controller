@@ -205,6 +205,32 @@ int gopro_control_send_set_mode_video(gopro_ble_ctx_t *ctx)
                                 pkt, sizeof(pkt));
 }
 
+/* ---- Wireless Band setting (force camera AP to 2.4 / 5 GHz) ------------- */
+
+int gopro_control_send_set_wifi_band(gopro_ble_ctx_t *ctx, uint8_t band)
+{
+    if (ctx->conn_handle == GOPRO_CONN_NONE || ctx->gatt.settings_write == 0) {
+        ESP_LOGW(TAG, "slot %d: SetWifiBand skipped — not connected", ctx->slot);
+        return -1;
+    }
+
+    /* TLV: [GPBS hdr=3, setting_id=0xB2, param_len=1, value=0|1]
+     * Same wire format as keepalive — settings IDs share the cmd byte slot. */
+    uint8_t pkt[4] = {
+        0x03u,
+        GOPRO_SETTING_WIRELESS_BAND,
+        0x01u,
+        band,
+    };
+
+    ESP_LOGI(TAG, "slot %d: -> SetWifiBand(%s)",
+             ctx->slot,
+             band == GOPRO_WIFI_BAND_2_4GHZ ? "2.4 GHz" :
+             band == GOPRO_WIFI_BAND_5GHZ   ? "5 GHz"   : "?");
+    return ble_core_gatt_write(ctx->conn_handle, ctx->gatt.settings_write,
+                                pkt, sizeof(pkt));
+}
+
 /* ---- SetWifi (camera AP on/off) ----------------------------------------- */
 
 int gopro_control_send_set_wifi(gopro_ble_ctx_t *ctx, bool on)

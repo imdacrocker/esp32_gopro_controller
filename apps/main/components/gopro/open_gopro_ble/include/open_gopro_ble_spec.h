@@ -124,6 +124,23 @@
 #define GOPRO_CMD_SET_THIRD_PARTY_CLIENT  0x50u
 
 /*
+ * Wireless Band (setting ID 178 / 0xB2) — pick 2.4 GHz vs 5 GHz for the
+ * camera's WiFi AP.  Written to: settings_write (GP-0074).  Response on:
+ * settings_resp_notify (GP-0075) — standard [setting_id, status] format.
+ * TLV payload: [GPBS_hdr=3, setting_id=0xB2, param_len=1, value]
+ *   value: 0x00 = 2.4 GHz, 0x01 = 5 GHz
+ *
+ * Officially documented on Hero9+ but the legacy-BLE pair-complete flow
+ * sends it to Hero6/7/8 as well — accepted on cameras that support the
+ * setting, rejected (status 0x02) otherwise.  We use it to force the
+ * camera AP onto 2.4 GHz so our SoftAP (locked to channel 11) can still
+ * function in APSTA mode during the pair-complete handshake.
+ */
+#define GOPRO_SETTING_WIRELESS_BAND   0xB2u
+#define GOPRO_WIFI_BAND_2_4GHZ        0x00u
+#define GOPRO_WIFI_BAND_5GHZ          0x01u
+
+/*
  * SetWifi / AP Control (0x17) — toggle the camera's WiFi AP.
  * Written to: cmd_write (GP-0072)
  * Response on: cmd_resp_notify (GP-0073)
@@ -213,6 +230,23 @@ static const uint8_t k_gopro_keepalive_pkt[4] = {
  */
 #define GOPRO_QUERY_GET_STATUS_VALUE  0x13u
 #define GOPRO_STATUS_ID_ENCODING_ACTIVE  0x0Au
+
+/*
+ * Status ID 76 (0x4C) — current Wireless Band the camera AP is operating on.
+ * Read-only counterpart to setting 178 (which Hero7 rejects).  Value byte:
+ *   0x00 = 2.4 GHz, 0x01 = 5 GHz.
+ * Worth reading on legacy-BLE cameras before the pair-complete WiFi switch:
+ * if the camera reports 5 GHz, our 2.4-GHz-only ESP32 STA cannot join and
+ * we can surface a precise "set Wi-Fi Band to 2.4 GHz on the camera" error
+ * instead of waiting through three failed STA attempts.
+ *
+ * Officially Hero9+ in the OpenGoPro spec, but statuses are usually more
+ * permissive than settings on older firmware — try and fall through if the
+ * camera doesn't include the id=0x4C entry in its response.
+ */
+#define GOPRO_STATUS_ID_WIRELESS_BAND    0x4Cu
+#define GOPRO_WIRELESS_BAND_2_4GHZ       0x00u
+#define GOPRO_WIRELESS_BAND_5GHZ         0x01u
 
 /* Recording status poll cadence — matches RC-emulation poll. */
 #define GOPRO_STATUS_POLL_INTERVAL_MS  5000u

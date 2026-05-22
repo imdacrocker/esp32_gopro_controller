@@ -10,6 +10,70 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Added
+- **Hero6 / Hero7 / Hero8 BLE pairing support** with a new one-shot WiFi
+  pair-complete handshake at first-pair. These cameras accept BLE
+  pairing at the SMP level but do not register the controller as a
+  paired app until it hits the legacy
+  `GET http://10.5.5.9/gp/gpControl/command/wireless/pair/complete?success=1&deviceName=<name>`
+  HTTP endpoint on the camera's own WiFi AP. The new
+  `apps/main/components/gopro/open_gopro_ble/pair_complete.c`
+  orchestration reads the camera's SSID/password over BLE, briefly
+  switches the ESP32 radio to STA mode to issue the HTTP call, and
+  restores the SoftAP. Verified on Hero7 (firmware HD7.01.01.90.71,
+  both stock and GoPro Labs). Hero6 and Hero8 are listed on the
+  assumption they share the legacy pairing model — adjust the
+  `gopro_model_needs_wifi_pair_complete()` predicate if hardware
+  testing proves otherwise.
+- **5 GHz fail-fast for Hero6/7/8** via BLE status 76 (`WirelessBand`).
+  The ESP32-S3 radio is 2.4 GHz only — if the camera reports 5 GHz, the
+  orchestration fails immediately with a precise error message
+  (`"Camera on 5 GHz; set Wi-Fi Band to 2.4 GHz, re-pair"`) instead of
+  thrashing through STA join attempts. Surfaced through the existing
+  `/api/pair/status` polling flow.
+- **`wifi_manager_sta_join()` / `wifi_manager_sta_leave()`** API in
+  `components/wifi_manager/` — blocking AP-down → STA-join → AP-up
+  cycle for the pair-complete dance. Connected SoftAP clients see a
+  brief link drop and reconnect automatically when the AP comes back up.
+- **`POST /api/repair-camera`** endpoint — clears `first_pair_complete`
+  on a slot so the legacy WiFi pair-complete handshake re-runs on the
+  next BLE reconnect. For use after the user runs Reset Connections on
+  the camera and the camera-side app entry is wiped.
+- **`CONFIG_DEVICE_IDENTITY_NAME`** Kconfig option (default
+  `"ESP32 Controller"`, under "GoPro Controller — Identity") —
+  centralizes the controller's display name across NimBLE GAP, GoPro
+  RequestPairingFinish, and the wireless/pair/complete URL. Override
+  via `idf.py menuconfig` or `sdkconfig.defaults`.
+- **`pair_attempt_reset_watchdog(timeout_ms)`** — long-running
+  post-BLE phases (currently just pair-complete) can extend their
+  deadline beyond the default 20 s BLE-setup watchdog. The watchdog
+  still catches genuine hangs.
+- **Hero8 model enum** (`CAMERA_MODEL_GOPRO_HERO8_BLACK = 50`) and
+  `"HERO8 Black"` mapping in `gopro_model_from_name()`.
+
+### Changed
+- **Hero7 BLE control is enabled** (was deliberately frozen in prior
+  releases because of the misdiagnosed "SetShutter rejected with
+  status 0x02" symptom). The rejection was actually
+  "controller not registered as a paired app" — same on stock and Labs
+  firmware. The pair-complete handshake above resolves it.
+- **Hero6/Hero7/Hero8 removed from `gopro_model_uses_rc_emulation()`** —
+  these models are now BLE-only. Existing RC-paired slots for these
+  models after upgrade have no matching driver; remove via the web UI
+  and re-pair via BLE. Hero5 stays in RC-emulation pending hardware
+  verification of its BLE path.
+- **`gopro_model_is_frozen()` returns false for all models.** Predicate
+  kept as a hook for future use.
+- **`RequestPairingFinish` is skipped on `needs_wifi_pair_complete`
+  cameras.** On Hero7 it dismisses the on-screen pairing prompt
+  prematurely and interferes with the camera-side app registration that
+  the HTTP handshake drives. Other models (Hero11 Mini / Hero12 /
+  Hero13 / Max 2 / Lit Hero) still receive it.
+- **Non-keepalive BLE settings responses now log at INFO** so
+  diagnostic state from one-shot writes (e.g. setting 178 WirelessBand)
+  is visible without enabling DEBUG. Keepalive responses (fire every
+  3 s) stay at DEBUG.
+
 ### Fixed
 - **Hero10 (and other BLE-control cameras) no longer flap between
   recording / not-recording in the UI while actually recording, and the
@@ -20,6 +84,17 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   recording, so the mismatch-correction loop kept re-issuing
   `SetShutter(ON)` after the 10 s grace expired. The poll now uses status
   ID 10 (`Encoding`), which is the actual recording flag.
+- **HTTP `ESP_ERR_HTTP_INCOMPLETE_DATA` with a 2xx status is now
+  treated as success in the pair-complete flow.** Hero7 returns
+  malformed chunked HTTP responses (bare CR without LF in places), but
+  by the time the body is streaming the camera has already processed
+  the request and registered us. Previously we tore the slot down on
+  this error even though the camera-side registration succeeded.
+- **`wifi_manager` now subscribes to `IP_EVENT_STA_GOT_IP`.** Previous
+  registration covered only the AP-side `IP_EVENT_ASSIGNED_IP_TO_CLIENT`,
+  so `sta_join()` reported DHCP timeout even though the STA actually
+  received an IP. Surfaced once the pair-complete flow started
+  exercising STA mode.
 
 ## [1.0.6] - 2026-05-16
 

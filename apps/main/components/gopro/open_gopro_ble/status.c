@@ -15,9 +15,14 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "open_gopro_ble_internal.h"
 
 static const char *TAG = "gopro_ble/status";
+
+/* Forward declaration — defined below, called from the status-response parser. */
+static void band_bridge_signal(uint8_t value);
 
 /*
  * GetStatusValue request payload (3 bytes):
@@ -105,7 +110,93 @@ void gopro_status_handle_response(gopro_ble_ctx_t *ctx,
                          new_status == CAMERA_RECORDING_ACTIVE ? "ACTIVE" : "IDLE");
                 ctx->cached_status = new_status;
             }
+        } else if (id == GOPRO_STATUS_ID_WIRELESS_BAND && len >= 1) {
+            band_bridge_signal(body[pos]);
         }
         pos += len;
     }
+}
+
+/* ---- One-shot wireless-band query --------------------------------------- *
+ *
+ * Issues a GetStatusValue request for status ID 76 (WirelessBand) and blocks
+ * the caller until either the camera responds (handled above) or the timeout
+ * elapses.  Only one query may be in flight at a time — gated by s_busy.
+ *
+ * Camera firmwares older than Hero9 may not include the id=0x4C entry in
+ * their response (the request returns OK but the requested status is just
+ * omitted).  In that case we time out and report unknown — the caller falls
+ * back to the optimistic "try STA join, see what happens" path.
+ *
+ * Lives in this file because the response handler above is what dispatches
+ * incoming status entries.  Keeping the bridge co-located avoids spilling
+ * status-id knowledge into a separate compilation unit.
+ */
+
+static SemaphoreHandle_t s_band_done;
+static bool              s_band_busy;
+static uint8_t           s_band_value;
+static bool              s_band_known;
+
+static void band_bridge_signal(uint8_t value)
+{
+    if (!s_band_busy) return;
+    s_band_value = value;
+    s_band_known = true;
+    if (s_band_done) xSemaphoreGive(s_band_done);
+}
+
+esp_err_t gopro_status_query_band_blocking(gopro_ble_ctx_t *ctx,
+                                            uint32_t  timeout_ms,
+                                            bool     *out_known,
+                                            bool     *out_is_5ghz)
+{
+    if (!ctx || !out_known || !out_is_5ghz) return ESP_ERR_INVALID_ARG;
+    *out_known   = false;
+    *out_is_5ghz = false;
+
+    if (ctx->conn_handle == GOPRO_CONN_NONE || ctx->gatt.query_write == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_band_busy) return ESP_ERR_INVALID_STATE;
+
+    if (s_band_done == NULL) {
+        s_band_done = xSemaphoreCreateBinary();
+        if (s_band_done == NULL) return ESP_ERR_NO_MEM;
+    }
+    /* Drain any stale signal so we wait fresh. */
+    (void)xSemaphoreTake(s_band_done, 0);
+
+    s_band_known = false;
+    s_band_value = 0;
+    s_band_busy  = true;
+
+    /* GetStatusValue(76): [hdr=2, cmd=0x13, status_id=0x4C] */
+    const uint8_t pkt[3] = {
+        0x02u,
+        GOPRO_QUERY_GET_STATUS_VALUE,
+        GOPRO_STATUS_ID_WIRELESS_BAND,
+    };
+    ESP_LOGI(TAG, "slot %d: -> GetStatusValue(WirelessBand)", ctx->slot);
+    int rc = ble_core_gatt_write(ctx->conn_handle, ctx->gatt.query_write,
+                                  pkt, sizeof(pkt));
+    if (rc != 0) {
+        s_band_busy = false;
+        ESP_LOGW(TAG, "slot %d: band query enqueue rc=%d", ctx->slot, rc);
+        return ESP_FAIL;
+    }
+
+    (void)xSemaphoreTake(s_band_done, pdMS_TO_TICKS(timeout_ms));
+    s_band_busy = false;
+
+    if (s_band_known) {
+        *out_known   = true;
+        *out_is_5ghz = (s_band_value == GOPRO_WIRELESS_BAND_5GHZ);
+        ESP_LOGI(TAG, "slot %d: WirelessBand = %s",
+                 ctx->slot, *out_is_5ghz ? "5 GHz" : "2.4 GHz");
+    } else {
+        ESP_LOGI(TAG, "slot %d: WirelessBand not reported (camera too old or busy)",
+                 ctx->slot);
+    }
+    return ESP_OK;
 }

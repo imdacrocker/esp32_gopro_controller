@@ -101,6 +101,20 @@ static void watchdog_disarm(void)
     if (s_watchdog) esp_timer_stop(s_watchdog);
 }
 
+void pair_attempt_reset_watchdog(uint32_t timeout_ms)
+{
+    if (!s_mutex || !s_watchdog) return;
+
+    lock();
+    bool in_flight = (s_info.state != PAIR_ATTEMPT_IDLE) && !is_terminal(s_info.state);
+    unlock();
+    if (!in_flight) return;
+
+    esp_timer_stop(s_watchdog);  /* harmless if not running */
+    esp_timer_start_once(s_watchdog, (uint64_t)timeout_ms * 1000ULL);
+    ESP_LOGI(TAG, "watchdog reset: %lu ms", (unsigned long)timeout_ms);
+}
+
 esp_err_t pair_attempt_begin(const uint8_t addr[6], uint8_t addr_type,
                               pair_attempt_transport_t transport)
 {

@@ -385,7 +385,20 @@ wifi_mgr_err_t wifi_manager_sta_join(const char *ssid,
     if (bits & STA_GOT_IP_BIT) {
         if (gw_out) *gw_out = s_sta_gw_ip;
         esp_ip4_addr_t gw_print = { .addr = s_sta_gw_ip };
-        ESP_LOGI(TAG, "sta_join: success, gw=" IPSTR, IP2STR(&gw_print));
+
+        /* Best-effort: pull the actual channel + RSSI from the driver so the
+         * caller can confirm which band the camera ended up on (2.4 GHz =
+         * channels 1-14; 5 GHz = 36+). */
+        wifi_ap_record_t ap = {0};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            ESP_LOGI(TAG, "sta_join: success, gw=" IPSTR
+                          " ch=%u rssi=%d band=%s",
+                     IP2STR(&gw_print), (unsigned)ap.primary, (int)ap.rssi,
+                     ap.primary >= 36 ? "5 GHz" : "2.4 GHz");
+        } else {
+            ESP_LOGI(TAG, "sta_join: success, gw=" IPSTR " (ap_info unavailable)",
+                     IP2STR(&gw_print));
+        }
         return WIFI_MGR_OK;  /* leave radio in STA mode for caller's HTTP work */
     }
 

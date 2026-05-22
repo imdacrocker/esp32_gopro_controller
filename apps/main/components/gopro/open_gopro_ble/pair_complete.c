@@ -51,6 +51,7 @@
 #include "open_gopro_ble_internal.h"
 #include "open_gopro_ble.h"
 #include "camera_manager.h"
+#include "gopro_model.h"
 
 static const char *TAG = "gopro_ble/pc";
 
@@ -62,6 +63,13 @@ static const char *TAG = "gopro_ble/pc";
 #define PC_STA_RETRY_COUNT       3
 #define PC_STA_RETRY_DELAY_MS    3000
 #define PC_HTTP_TIMEOUT_MS       5000
+
+/* Time we let the camera spend reconfiguring its AP after a WirelessBand
+ * setting change.  Changing the band forces the camera to tear down and
+ * re-advertise its AP on the new band; 5 s is enough on Hero7 in our
+ * testing.  If the camera silently rejects the setting (e.g. the model
+ * doesn't support 178) the delay is just wasted time, not harmful. */
+#define PC_BAND_SETTLE_MS        5000
 
 /* ---- BLE-read bridge ---------------------------------------------------- */
 
@@ -174,6 +182,13 @@ static void pair_complete_task(void *arg)
 
     ESP_LOGI(TAG, "slot %d: pair-complete orchestration starting", slot);
 
+    /* The pair_attempt watchdog defaults to 20 s from begin().  By the time
+     * we're invoked the BLE setup has already consumed ~15 s of that budget
+     * and the full pair-complete path (band settle + STA join + HTTP + AP
+     * restore) takes another ~25 s.  Hand the watchdog a fresh 60 s so it
+     * still catches genuine hangs without tripping on normal operation. */
+    pair_attempt_reset_watchdog(60000);
+
     gopro_ble_ctx_t *ctx = gopro_ctx_by_slot(slot);
     if (!ctx || ctx->conn_handle != conn_handle) {
         ESP_LOGW(TAG, "slot %d: BLE link gone before pair-complete started", slot);
@@ -208,19 +223,56 @@ static void pair_complete_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGI(TAG, "slot %d: read password (%d bytes)", slot, (int)strlen(password));
+    ESP_LOGI(TAG, "slot %d: read password=\"%s\" (%d bytes)",
+             slot, password, (int)strlen(password));
 
     /* 3. SetWifi(ON) skipped — the camera's AP is already up after the BLE
      * session is established, and explicitly toggling it appears to push the
      * radio onto 5 GHz, which our ESP32 STA can't join.  Leaving the camera's
      * AP in whatever state it negotiated for itself. */
 
+    /* 3a. Query status 76 (WirelessBand) and fail fast if the camera is on
+     * 5 GHz.  The ESP32-S3 radio is 2.4 GHz only — if the camera is beaconing
+     * on a 5 GHz channel we cannot scan it and 3 × 8 s of failed STA attempts
+     * end with a generic error.  Asking up-front lets us tell the user the
+     * exact knob to change.  Older firmware may not include the entry in its
+     * response (out_known=false) — in that case proceed and let the STA join
+     * either succeed or fail with the existing message. */
+    bool band_known = false, band_5ghz = false;
+    (void)gopro_status_query_band_blocking(ctx, 2000, &band_known, &band_5ghz);
+    if (band_known && band_5ghz) {
+        ESP_LOGE(TAG, "slot %d: camera reports 5 GHz — set Preferences -> "
+                      "Connections -> Wi-Fi Band -> 2.4 GHz on the camera "
+                      "and re-pair", slot);
+        fail_and_cleanup(slot, conn_handle,
+                         "Camera on 5 GHz; set Wi-Fi Band to 2.4 GHz, re-pair");
+        s_busy = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    /* 3b. Force the camera's WiFi band to 2.4 GHz via setting 178.  Hero7's
+     * firmware rejects this with INVALID_PARAM (settings_resp id=0xB2
+     * status=0x02 — verified on HD7.01.01.90.71), so for legacy-BLE cameras
+     * we skip the write and the matching settle wait entirely.  Hero9+ accepts
+     * it; Hero6/Hero8 status unverified, so we try and let the camera answer.
+     *
+     * Either way the band-status check above is the authoritative pre-flight;
+     * this is just a best-effort nudge for cameras that haven't been manually
+     * configured to 2.4 GHz. */
+    camera_model_t model = camera_manager_get_model(slot);
+    if (!gopro_model_uses_legacy_ble(model)) {
+        if (gopro_control_send_set_wifi_band(ctx, GOPRO_WIFI_BAND_2_4GHZ) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(PC_BAND_SETTLE_MS));
+        }
+    }
+
     /* 4. Pause our SoftAP, switch to STA, join the camera.  Retried — the
      * camera may not be beaconing yet on the first attempt even after the
      * settle delay above; each retry gives it another 15 s window.  If all
-     * attempts miss, the camera is most likely advertising on 5 GHz (the
-     * ESP32-S3 radio is 2.4 GHz only) and the user needs to set the
-     * camera's Wi-Fi band manually. */
+     * attempts miss, the camera is most likely still advertising on 5 GHz
+     * (the ESP32-S3 radio is 2.4 GHz only) and the user may need to set the
+     * camera's Wi-Fi band manually under Preferences -> Connections. */
     uint32_t gw_ip = 0;
     wifi_mgr_err_t we = WIFI_MGR_ERR_INTERNAL;
     for (int attempt = 1; attempt <= PC_STA_RETRY_COUNT; attempt++) {

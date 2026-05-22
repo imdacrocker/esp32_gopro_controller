@@ -157,6 +157,14 @@ int  gopro_control_send_set_mode_video(gopro_ble_ctx_t *ctx);
  */
 int  gopro_control_send_set_wifi(gopro_ble_ctx_t *ctx, bool on);
 
+/*
+ * Send Wireless Band setting (ID 178) to force the camera AP onto 2.4 GHz
+ * (band=GOPRO_WIFI_BAND_2_4GHZ) or 5 GHz (band=GOPRO_WIFI_BAND_5GHZ).
+ * Fire-and-forget — response on settings_resp_notify is not awaited by
+ * this call.  Returns 0 on enqueue success, -1 on no-link.
+ */
+int  gopro_control_send_set_wifi_band(gopro_ble_ctx_t *ctx, uint8_t band);
+
 /* Start the 3-second periodic BLE keepalive timer. */
 void gopro_keepalive_start(gopro_ble_ctx_t *ctx);
 
@@ -190,6 +198,24 @@ void gopro_status_poll_stop(gopro_ble_ctx_t *ctx);
  */
 void gopro_status_handle_response(gopro_ble_ctx_t *ctx,
                                    const uint8_t *body, uint16_t body_len);
+
+/*
+ * One-shot blocking query of status ID 76 (WirelessBand).  Sends
+ * GetStatusValue(76) on the Query channel and waits up to timeout_ms for the
+ * response to be parsed by gopro_status_handle_response.
+ *
+ *   *out_known   = true if the camera included a WirelessBand entry,
+ *                  false on timeout / camera silently dropped the ID.
+ *   *out_is_5ghz = true if the byte was 0x01 (5 GHz), false otherwise.
+ *
+ * Must be called from a real FreeRTOS task (it blocks on a semaphore).
+ * Only one query may be in flight at a time.  Returns ESP_OK whether the
+ * camera answered or not — check *out_known to disambiguate.
+ */
+esp_err_t gopro_status_query_band_blocking(gopro_ble_ctx_t *ctx,
+                                            uint32_t  timeout_ms,
+                                            bool     *out_known,
+                                            bool     *out_is_5ghz);
 
 /* ---- Response reassembly (query.c) --------------------------------------- */
 
