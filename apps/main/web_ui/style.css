@@ -85,11 +85,18 @@ button {
   letter-spacing: 0.02em;
 }
 
-#settings-btn {
+#header-actions {
   position: absolute;
-  right: 16px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#settings-btn,
+#power-btn {
   background: none;
   border: none;
   padding: 6px;
@@ -101,7 +108,8 @@ button {
   justify-content: center;
 }
 
-#settings-btn:hover { color: #333; background: #f0f0f0; }
+#settings-btn:hover,
+#power-btn:hover { color: #333; background: #f0f0f0; }
 
 /* ---- Section shell (shared by rc-status, auto-control, cam-status) ------- */
 
@@ -507,7 +515,10 @@ button {
 
 #settings-overlay,
 #advanced-overlay,
-#about-overlay    { align-items: flex-start; justify-content: center; }
+#about-overlay,
+#power-overlay,
+#can-bus-overlay,
+#updates-overlay  { align-items: flex-start; justify-content: center; }
 #modal-overlay,
 #add-camera-overlay { align-items: flex-end;   justify-content: center; }
 

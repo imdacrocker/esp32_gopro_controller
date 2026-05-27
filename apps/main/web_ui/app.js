@@ -531,20 +531,81 @@ function openSettings() {
         document.getElementById('tz-select').value = d.tz_offset_hours;
         updateSystemTimeLabel(d.tz_offset_hours);
     }).catch(() => {});
+}
 
-    // Load current CAN bitrate
+function closeSettings() {
+    settingsOverlay.classList.remove('open');
+}
+
+/* ---- CAN-BUS Settings modal --------------------------------------------- *
+ * Opening dismisses Settings; closing reopens Settings (same pattern as the
+ * Advanced sub-modal). */
+
+const canBusOverlay = document.getElementById('can-bus-overlay');
+
+document.getElementById('can-bus-btn').addEventListener('click', () => {
+    closeSettings();
+    openCanBus();
+});
+document.getElementById('can-bus-done').addEventListener('click', () => {
+    closeCanBus();
+    settingsOverlay.classList.add('open');
+});
+canBusOverlay.addEventListener('click', e => {
+    if (e.target === canBusOverlay) {
+        closeCanBus();
+        settingsOverlay.classList.add('open');
+    }
+});
+
+function openCanBus() {
+    canBusOverlay.classList.add('open');
     apiFetch('GET', '/api/settings/can-bitrate').then(d => {
         canBitrateInitial = d.bitrate_bps;
         document.getElementById('can-bitrate-select').value = String(d.bitrate_bps);
         const hint = document.getElementById('can-bitrate-hint');
         if (hint) hint.hidden = true;
     }).catch(() => {});
-
 }
 
-function closeSettings() {
-    settingsOverlay.classList.remove('open');
+function closeCanBus() {
+    canBusOverlay.classList.remove('open');
 }
+
+/* ---- Updates modal ------------------------------------------------------- *
+ * Same Settings→sub-modal→Settings pattern. The actual fetch of version /
+ * channel / Check-for-updates wiring lives in updates.js. */
+
+const updatesOverlay = document.getElementById('updates-overlay');
+
+document.getElementById('updates-btn').addEventListener('click', () => {
+    closeSettings();
+    updatesOverlay.classList.add('open');
+});
+document.getElementById('updates-done').addEventListener('click', () => {
+    updatesOverlay.classList.remove('open');
+    settingsOverlay.classList.add('open');
+});
+updatesOverlay.addEventListener('click', e => {
+    if (e.target === updatesOverlay) {
+        updatesOverlay.classList.remove('open');
+        settingsOverlay.classList.add('open');
+    }
+});
+
+/* ---- Power modal --------------------------------------------------------- */
+
+const powerOverlay = document.getElementById('power-overlay');
+
+document.getElementById('power-btn').addEventListener('click', () => {
+    powerOverlay.classList.add('open');
+});
+document.getElementById('power-done').addEventListener('click', () => {
+    powerOverlay.classList.remove('open');
+});
+powerOverlay.addEventListener('click', e => {
+    if (e.target === powerOverlay) powerOverlay.classList.remove('open');
+});
 
 /* ---- Advanced modal ------------------------------------------------------ *
  * Opening Advanced dismisses Settings so the two are never stacked. Closing

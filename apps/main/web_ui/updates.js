@@ -36,9 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     els.result          = document.getElementById('upd-result');
     els.recoveryBtn     = document.getElementById('upd-recovery-btn');
 
-    // Refresh whenever the user opens settings — versions and channel may
-    // have changed since the last open (e.g., a recovery round-trip).
-    document.getElementById('settings-btn')
+    // Refresh whenever the user opens the Updates sub-modal — versions and
+    // channel may have changed since the last open (e.g., a recovery
+    // round-trip).
+    document.getElementById('updates-btn')
         .addEventListener('click', loadPanel);
 
     els.checkBtn.addEventListener('click', onCheckClick);

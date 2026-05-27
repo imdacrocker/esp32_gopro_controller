@@ -10,6 +10,34 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Changed
+- **Settings menu reorganised in the web UI.** The Settings top-sheet is now
+  a navigation hub rather than a single flat panel — long-form controls
+  live in dedicated sub-modals reached the same Settings→sub-modal→Settings
+  round-trip pattern already used by Advanced Settings.
+  - **Power moved out of Settings** into its own top-sheet modal opened by
+    a new power-icon button placed immediately right of the gear icon in
+    the page header. The modal contains the existing **Reboot** (orange)
+    and **Shut Down** (red) buttons, unchanged in behaviour. Removes the
+    Reboot/Shut Down buttons from the bottom of the Settings modal.
+  - **CAN-BUS Settings sub-modal.** Added a "CAN-BUS Settings" entry button
+    in Settings; tapping it opens a sub-modal containing the existing CAN
+    Baud Rate selector and the orange "Reboot to apply" hint. The bitrate
+    is loaded on sub-modal open instead of on Settings open.
+  - **Updates sub-modal.** Added an "Updates" entry button in Settings;
+    tapping it opens a sub-modal containing the Channel selector, the
+    "Check for updates" button, and the existing `#upd-result` panel.
+    `updates.js` now refreshes the version / channel state when the
+    Updates button is clicked instead of when the gear icon is clicked.
+  - **Settings modal body now contains:** Time Zone (inline) → CAN-BUS
+    Settings → Advanced Settings → Updates → About. The "Device" and
+    "Updates" section headings are dropped — every long-form group now
+    lives in its own sub-modal, so the headings became redundant.
+  - DOM IDs that other code relies on (`can-bitrate-select`,
+    `can-bitrate-hint`, `upd-channel-select`, `upd-check-btn`,
+    `upd-result`, `reboot-btn`, `shutdown-btn`) are unchanged — only
+    their parent overlay changed.
+
 ## [1.0.9] - 2026-05-27
 
 ### Added
