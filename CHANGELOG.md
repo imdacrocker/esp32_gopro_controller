@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-05-26
+
 ### Added
 - **Disconnected overlay in the web UI.** When the page can't reach the
   controller for ~3 consecutive requests (~3–6 s), the UI hides every modal
@@ -255,7 +257,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...HEAD
+[1.0.8]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.4...v1.0.5
