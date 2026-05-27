@@ -306,6 +306,34 @@ void rc_send_datetime(int slot)
     }
 }
 
+/* ---- Sleep (camera power off) ------------------------------------------- *
+ *
+ * Issued by shutdown_manager via the camera_driver_t.sleep vtable entry.
+ * Path /gp/gpControl/command/system/sleep is documented for Hero4 and
+ * verified on Hero5; the rest of the RC-emulation family is best-effort.
+ * Models that silently 404 will simply auto-sleep once their keepalive
+ * times out — we don't care about the response code beyond logging it.
+ */
+esp_err_t rc_send_sleep(int slot)
+{
+    gopro_wifi_rc_ctx_t *ctx = &s_ctx[slot];
+    if (!ctx->last_ip) {
+        ESP_LOGI(TAG, "slot %d: sleep (HTTP) skipped — no IP", slot);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "slot %d: sleep (HTTP) → %s", slot, RC_HTTP_PATH_SLEEP);
+    int code = rc_http_get(ctx->last_ip, RC_HTTP_PATH_SLEEP,
+                           RC_HTTP_TIMEOUT_MS, NULL, 0);
+    if (code >= 200 && code < 300) {
+        ESP_LOGI(TAG, "slot %d: sleep (HTTP) OK (status %d)", slot, code);
+    } else {
+        ESP_LOGI(TAG, "slot %d: sleep (HTTP) non-2xx (status %d) — relying on auto-sleep",
+                 slot, code);
+    }
+    return ESP_OK;
+}
+
 /* ---- Sync time all handler (called from work task on RC_CMD_SYNC_TIME_ALL) */
 
 void rc_handle_sync_time_all(void)

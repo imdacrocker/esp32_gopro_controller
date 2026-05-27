@@ -193,6 +193,21 @@
     (1u + 2u + GOPRO_DT_PARAM_DATE_LEN + 2u + GOPRO_DT_PARAM_TIME_LEN)  /* 14 bytes */
 
 /*
+ * Sleep (Command ID 0x05)
+ * Written to: cmd_write (GP-0072)
+ * Response on: cmd_resp_notify (GP-0073)
+ * TLV payload: [GPBS_hdr=1, cmd=0x05] — no parameters.
+ *
+ * Puts the camera to sleep.  Officially documented for Hero9/10/13 in the
+ * OpenGoPro BLE spec; Hero7/8 firmware behaviour is unverified — we send the
+ * TLV anyway and ignore an INVALID_PARAM response (the camera will fall back
+ * to its own auto-sleep once our keepalive stops).
+ *
+ * Spec: https://gopro.github.io/OpenGoPro/ble/features/control.html#sleep
+ */
+#define GOPRO_CMD_SLEEP  0x05u
+
+/*
  * BLE keepalive (Command ID 0x5B)
  * Written to: settings_write (GP-0074)
  * TLV payload: [GPBS_hdr=3, cmd=0x5B, param_len=1, value=0x42]

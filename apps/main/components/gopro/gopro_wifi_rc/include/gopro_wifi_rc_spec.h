@@ -129,6 +129,13 @@ static const uint8_t RC_PKT_CV[13] = {
 #define RC_HTTP_PATH_DATETIME_FMT \
     "/gp/gpControl/command/setup/date_time?p=%%%02x%%%02x%%%02x%%%02x%%%02x%%%02x"
 
+/* Sleep — sent unconditionally to every RC-emulation slot during shutdown.
+ * Verified on Hero4 + Hero5; sent best-effort to the rest of the RC family
+ * (Hero4 Session / Hero6 / Hero7 / Hero 2018 / LEGACY_RC).  See
+ * docs/design/shutdown.md §5. */
+#define RC_HTTP_PATH_SLEEP \
+    "/gp/gpControl/command/system/sleep"
+
 /* ---- Timing (§17.6 / §17.8) ---------------------------------------------- */
 
 #define RC_KEEPALIVE_INTERVAL_MS    3000   /* per-slot UDP keepalive period */

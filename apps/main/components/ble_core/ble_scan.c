@@ -78,7 +78,8 @@ static int scan_event_cb(struct ble_gap_event *event, void *arg)
             /* Background reconnect: connect to known cameras. */
             if (!s_connecting &&
                 g_cbs.is_known_addr &&
-                g_cbs.is_known_addr(event->disc.addr)) {
+                g_cbs.is_known_addr(event->disc.addr) &&
+                !(g_cbs.is_shutdown_active && g_cbs.is_shutdown_active())) {
 
                 s_connecting = true;
                 ble_gap_disc_cancel();
@@ -135,6 +136,10 @@ void start_scan_if_needed(void)
 {
     if (s_connecting || s_discovering) {
         ESP_LOGI(TAG, "camera is connecting, skipping background scan");
+        return;
+    }
+    if (g_cbs.is_shutdown_active && g_cbs.is_shutdown_active()) {
+        ESP_LOGI(TAG, "shutdown active, skipping background scan");
         return;
     }
     if (g_cbs.has_disconnected_cameras && !g_cbs.has_disconnected_cameras()) {

@@ -16,9 +16,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "host/ble_gap.h"
 #include "open_gopro_ble_internal.h"
 #include "ble_core.h"
 #include "gopro_model.h"
+#include "shutdown_manager.h"
 
 static const char *TAG = "gopro_ble";
 
@@ -157,6 +159,22 @@ void open_gopro_ble_connect_by_addr(const ble_addr_t *addr)
     ble_core_connect_by_addr(addr);
 }
 
+/* ---- Shutdown helper (docs/design/shutdown.md) -------------------------- */
+
+void open_gopro_ble_terminate_slot(int slot)
+{
+    gopro_ble_ctx_t *ctx = gopro_ctx_by_slot(slot);
+    if (!ctx) return;
+    if (ctx->conn_handle == GOPRO_CONN_NONE) {
+        ESP_LOGI(TAG, "slot %d: terminate skipped — not connected", slot);
+        return;
+    }
+    int rc = ble_gap_terminate(ctx->conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    ESP_LOGI(TAG, "slot %d: ble_gap_terminate rc=%d", slot, rc);
+    /* gopro_on_disconnected will clear ctx->conn_handle when the controller
+     * acknowledges the disconnect. */
+}
+
 /* ---- UTC sync (§15.5) ---------------------------------------------------- */
 
 void open_gopro_ble_sync_time_all(void)
@@ -211,6 +229,15 @@ static camera_recording_status_t drv_get_recording_status(void *arg)
     return ctx->cached_status;
 }
 
+static esp_err_t drv_sleep(void *arg)
+{
+    gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
+    if (gopro_control_send_sleep(ctx) != 0) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 static void drv_teardown(void *arg)
 {
     gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
@@ -234,6 +261,7 @@ static const camera_driver_t k_gopro_ble_driver = {
     .teardown             = drv_teardown,
     .update_slot_index    = drv_update_slot_index,
     .on_wifi_disconnected = NULL,
+    .sleep                = drv_sleep,
 };
 
 static bool model_matches(camera_model_t model)
@@ -281,6 +309,7 @@ void open_gopro_ble_init(void)
         .on_notify_rx              = gopro_notify_rx,
         .is_known_addr             = camera_manager_is_known_ble_addr,
         .has_disconnected_cameras  = camera_manager_has_disconnected_cameras,
+        .is_shutdown_active        = shutdown_manager_is_active,
     };
     ble_core_register_callbacks(&cbs);
 

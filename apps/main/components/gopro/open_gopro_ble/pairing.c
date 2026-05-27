@@ -7,8 +7,10 @@
 #include <string.h>
 #include "esp_log.h"
 #include "host/ble_hs.h"
+#include "host/ble_gap.h"
 #include "host/ble_gatt.h"
 #include "open_gopro_ble_internal.h"
+#include "shutdown_manager.h"
 
 static const char *TAG = "gopro_ble/pair";
 
@@ -44,6 +46,16 @@ static int on_mtu_exchanged(uint16_t conn_handle, const struct ble_gatt_error *e
 
 void gopro_on_connected(uint16_t conn_handle, ble_addr_t addr)
 {
+    /* If shutdown is in progress, defense-in-depth: terminate any new BLE
+     * connection that gets through (e.g. a camera-initiated reconnect that
+     * raced our teardown).  See docs/design/shutdown.md §7. */
+    if (shutdown_manager_is_active()) {
+        ESP_LOGI(TAG, "shutdown active — terminating new connection conn=%u",
+                 conn_handle);
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return;
+    }
+
     /* L2 is up; ble_core has already kicked off ble_gap_security_initiate().
      * If this is the camera the user is currently pairing, record the
      * conn_handle so cancel() can terminate the link and advance the state

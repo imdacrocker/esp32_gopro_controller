@@ -275,6 +275,26 @@ int gopro_control_send_shutter(gopro_ble_ctx_t *ctx, bool on)
                                 pkt, sizeof(pkt));
 }
 
+/* ---- Sleep (camera power off) ------------------------------------------- */
+
+int gopro_control_send_sleep(gopro_ble_ctx_t *ctx)
+{
+    if (ctx->conn_handle == GOPRO_CONN_NONE || ctx->gatt.cmd_write == 0) {
+        ESP_LOGW(TAG, "slot %d: Sleep skipped — not connected", ctx->slot);
+        return -1;
+    }
+
+    /* TLV: [GPBS hdr=1, cmd=0x05] — no parameters. */
+    uint8_t pkt[2] = {
+        0x01u,
+        GOPRO_CMD_SLEEP,
+    };
+
+    ESP_LOGI(TAG, "slot %d: → Sleep", ctx->slot);
+    return ble_core_gatt_write(ctx->conn_handle, ctx->gatt.cmd_write,
+                                pkt, sizeof(pkt));
+}
+
 /* ---- BLE keepalive (§15.1) ----------------------------------------------- */
 
 static void on_keepalive_timer(void *arg)

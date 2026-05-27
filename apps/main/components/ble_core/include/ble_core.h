@@ -22,6 +22,14 @@ typedef bool (*ble_core_is_known_addr_cb_t)(ble_addr_t addr);
 /* Returns true if any paired camera is currently disconnected — gates background scan. */
 typedef bool (*ble_core_has_disconnected_cameras_cb_t)(void);
 
+/*
+ * Returns true if the system is in shutdown mode (SHUTTING_DOWN or COMPLETE).
+ * When true, ble_core suppresses background reconnect scans and connection
+ * attempts so cameras aren't redialed mid-shutdown.  Nullable — when NULL
+ * the gate is treated as "not shutting down".  See docs/design/shutdown.md §7.
+ */
+typedef bool (*ble_core_is_shutdown_active_cb_t)(void);
+
 typedef struct {
     ble_core_on_disc_cb_t                   on_disc;
     ble_core_on_connected_cb_t              on_connected;
@@ -30,6 +38,7 @@ typedef struct {
     ble_core_on_notify_rx_cb_t              on_notify_rx;
     ble_core_is_known_addr_cb_t             is_known_addr;
     ble_core_has_disconnected_cameras_cb_t  has_disconnected_cameras;
+    ble_core_is_shutdown_active_cb_t        is_shutdown_active;
 } ble_core_callbacks_t;
 
 /*

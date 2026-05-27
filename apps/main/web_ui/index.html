@@ -131,6 +131,8 @@
     <button class="settings-action-btn" id="about-btn">About</button>
 
     <button class="settings-reboot-btn" id="reboot-btn">Reboot</button>
+
+    <button class="settings-reboot-btn settings-shutdown-btn" id="shutdown-btn">Shut Down</button>
   </div>
 </div>
 
@@ -266,6 +268,21 @@
     </svg>
     <div class="disconnect-title">DISCONNECTED</div>
     <button id="disconnect-reload-btn">RELOAD</button>
+  </div>
+</div>
+
+<!-- Shutdown-complete overlay. Shown when GET /api/shutdown returns
+     state == "complete" (either after the user pressed Shut Down, or on a
+     page reload that landed after the shutdown finished). Hidden by default. -->
+<div id="shutdown-overlay" hidden>
+  <div class="disconnect-box">
+    <svg class="disconnect-icon" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M32 12 V32" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M21 20.5 A15 15 0 1 0 43 20.5" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+    </svg>
+    <div class="disconnect-title">Shut down complete!</div>
+    <div class="shutdown-subtitle">OK to power off</div>
+    <button id="shutdown-reboot-btn">REBOOT</button>
   </div>
 </div>
 

@@ -25,4 +25,6 @@ idf_component_register(
         wifi_manager
         esp_http_client
         esp_netif
+    PRIV_REQUIRES
+        shutdown_manager
 )
