@@ -187,6 +187,15 @@ static void drv_update_slot_index(void *arg, int new_slot)
     ctx->slot = new_slot;
 }
 
+static esp_err_t drv_sleep(void *arg)
+{
+    /* rc_send_sleep blocks for up to RC_HTTP_TIMEOUT_MS on the HTTP GET, so
+     * the caller (shutdown_manager_slot_task) must already be running on its
+     * own per-slot FreeRTOS task — never on a NimBLE / wifi-event context. */
+    gopro_wifi_rc_ctx_t *ctx = (gopro_wifi_rc_ctx_t *)arg;
+    return rc_send_sleep(ctx->slot);
+}
+
 /* on_wifi_disconnected is NULL — RC cameras' lifecycle is driven entirely
  * via the gopro_wifi_rc_on_station_* public API. */
 
@@ -200,6 +209,7 @@ static const camera_driver_t k_gopro_rc_driver = {
     .broadcasts_to_all    = true,
     .start_recording_all  = drv_start_recording_all,
     .stop_recording_all   = drv_stop_recording_all,
+    .sleep                = drv_sleep,
 };
 
 /* ---- Driver registration ------------------------------------------------- */

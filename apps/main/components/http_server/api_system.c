@@ -137,6 +137,8 @@ static esp_err_t handler_get_auto_control(httpd_req_t *req)
 
 static esp_err_t handler_post_auto_control(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[128];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 

@@ -12,6 +12,7 @@
 #include "can_manager.h"
 #include "http_server.h"
 #include "log_ring.h"
+#include "shutdown_manager.h"
 
 static const char *TAG = "main";
 
@@ -98,6 +99,12 @@ void app_main(void)
 
     camera_manager_init();
 
+    /* Initialise shutdown state machine before any component that consults
+     * shutdown_manager_is_active() (can_manager RX/TX gates, ble_core scan
+     * gate, http_server reject_if_shutting_down helper).
+     * See docs/design/shutdown.md §13. */
+    shutdown_manager_init();
+
     /* Registers RC-emulation driver, starts work/shutter/UDP tasks. */
     gopro_wifi_rc_init();
 
@@ -136,12 +143,14 @@ void app_main(void)
 
     /* Wire CAN callbacks before starting the TWAI driver. */
     can_manager_callbacks_t can_cbs = {
-        .on_logging_state     = NULL,   /* camera_manager handles intent directly */
-        .on_logging_state_arg = NULL,
-        .on_utc_acquired      = on_gps_utc_acquired,
-        .on_utc_acquired_arg  = NULL,
-        .on_rx_frame          = NULL,
-        .on_rx_frame_arg      = NULL,
+        .on_logging_state         = NULL,   /* camera_manager handles intent directly */
+        .on_logging_state_arg     = NULL,
+        .on_utc_acquired          = on_gps_utc_acquired,
+        .on_utc_acquired_arg      = NULL,
+        .on_rx_frame              = NULL,
+        .on_rx_frame_arg          = NULL,
+        .on_shutdown_request      = shutdown_manager_on_can_request,
+        .on_shutdown_request_arg  = NULL,
     };
     can_manager_register_callbacks(&can_cbs);
     can_manager_init();

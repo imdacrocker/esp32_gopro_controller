@@ -11,6 +11,7 @@
 
 #include "can_manager.h"
 #include "camera_manager.h"
+#include "shutdown_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_twai.h"
@@ -37,6 +38,7 @@ static const char *TAG = "can_manager";
 #define CAN_ID_LOGGING_CMD   0x600u
 #define CAN_ID_CAM_STATUS    0x601u
 #define CAN_ID_GPS_UTC       0x602u
+#define CAN_ID_SHUTDOWN_REQ  0x603u
 
 #define STATUS_TX_PERIOD_US  200000   /* 5 Hz */
 #define WATCHDOG_TIMEOUT_US  5000000  /* 5 s  */
@@ -147,6 +149,13 @@ static void watchdog_cb(void *arg)
 
 static void handle_logging_cmd(const can_rx_item_t *item)
 {
+    /* During shutdown, drop logging-state frames silently — accepting them
+     * would re-issue recording intent and undo the per-slot stop_recording
+     * step.  See docs/design/shutdown.md §6.2. */
+    if (shutdown_manager_is_active()) {
+        return;
+    }
+
     can_logging_state_t state = item->data[0]
         ? LOGGING_STATE_LOGGING
         : LOGGING_STATE_NOT_LOGGING;
@@ -253,6 +262,23 @@ static void load_utc_from_nvs(void)
     apply_utc_to_system_clock(saved_ms);
     ESP_LOGI(TAG, "UTC restored from NVS: %llu ms (not session-synced)",
              (unsigned long long)saved_ms);
+}
+
+/* ---- 0x603 handler -------------------------------------------------------- *
+ *
+ * Byte 0 non-zero requests system shutdown.  shutdown_manager_request() is
+ * idempotent so the callback fires unconditionally — repeated frames during
+ * SHUTTING_DOWN / COMPLETE collapse into no-ops at the shutdown_manager
+ * layer.  See docs/design/shutdown.md §6.1.
+ */
+static void handle_shutdown_request(const can_rx_item_t *item)
+{
+    if (item->dlc < 1 || item->data[0] == 0) {
+        return;
+    }
+    if (s_cbs.on_shutdown_request) {
+        s_cbs.on_shutdown_request(s_cbs.on_shutdown_request_arg);
+    }
 }
 
 /* ---- 0x602 handler -------------------------------------------------------- */
@@ -384,6 +410,9 @@ static void rx_task(void *arg)
         case CAN_ID_GPS_UTC:
             handle_gps_utc(&item);
             break;
+        case CAN_ID_SHUTDOWN_REQ:
+            handle_shutdown_request(&item);
+            break;
         default:
             break;
         }
@@ -399,6 +428,15 @@ static void tx_timer_cb(void *arg)
      * at 5 Hz.  Gate is re-opened by on_state_change_isr() once the
      * controller leaves BUS_OFF. */
     if (!s_can_tx_enabled) {
+        return;
+    }
+
+    /* Once shutdown is complete, stop announcing camera status on the bus.
+     * RaceCapture-side observers treat CAN silence on 0x601 as the shutdown
+     * indicator.  We keep transmitting during SHUTTING_DOWN so the bus sees
+     * the per-slot state transition to DISCONNECTED in real time.
+     * See docs/design/shutdown.md §6.3. */
+    if (shutdown_manager_get_state() == SHUTDOWN_STATE_COMPLETE) {
         return;
     }
 

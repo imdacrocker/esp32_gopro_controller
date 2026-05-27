@@ -10,6 +10,35 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-05-27
+
+### Added
+- **System shutdown.** A new `shutdown_manager` component coordinates a
+  per-slot stop-recording → sleep → BLE-terminate → teardown sequence
+  with a 5 s deadline per camera. It can be triggered two ways: the new
+  red **Shut Down** button in the web UI Settings panel, or a CAN
+  `0x603` frame with byte0 != 0. Camera sleep uses the BLE TLV `0x05`
+  command on Hero9+ (and best-effort on Hero7/8), and the HTTP
+  `/gp/gpControl/command/system/sleep` endpoint on every WiFi RC slot
+  (verified on Hero4 and Hero5).
+- **`POST /api/shutdown` / `GET /api/shutdown`** endpoints. POST starts
+  the shutdown sequence; GET reports `{state, failed_slots}` for the web
+  UI to poll.
+- **Shutdown overlay in the web UI.** On completion every modal is
+  dismissed and a full-screen "Shut down complete! OK to power off"
+  panel is revealed with an orange **REBOOT** button. REBOOT probes
+  `GET /api/version` before reloading so the page only refreshes once
+  the controller is reachable again.
+
+### Changed
+- **Shutdown state machine** (`IDLE → SHUTTING_DOWN → COMPLETE`,
+  RAM-only). While a shutdown is in progress, inbound CAN `0x600`
+  control frames are dropped, BLE reconnect attempts are suppressed via
+  a new `ble_core` callback, and camera-action POSTs return `503`.
+  `/api/reboot` stays available throughout. Once the sequence reaches
+  `COMPLETE`, CAN `0x601` status transmission stops — RaceCapture
+  treats the resulting CAN silence as the shutdown indicator.
+
 ## [1.0.8] - 2026-05-26
 
 ### Added

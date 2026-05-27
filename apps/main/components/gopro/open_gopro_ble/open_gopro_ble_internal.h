@@ -129,6 +129,13 @@ int  gopro_control_send_set_cam_ctrl(gopro_ble_ctx_t *ctx);
 int  gopro_control_send_shutter(gopro_ble_ctx_t *ctx, bool on);
 
 /*
+ * Send Sleep (TLV cmd 0x05) on cmd_write.  Fire-and-forget — does not wait
+ * for the cmd_resp_notify response.  Returns 0 on enqueue success, -1 if
+ * the slot is not connected or has no cmd_write handle.
+ */
+int  gopro_control_send_sleep(gopro_ble_ctx_t *ctx);
+
+/*
  * Send RequestPairingFinish (Feature 0x03 / Action 0x01) on the Network
  * Management channel.  Tells the camera the initial pairing flow is complete,
  * which clears the on-screen pairing prompt on supported models.  Best-effort:
