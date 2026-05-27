@@ -8,6 +8,7 @@
 #include <string.h>
 #include "esp_http_server.h"
 #include "cJSON.h"
+#include "shutdown_manager.h"
 
 /* ---- Handler registration (called from driver.c) ------------------------- */
 
@@ -17,6 +18,7 @@ void api_settings_register(httpd_handle_t server);
 void api_system_register(httpd_handle_t server);
 void api_ota_register(httpd_handle_t server);
 void api_logs_register(httpd_handle_t server);
+void api_shutdown_register(httpd_handle_t server);
 
 /* ---- Shared helpers ------------------------------------------------------ */
 
@@ -83,4 +85,24 @@ static inline void send_json(httpd_req_t *req, const char *json)
 {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
+}
+
+/*
+ * Reject action-style requests while shutdown is in progress.  Returns
+ * ESP_FAIL after emitting a 503 response if the shutdown_manager state is
+ * non-IDLE; returns ESP_OK and does nothing otherwise.  Call from the top
+ * of POST handlers that mutate camera/connection state.
+ *
+ * Read-only GET handlers, the shutdown endpoints themselves, and
+ * POST /api/reboot deliberately do NOT call this — the UI must still be
+ * able to observe state and the user must keep an escape hatch.
+ * See docs/design/shutdown.md §8.
+ */
+static inline esp_err_t reject_if_shutting_down(httpd_req_t *req)
+{
+    if (!shutdown_manager_is_active()) return ESP_OK;
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"shutdown in progress\"}");
+    return ESP_FAIL;
 }

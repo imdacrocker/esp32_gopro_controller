@@ -74,3 +74,15 @@ void open_gopro_ble_sync_time_all(void);
  * Must be called after camera_manager_init() and before ble_core_init().
  */
 void open_gopro_ble_init(void);
+
+/* ---- Shutdown helper (docs/design/shutdown.md) -------------------------- */
+
+/*
+ * Terminate the BLE link for the given slot, if any.  Idempotent — no-op
+ * when the slot has no active connection.  Used by shutdown_manager to
+ * explicitly drop the link after the sleep TLV has been sent so the camera
+ * doesn't wait for its own supervision timeout.  The matching
+ * BLE_GAP_EVENT_DISCONNECT will fire as normal and clear the slot's
+ * conn_handle via the standard on_disconnected callback path.
+ */
+void open_gopro_ble_terminate_slot(int slot);

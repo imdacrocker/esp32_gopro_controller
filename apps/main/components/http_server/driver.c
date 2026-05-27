@@ -232,7 +232,7 @@ void http_server_init(void)
     httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
     config.stack_size        = 12288;
     config.max_open_sockets  = 8;
-    config.max_uri_handlers  = 42;   /* 5 assets + 7 system + 10 cameras + 2 rc + 7 settings + 6 ota + 3 logs = 40, +2 margin */
+    config.max_uri_handlers  = 44;   /* 5 assets + 7 system + 10 cameras + 2 rc + 7 settings + 6 ota + 3 logs + 2 shutdown = 42, +2 margin */
     config.uri_match_fn      = httpd_uri_match_wildcard;
 
     httpd_handle_t server = NULL;
@@ -277,6 +277,7 @@ void http_server_init(void)
     api_settings_register(server);
     api_ota_register(server);
     api_logs_register(server);
+    api_shutdown_register(server);
 
     ESP_LOGI(TAG, "HTTP server started");
 }

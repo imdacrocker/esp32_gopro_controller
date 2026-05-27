@@ -35,6 +35,12 @@ struct camera_driver {
     bool                        broadcasts_to_all;
     esp_err_t                  (*start_recording_all)(void);
     esp_err_t                  (*stop_recording_all)(void);
+
+    /* Nullable — send a model-appropriate sleep command and return ESP_OK on
+     * enqueue (not on camera ACK; the shutdown_manager budgets the overall
+     * timeout itself).  Return ESP_ERR_NOT_SUPPORTED if the model has no
+     * usable sleep path.  See docs/design/shutdown.md §5. */
+    esp_err_t                  (*sleep)(void *ctx);
 };
 
 /* ---- Public slot info struct (§9) ---- */
@@ -212,6 +218,22 @@ void camera_manager_set_auto_control(bool enabled);
 /* ----- Slot removal with compaction (§20.5) ----- */
 
 esp_err_t camera_manager_remove_slot(int slot);
+
+/* ----- Shutdown helpers (docs/design/shutdown.md) -----
+ *
+ * camera_manager_invoke_sleep — call the driver's sleep vtable entry for the
+ * slot.  Returns ESP_ERR_NOT_SUPPORTED if the slot has no driver or no sleep
+ * handler.  Forwards the driver's own return code otherwise.  Non-blocking:
+ * the driver enqueues the command; the caller is responsible for any
+ * per-camera deadline.
+ *
+ * camera_manager_teardown_slot — call the driver's teardown vtable entry on
+ * the slot WITHOUT touching NVS or removing the slot from the table.  Used by
+ * shutdown_manager to stop driver timers and release transport-specific
+ * resources while keeping the camera paired across the next reboot.
+ */
+esp_err_t camera_manager_invoke_sleep(int slot);
+void      camera_manager_teardown_slot(int slot);
 
 /*
  * Reorder camera slots in RAM and NVS (§20.6).

@@ -787,6 +787,58 @@ bool camera_manager_get_auto_control(void) { return s_auto_control; }
 void camera_manager_set_auto_control(bool enabled) { s_auto_control = enabled; }
 
 /* ================================================================
+ * Shutdown helpers (docs/design/shutdown.md)
+ * ================================================================ */
+
+esp_err_t camera_manager_invoke_sleep(int slot)
+{
+    if (!slot_valid(slot)) return ESP_ERR_INVALID_ARG;
+
+    const camera_driver_t *drv = NULL;
+    void                  *ctx = NULL;
+
+    lock();
+    if (s_slots[slot].driver) {
+        drv = s_slots[slot].driver;
+        ctx = s_slots[slot].driver_ctx;
+    }
+    unlock();
+
+    if (!drv || !drv->sleep) return ESP_ERR_NOT_SUPPORTED;
+    return drv->sleep(ctx);
+}
+
+void camera_manager_teardown_slot(int slot)
+{
+    if (!slot_valid(slot)) return;
+
+    /* Stop the mismatch poll timer first — it acquires the mutex on tick. */
+    stop_poll_timer(slot);
+
+    const camera_driver_t *drv = NULL;
+    void                  *ctx = NULL;
+
+    lock();
+    camera_slot_t *sl = &s_slots[slot];
+    drv = sl->driver;
+    ctx = sl->driver_ctx;
+
+    /* Mark the slot as no longer ready so derived state (is_recording,
+     * CAN 0x601 state) reflects the disconnect immediately, without waiting
+     * for the BLE disconnect callback. */
+    sl->wifi_status     = WIFI_CAM_NONE;
+    sl->ip_addr         = 0;
+    sl->grace_until_us  = 0;
+    unlock();
+
+    if (drv && drv->teardown) {
+        drv->teardown(ctx);
+    }
+
+    ESP_LOGI(TAG, "slot %d: teardown (shutdown path)", slot);
+}
+
+/* ================================================================
  * Slot removal with compaction (§20.5)
  * ================================================================ */
 

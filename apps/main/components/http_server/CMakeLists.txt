@@ -7,6 +7,7 @@ idf_component_register(
         "api_system.c"
         "api_ota.c"
         "api_logs.c"
+        "api_shutdown.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -20,6 +21,7 @@ idf_component_register(
         gopro_wifi_rc
         ota_io
         log_ring
+        shutdown_manager
         esp_http_server
         esp_app_format
         app_update

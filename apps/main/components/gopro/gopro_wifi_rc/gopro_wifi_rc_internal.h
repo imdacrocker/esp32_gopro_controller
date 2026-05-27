@@ -109,6 +109,15 @@ void rc_handle_sync_time_all(void);
 void rc_send_datetime(int slot);
 
 /*
+ * Issue HTTP GET /gp/gpControl/command/system/sleep to the slot's camera.
+ * Sent unconditionally for any RC-driven slot during system shutdown.
+ * Returns ESP_OK on any 2xx response or transport failure (best-effort —
+ * the camera is going away regardless); ESP_ERR_INVALID_STATE if the slot
+ * has no last_ip.  See docs/design/shutdown.md §5.
+ */
+esp_err_t rc_send_sleep(int slot);
+
+/*
  * Issue a plain HTTP/1.0 GET to camera at ip:RC_HTTP_PORT.  Used today only
  * by rc_send_datetime — identification went over UDP `cv` instead.
  *

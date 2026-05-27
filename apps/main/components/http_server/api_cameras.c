@@ -216,6 +216,8 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
 
 static esp_err_t handler_shutter(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[128];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -270,6 +272,8 @@ static esp_err_t handler_shutter(httpd_req_t *req)
 
 static esp_err_t handler_repair_camera(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -302,6 +306,8 @@ static esp_err_t handler_repair_camera(httpd_req_t *req)
 
 static esp_err_t handler_remove_camera(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -335,6 +341,8 @@ static esp_err_t handler_remove_camera(httpd_req_t *req)
 
 static esp_err_t handler_reorder_cameras(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[128];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -443,6 +451,7 @@ static esp_err_t handler_cameras(httpd_req_t *req)
 
 static esp_err_t handler_scan(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
     open_gopro_ble_start_discovery();
     ESP_LOGI(TAG, "BLE scan started");
     send_json(req, "{}");
@@ -453,6 +462,7 @@ static esp_err_t handler_scan(httpd_req_t *req)
 
 static esp_err_t handler_scan_cancel(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
     open_gopro_ble_stop_discovery();
     ESP_LOGI(TAG, "BLE scan cancelled");
     send_json(req, "{}");
@@ -463,6 +473,8 @@ static esp_err_t handler_scan_cancel(httpd_req_t *req)
 
 static esp_err_t handler_pair(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[128];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -561,6 +573,8 @@ static esp_err_t handler_pair_status(httpd_req_t *req)
 
 static esp_err_t handler_pair_cancel(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     esp_err_t err = pair_attempt_cancel();
     if (err == ESP_ERR_INVALID_STATE) {
         /* No attempt in flight — not an error from the UI's POV; just report

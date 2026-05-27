@@ -30,15 +30,25 @@ typedef void (*can_logging_state_cb_t)(can_logging_state_t state, void *arg);
 /* Exactly once, on the first valid 0x602 frame (year > 2020). */
 typedef void (*can_utc_acquired_cb_t)(uint64_t utc_ms, void *arg);
 
+/*
+ * Fires on every received 0x603 frame with byte0 != 0 (request shutdown).
+ * Idempotent — repeated requests during SHUTTING_DOWN / COMPLETE are
+ * handled by the shutdown_manager itself; the callback fires unconditionally.
+ * See docs/design/shutdown.md §6.
+ */
+typedef void (*can_shutdown_request_cb_t)(void *arg);
+
 /* ---- Callback registration struct ---------------------------------------- */
 
 typedef struct {
-    can_rx_frame_cb_t       on_rx_frame;           /* nullable */
-    void                   *on_rx_frame_arg;
-    can_logging_state_cb_t  on_logging_state;       /* nullable */
-    void                   *on_logging_state_arg;
-    can_utc_acquired_cb_t   on_utc_acquired;        /* nullable */
-    void                   *on_utc_acquired_arg;
+    can_rx_frame_cb_t          on_rx_frame;             /* nullable */
+    void                      *on_rx_frame_arg;
+    can_logging_state_cb_t     on_logging_state;         /* nullable */
+    void                      *on_logging_state_arg;
+    can_utc_acquired_cb_t      on_utc_acquired;          /* nullable */
+    void                      *on_utc_acquired_arg;
+    can_shutdown_request_cb_t  on_shutdown_request;      /* nullable */
+    void                      *on_shutdown_request_arg;
 } can_manager_callbacks_t;
 
 /* ==========================================================================

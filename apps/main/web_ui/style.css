@@ -680,6 +680,11 @@ button {
 
 .settings-reboot-btn:hover { background: var(--orange-dark-hover); }
 
+.settings-shutdown-btn {
+  background: var(--red, #b71c1c);
+}
+.settings-shutdown-btn:hover { background: var(--red-hover, #8e1414); }
+
 /* ---- Updates section (in settings modal) -------------------------------- */
 
 .settings-row-value {
@@ -1061,8 +1066,8 @@ button {
   line-height: 1;
 }
 
-#disconnect-reload-btn {
-  background: var(--blue);
+#disconnect-reload-btn,
+#shutdown-reboot-btn {
   color: var(--white);
   font-size: 0.88rem;
   font-weight: 700;
@@ -1072,7 +1077,32 @@ button {
   border: 0;
 }
 
-#disconnect-reload-btn:hover { background: var(--blue-hover); }
+#disconnect-reload-btn          { background: var(--blue); }
+#disconnect-reload-btn:hover    { background: var(--blue-hover); }
+#shutdown-reboot-btn            { background: var(--orange-dark); }
+#shutdown-reboot-btn:hover      { background: var(--orange-dark-hover); }
+
+/* ---- Shutdown-complete overlay ------------------------------------------ */
+
+#shutdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+}
+
+.shutdown-subtitle {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #333;
+  margin-top: -0.5em;
+  margin-bottom: 1.2em;
+  line-height: 1.2;
+}
 
 /* ---- Add Camera modal (bottom sheet with two-pane slider) --------------- */
 

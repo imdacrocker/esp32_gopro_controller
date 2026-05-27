@@ -36,6 +36,8 @@ static esp_err_t handler_get_timezone(httpd_req_t *req)
 
 static esp_err_t handler_post_timezone(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -73,6 +75,8 @@ static esp_err_t handler_post_timezone(httpd_req_t *req)
  */
 static esp_err_t handler_post_datetime(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -125,6 +129,8 @@ static esp_err_t handler_get_can_bitrate(httpd_req_t *req)
  */
 static esp_err_t handler_post_can_bitrate(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 
@@ -177,6 +183,8 @@ static esp_err_t handler_get_logging_enabled(httpd_req_t *req)
  */
 static esp_err_t handler_post_logging_enabled(httpd_req_t *req)
 {
+    if (reject_if_shutting_down(req) != ESP_OK) return ESP_FAIL;
+
     char body[64];
     if (read_body(req, body, sizeof(body)) < 0) return ESP_FAIL;
 

@@ -635,6 +635,91 @@ document.getElementById('reboot-btn').addEventListener('click', function () {
     setTimeout(() => location.reload(), 3000);
 });
 
+// Shutdown
+let shutdownPollTimer = null;
+let shutdownComplete  = false;
+
+document.getElementById('shutdown-btn').addEventListener('click', function () {
+    if (!confirm('Shut down controller?\n\nAll cameras will be put to sleep and disconnected. You MUST reboot to reconnect.')) return;
+    this.disabled = true;
+    this.textContent = 'Shutting down…';
+    apiFetch('POST', '/api/shutdown').catch(() => {});
+    startShutdownPoll();
+});
+
+function startShutdownPoll() {
+    if (shutdownPollTimer || shutdownComplete) return;
+    shutdownPollTimer = setInterval(checkShutdownState, 1000);
+    checkShutdownState();
+}
+
+async function checkShutdownState() {
+    try {
+        const r = await apiFetch('GET', '/api/shutdown');
+        if (r && r.state === 'complete') enterShutdownComplete();
+    } catch (e) { /* retry on next tick */ }
+}
+
+function enterShutdownComplete() {
+    if (shutdownComplete) return;
+    shutdownComplete = true;
+
+    // Halt every UI timer — nothing useful can run until the user reboots.
+    clearInterval(shutdownPollTimer);       shutdownPollTimer       = null;
+    clearInterval(topSectionTimer);         topSectionTimer         = null;
+    clearInterval(cameraStatusTimer);       cameraStatusTimer       = null;
+    clearInterval(modalPairedRefreshTimer); modalPairedRefreshTimer = null;
+    clearInterval(pollTimer);               pollTimer               = null;
+    clearInterval(countdownTimer);          countdownTimer          = null;
+    clearInterval(pairStatusTimer);         pairStatusTimer         = null;
+    clearTimeout(pairDismissTimer);         pairDismissTimer        = null;
+    clearInterval(clockTickTimer);          clockTickTimer          = null;
+
+    // Dismiss any open modals/sheets.
+    document.querySelectorAll('.modal-overlay.open').forEach(el => el.classList.remove('open'));
+    const pairOverlay = document.getElementById('pair-overlay');
+    if (pairOverlay) pairOverlay.hidden = true;
+
+    const overlay = document.getElementById('shutdown-overlay');
+    if (overlay) overlay.hidden = false;
+}
+
+document.getElementById('shutdown-reboot-btn').addEventListener('click', function () {
+    this.disabled = true;
+    this.textContent = 'REBOOTING…';
+    apiFetch('POST', '/api/reboot').catch(() => {});
+
+    // location.reload() alone races the device — it fires while the ESP is
+    // still rebooting, the browser hangs trying to fetch, and the page never
+    // refreshes from the user's POV. Probe /api/version until it answers,
+    // then reload. Same pattern as the disconnect overlay.
+    setTimeout(() => {
+        const probe = setInterval(async () => {
+            try {
+                const ctrl = new AbortController();
+                const t    = setTimeout(() => ctrl.abort(), 1500);
+                const r    = await fetch('/api/version', { signal: ctrl.signal, cache: 'no-store' });
+                clearTimeout(t);
+                if (r.ok) {
+                    clearInterval(probe);
+                    location.reload();
+                }
+            } catch (_) { /* still rebooting */ }
+        }, 1000);
+    }, 2000);
+});
+
+// On page load, surface any in-progress / completed shutdown so a refresh
+// doesn't leave the user looking at a stale UI that's about to 503 everything.
+(async function checkShutdownOnLoad() {
+    try {
+        const r = await apiFetch('GET', '/api/shutdown');
+        if (!r) return;
+        if (r.state === 'complete')           enterShutdownComplete();
+        else if (r.state === 'shutting_down') startShutdownPoll();
+    } catch (e) { /* device unreachable — disconnect overlay will take over */ }
+})();
+
 /* ---- Manage cameras modal ------------------------------------------------ */
 
 const modalOverlay = document.getElementById('modal-overlay');
