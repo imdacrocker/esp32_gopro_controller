@@ -20,14 +20,14 @@ static const char *TAG = "ble_core";
  * Helpers
  * -------------------------------------------------------------------------*/
 
-/* Transient HCI/link errors that do NOT indicate a key mismatch.
-   Bond is preserved; the disconnect handler will resume the reconnect scan. */
-static bool is_transient_enc_error(int status)
+/* Encryption-failure statuses that definitively mean the local LTK is bad.
+   Anything else preserves the bond — deleting an LTK requires the user to
+   put the camera physically back into pair-mode to recover, so we err on
+   "keep" and let the reconnect scan retry on the subsequent disconnect. */
+static bool is_bond_invalid_error(int status)
 {
-    return status == BLE_HS_ETIMEOUT     ||
-           status == BLE_HS_ETIMEOUT_HCI ||
-           status == BLE_HS_ENOTCONN     ||
-           status == BLE_HS_ECONTROLLER;
+    return status == BLE_HS_HCI_ERR(BLE_ERR_AUTH_FAIL)   ||
+           status == BLE_HS_HCI_ERR(BLE_ERR_PINKEY_MISSING);
 }
 
 /* ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
         } else {
             ESP_LOGW(TAG, "encryption failed: handle=%u status=%d",
                      event->enc_change.conn_handle, event->enc_change.status);
-            if (!is_transient_enc_error(event->enc_change.status)) {
+            if (is_bond_invalid_error(event->enc_change.status)) {
                 /* Key mismatch — purge bond so the next connection performs
                    fresh SMP pairing rather than re-failing with stale keys. */
                 if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
@@ -94,7 +94,7 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
                     ESP_LOGW(TAG, "stale bond deleted (key mismatch)");
                 }
             }
-            /* Transient failures: bond preserved; the subsequent
+            /* Otherwise: bond preserved; the subsequent
                BLE_GAP_EVENT_DISCONNECT will call start_scan_if_needed. */
         }
         break;

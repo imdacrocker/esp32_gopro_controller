@@ -903,14 +903,14 @@ All GAP events are handled in `connection_event_cb` (defined in `ble_connect.c`,
 - Fires `on_encrypted(conn_handle, addr)` — this is the correct point for `open_gopro_ble` to begin GATT service discovery and subscribe to notifications. GATT commands sent before encryption is established will be rejected by the GoPro.
 
 **`BLE_GAP_EVENT_ENC_CHANGE` (failure)**
-- Distinguishes transient failures from genuine key mismatches:
+- Only definitive key-mismatch statuses trigger bond deletion; everything else is treated as retryable:
 
 | Error codes | Classification | Action |
 |---|---|---|
-| `BLE_HS_ETIMEOUT`, `BLE_HS_ETIMEOUT_HCI`, `BLE_HS_ENOTCONN`, `BLE_HS_ECONTROLLER` | Transient | Bond preserved; scan resumes via disconnect handler |
-| All other status codes | Key mismatch | Bond deleted from NVS; next connection will perform fresh SMP pairing |
+| `BLE_HS_HCI_ERR(BLE_ERR_AUTH_FAIL)` (MIC check failed), `BLE_HS_HCI_ERR(BLE_ERR_PINKEY_MISSING)` (peer lost our LTK) | Key mismatch | Bond deleted from NVS; next connection will perform fresh SMP pairing |
+| All other status codes (link timeouts, transient SMP errors, controller hiccups) | Retryable | Bond preserved; scan resumes via disconnect handler |
 
-Deleting a bond on a transient failure would cause desynchronised bond state: the camera still has a bond but the ESP32 does not. The camera would then reject the fresh pairing request and the two sides could diverge permanently until the user re-pairs manually. The distinction above prevents this.
+The classifier is intentionally an allowlist of bond-invalid codes rather than an allowlist of transient codes. Deleting a bond on a non-mismatch failure causes desynchronised bond state: the camera still has the LTK but the ESP32 does not, and the camera will refuse fresh pairing (SMP "Pairing Not Supported") because it is no longer in pair-mode. Recovery requires the user to physically put the camera back into pair-mode. Hero9 in particular returns HCI `0x08` (Connection Timeout) when it is slow to respond to the LL encryption-start on a quick reconnect; treating that as a key mismatch breaks every subsequent reconnect.
 
 **`BLE_GAP_EVENT_REPEAT_PAIRING`**
 - Symmetric case: the camera has a bond but the ESP32 does not (e.g. after an NVS erase)
