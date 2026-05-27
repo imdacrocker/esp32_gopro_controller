@@ -125,6 +125,7 @@ BLE and WiFi are pinned to opposite cores to reduce cache thrashing and radio co
 | [`can_manager`](../apps/main/components/can_manager/README.md) | TWAI node, 0x600/0x602 RX, 0x601 TX at 5 Hz, GPS UTC, NVS persistence |
 | [`http_server`](../apps/main/components/http_server) | esp_httpd, LittleFS web UI, all `/api/` handlers, soft recovery fallback when LittleFS is empty |
 | [`log_ring`](../apps/main/components/log_ring) | In-RAM diagnostic log ring buffer for user reports; vprintf hook, NVS-persisted enable toggle (default OFF). See [`design/log-capture.md`](design/log-capture.md) |
+| [`shutdown_manager`](../apps/main/components/shutdown_manager) | Operator + CAN-0x603 triggered system shutdown. Owns the `IDLE → SHUTTING_DOWN → COMPLETE` state machine, spawns one per-slot task that issues stop-recording + sleep + BLE-terminate + teardown (5 s deadline per slot, slow cameras don't block completion). Exposes `shutdown_manager_is_active()` as the gate consulted by `can_manager` (drop 0x600, stop 0x601 TX), `ble_core` (suppress reconnects), and every action HTTP POST (503). See [`design/shutdown.md`](design/shutdown.md). |
 
 ### Recovery-app only (`apps/recovery/components/`)
 
@@ -144,10 +145,11 @@ app_main()
  2. esp_netif_init()
  3. esp_event_loop_create_default()
  4. camera_manager_init()
+ 4a. shutdown_manager_init()                 ← before any subsystem that consults its gate
  5. gopro_wifi_rc_init()
- 6. open_gopro_ble_init()
+ 6. open_gopro_ble_init()                    ← registers is_shutdown_active w/ ble_core
  7. ble_core_init()
- 8. can_manager_register_callbacks(...)
+ 8. can_manager_register_callbacks(...)      ← on_shutdown_request → shutdown_manager_on_can_request
  9. can_manager_init()
 10. wifi_manager_set_callbacks(...)
 11. wifi_manager_init()

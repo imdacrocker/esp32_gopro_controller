@@ -16,6 +16,12 @@ Full request/response contracts (bodies, error codes, state diagrams) are in [`d
 | GET | `/api/auto-control` | Whether cameras follow CAN logging state automatically |
 | POST | `/api/auto-control` | Set auto-control on/off |
 | POST | `/api/reboot` | Restart the ESP32 |
+| POST | `/api/shutdown` | Request system shutdown (sleep all cameras, tear down transports, park in pending-reboot state). Idempotent — repeat calls return the current state. Returns `{state}`. |
+| GET | `/api/shutdown` | `{state, failed_slots[]}` — state is `idle` / `shutting_down` / `complete`; `failed_slots` lists 1-based slot numbers whose per-slot sequence timed out. Polled by the web UI's shutdown-complete overlay. |
+
+While shutdown is active (`state != idle`), every action POST in the table
+below returns `503 Service Unavailable` except `POST /api/reboot`. GETs are
+unaffected. See [`design/shutdown.md`](design/shutdown.md).
 
 ## Cameras
 
