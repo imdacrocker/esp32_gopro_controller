@@ -226,6 +226,8 @@ margin: 0 0 0.8em
 
 Date and time render on **separate lines** with the same monospace styling. Date format is `Month D, YYYY` (e.g. `May 9, 2026`), built from a `MONTH_NAMES` array using `getUTCMonth() / getUTCDate() / getUTCFullYear()`. Time format is 12-hour with AM/PM (`hh:mm:ss AM/PM`, hours zero-padded), still using the UTC accessors. Firmware returns `epoch_ms` with the timezone offset already applied — JS uses the `getUTC*` methods so it does not re-apply the local timezone.
 
+**Local tick (1 Hz):** The displayed time advances every second between `/api/utc` polls. On each `/api/utc` response, `applyUtcResponse()` stores `clockServerEpochMs = d.epoch_ms` and `clockFetchedAt = performance.now()`. A `setInterval(renderClock, 1000)` then re-renders the date/time lines using `now = clockServerEpochMs + (performance.now() - clockFetchedAt)`. This keeps the seconds digit ticking smoothly without polling `/api/utc` faster than the existing 2 s top-section rate. `renderClock()` is also invoked synchronously at the end of `applyUtcResponse()` so the display resyncs immediately on the freshest server data. When `clockValid == false`, the time line shows `--:--:--` and the date line is empty.
+
 **Display states** (driven by `/api/utc` flags `valid` and `session_synced`):
 
 | Condition | Date line | Time line | `#utc-display` class | Tooltip text |
@@ -460,7 +462,7 @@ font-size: 0.88rem, font-weight: 700, min-height: 48px, border-radius: 8px
 Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings. Always exactly one of {Settings, Advanced} is visible — never both.
 
 - Opened from the "Advanced Settings" button in Settings; Settings closes simultaneously.
-- Closed via the Done button or click-outside; Settings reopens.
+- Closed via the **Back** button (labelled "Back" to reflect that it returns to Settings) or click-outside; Settings reopens.
 
 **Logging section** — collects diagnostic logs for support reports. See [`log-capture.md`](log-capture.md) for the full design.
 - Enable Logging toggle (reuses `.toggle-wrap` styling from the home-screen Auto Control toggle).
@@ -489,7 +491,7 @@ z-index: 200
 aligns: flex-end (sheet anchors to bottom)
 ```
 
-**Sheet panel** (`.modal`):
+**Sheet panel** (`.manage-modal`):
 ```
 background: #fff
 border-radius: 12px 12px 0 0   ← only top corners rounded
@@ -500,88 +502,192 @@ padding: 0 0 2em
 
 **Header:** "Manage Cameras" title left, "Done" button right. Sticky (z-index 10) so it stays visible while scrolling.
 
-On open: immediately calls `refreshModalPairedCameras()` and starts a 3s interval that refreshes the paired list and (when activated) the RC-discovered list. The RC-discovered list is **not** populated on modal open — it stays empty until the user clicks "Add a new Wifi RC Camera" (see §13.2). A module-level `rcListActivated` flag gates `refreshRcDiscovered()`; the periodic poll continues to call it but it short-circuits while the flag is false.
+**Body layout (top to bottom):**
+1. Paired Cameras section (§13.1)
+2. Add Camera entry button (§13.2)
 
-On close: cancels any active BLE scan, clears the 3s refresh interval, resets all modal UI state including `#rc-results` and `rcListActivated = false` (so reopening the modal again starts the RC section blank).
+On open: calls `refreshModalPairedCameras()` and starts a 3 s interval that refreshes the paired list. No other polling fires from this modal — the RC-discovered list and the BLE scan both live in the Add Camera modal (§13.3) now.
 
-Clicking backdrop also closes modal.
+On close: clears the 3 s paired-list interval. Modal state otherwise persists.
 
-**Action-row pattern (§13.1, §13.2):** Each "add a new camera" section is rendered as a `.modal-action-row` flex row containing:
-- A primary `.modal-action-btn` (flex:1) — the action button
-- A 44×44 px circular `.modal-info-btn` — info icon (Lucide-style "i in a circle" SVG, 28×28)
-- An absolutely-positioned `.modal-info-tooltip` (top: row + 6 px, right: 0, max-width 280 px, dark background `#2a2a2a`, white text) — hidden by default
+Clicking the backdrop also closes the modal.
 
-Tapping the info icon toggles the `.show` class on its sibling tooltip. Tapping a different info icon swaps which tooltip is visible (only one open at a time). Tapping anywhere outside an info icon or open tooltip closes all open tooltips.
+### 13.1 Paired Cameras
 
-Below each action row is a section caption styled as `.modal-section-title` with `padding-top:0` (so it reads as a caption *for* the button above, not a heading for what follows). Each section ends with a `.modal-separator` (1 px `--gray-border-light` line, 12 px vertical / 16 px horizontal margin).
-
-### 13.1 Section 1 — Pair a New Camera (BLE)
-
-**Action button** (`#scan-btn`):
-- Idle: blue `#2980b9`, text "Add a new Bluetooth camera"
-- Scanning: background `#f0f0f0`, border `1px solid #ccc`, color `#333`, text "Cancel Scan"
-- Toggle behavior: if scanning → cancel; else → start
-
-**Info-icon tooltip:** "Put your camera into Pairing mode, like you would for the GoPro Quik App"
-
-**Caption (below button):** "Pair a Hero9 Black or newer over BLE"
-
-**Scan flow:**
-1. `POST /api/scan` → start 1s poll on `GET /api/cameras` + `GET /api/paired-cameras`
-2. Show countdown: "Scanning… 120s" decrementing every second
-3. Filter discovered list to exclude already-paired addresses
-4. Render unpaired cameras in `#results` as `.found-camera-row` cards:
-   - Name (`0.88rem`, weight 600) + address + RSSI (`0.72rem`, `#999`)
-   - "Pair" button (blue, `pair-this-btn`)
-5. Auto-stop at 120s (121s timer to account for last second display); final poll on stop
-6. Status line (`#modal-status`): shows countdown / "Scan complete." / "Scan cancelled." / errors
-
-**Pairing:**
-- Click "Pair" → cancel active scan → `POST /api/pair` with `{ addr, addr_type }`
-- Status: "Pairing initiated — camera should appear in the list shortly."
-- Result list cleared; new camera will appear on next camera status poll
-
-### 13.2 Section 2 — Add WiFi RC Emulation Camera
-
-**Action button** (`#rc-add-btn`): green `#27ae60`, text "Add a new Wifi RC Camera"
-
-**Info-icon tooltip:** "On your camera, add a new connection, and choose either the Wifi RC or Smart Remote option. The camera will automatically pair successfully. Then you can add it to the controller here."
-
-**Caption (below button):** "Pair an older camera as a Wifi Remote"
-
-**Activation:** `#rc-results` stays empty when the modal opens. The first click of `#rc-add-btn` sets `rcListActivated = true` and calls `refreshRcDiscovered()`; from that point the existing 3s modal poll keeps the list current. The flag resets on modal close.
-
-On click (and on each subsequent poll while activated): `GET /api/rc/discovered`
-- Returns array of `{ addr, ip }` for SoftAP-connected stations whose MAC OUI is on the GoPro allow-list (see `GOPRO_RC_OUIS[]` in `api_rc.c` — IEEE MA-L registrations to Woodman Labs / GoPro) and that aren't already in a managed RC slot. Non-GoPro stations (phones, laptops viewing the web UI) are filtered out server-side.
-- 0 results: "No unidentified devices connected."
-- N results: "{N} device(s) connected — click Add to probe:"
-
-Each unidentified device renders as a `.found-camera-row`:
-- Name: "Unknown Device"
-- Meta: `{addr} — {ip}` (or "IP pending" if no IP)
-- "Add" button (blue, `pair-this-btn`)
-
-**Add flow** (mirrors the BLE pair flow — same `pair-overlay` modal and `/api/pair/status` polling):
-1. If IP missing: show "Cannot add — IP address not yet assigned. Wait a moment and click Add a new Wifi RC Camera again." and abort
-2. Open the pair-progress modal (`openPairModal()`); this also closes the Manage Cameras modal so the home screen takes focus on success
-3. `POST /api/rc/add` with `{ addr, ip }` — firmware reserves the shared pair-attempt machine (`PAIR_TRANSPORT_WIFI_RC`) and primes the camera with keepalive + `st` + `cv`. `409 Conflict` means another pair attempt is in flight; the modal flips to the failure view immediately.
-4. `startPairStatusPoll()` — UI polls `GET /api/pair/status` every 1 s.
-   - State `connecting` → "Connecting to camera…" (default label)
-   - State `success` → "Success!", auto-dismiss after 2 s, then `refreshCameraStatus()` repaints the home-screen camera list. The cv-resolved model name surfaces on the home-screen card on its next refresh, even if cv arrived after the modal closed.
-   - State `failed` → mapped error label (e.g. `handshake_timeout` → "Camera setup timed out. Try again."); button changes to "OK".
-5. Cancel button → `POST /api/pair/cancel`. Server-side this removes the just-registered slot (RC slots are committed at register time; see §9.1 of [`camera-manager.md`](camera-manager.md)).
-
-### 13.3 Section 3 — Paired Cameras
-
-Title: "PAIRED CAMERAS" + count badge (hidden when 0). Unlike the §13.1/§13.2 captions (which use the default `--gray-light` colour), this title is rendered in `--text-primary` (dark) via an inline `style="color:var(--text-primary)"` override on the `.modal-section-title` span, to mark it as a heading for the list rather than a caption for a button above.
+Title: "PAIRED CAMERAS" + count badge (hidden when 0). Rendered in `--text-primary` (dark) via an inline `style="color:var(--text-primary)"` override on the `.modal-section-title` span, to mark it as a list heading.
 
 Source: `GET /api/paired-cameras`
 
 Each camera renders as a `.modal-paired-row` (background `#fafafa`, border `#eee`, border-radius 8px):
-- Left: name line (`0.9rem`, weight 600) with optional type badge (shown when `cam.type === 'rc_emulation'`, text "WiFi RC"); meta line (`0.72rem`, `#999`) showing model_name · Cam {index} [· addr if RC-emulation]
-- Right: "Remove" button in red `#e74c3c`
+- Left: name line (`0.9rem`, weight 600) with optional type badge (shown when `cam.type === 'rc_emulation'`, text "WiFi RC"); meta line (`0.72rem`, `#999`) showing name · model_name · IP/addr depending on what the API returned.
+- Right: "Remove" button in red `#e74c3c`.
 
-**Remove flow:** Confirm dialog → `POST /api/remove-camera` with `{ slot }` → refresh lists. RC-emulation removal also waits 1.5s then refreshes `GET /api/rc/discovered` (async slot free).
+**Remove flow:** Confirm dialog → `POST /api/remove-camera` with `{ slot }` → `refreshModalPairedCameras()`. No follow-up RC-discovered refresh here — that list isn't in this modal anymore. Hero3/Hero4 slot reuse is picked up the next time the user enters the Add Camera → Hero3/Hero4 instructions pane (§13.3.2).
+
+### 13.2 Add Camera entry button
+
+Single full-width primary button rendered as the **last** element in the Manage modal body (after the Paired Cameras list, not before — so removal of an existing camera and adding a new one share the same visual flow).
+
+```
+id: add-camera-btn
+.modal-action-btn pattern: block, width: calc(100% - 32px), 16px side margin
+background: var(--blue), color: var(--white)
+font-size: 0.88rem, font-weight: 700, min-height: 44px, border-radius: 8px
+```
+
+On click:
+1. `closeModal()` — dismisses the Manage Cameras modal.
+2. `openAddCameraModal()` — opens the Add Camera modal (§13.3) in its initial "list" state.
+
+There is no info-icon / tooltip on this button (the previous two buttons each had one; the new flow surfaces all needed guidance on the per-model instructions pane).
+
+### 13.3 Add Camera Modal (Bottom Sheet, two-pane slider)
+
+A separate bottom-sheet modal opened from the Manage modal's Add Camera button. The user picks a camera model, then slides to a model-specific instructions screen, then either taps Pair (BLE flow) or Add (RC flow) — both of which hand off to the existing pair-progress overlay.
+
+```
+id: add-camera-overlay
+.modal-overlay shared rules: position: fixed, inset: 0, background: rgba(0,0,0,0.45), z-index: 200
+align-items: flex-end, justify-content: center   ← shared with #modal-overlay via combined selector
+```
+
+**Sheet panel** (`.manage-modal .add-camera-modal`):
+```
+background: #fff
+border-radius: 12px 12px 0 0
+width: 100%, max-width: 480px
+max-height: 85vh
+display: flex, flex-direction: column   ← so the slider track can fill the body
+overflow: hidden                         ← clips the 200%-wide slider track
+padding-bottom: 0
+```
+
+**Header** (left → right):
+- `#add-camera-back` — `.modal-back-btn` (blue text + chevron SVG, "Back" label, 0.92 rem weight 600). Hidden on the list pane via the `hidden` attribute; revealed by `selectCameraModel()` and re-hidden by `slideToList()`. Tap → slides back to the model picker.
+- `.modal-title` — "Add New", centered visually because the back button is hidden on the initial pane.
+- `#add-camera-cancel` — `.modal-done-btn` (blue "Cancel" text). Always closes the whole modal. Closing from the instructions pane resets the modal back to the list pane so the next open starts fresh.
+
+Backdrop click is equivalent to Cancel.
+
+**Slider mechanics:**
+```
+#add-camera-content   flex: 1 1 auto, min-height: 320px, overflow: hidden, position: relative
+  #add-camera-track   display: flex, width: 200%, height: 100%
+                      transition: transform 0.28s ease
+                      transform: translateX(0)        ← list pane visible (default)
+                      transform: translateX(-50%)     ← when .step-instructions is added
+    .add-camera-pane  width: 50% (of track = 100% of content), flex-shrink: 0
+                      overflow-y: auto, -webkit-overflow-scrolling: touch
+                      padding: 8px 0 24px
+```
+
+Both panes are in the DOM at all times. Vertical scroll is per-pane (mobile inertia preserved). The `.step-instructions` class on `#add-camera-track` toggles the slide.
+
+#### 13.3.1 Model picker pane
+
+`#add-camera-list-pane` contains an `<ul class="camera-model-list">` of 8 rows, one per supported model, in this order:
+
+```
+Hero3
+Hero4
+Hero7
+Hero9
+Hero10
+Hero11
+Hero12
+Hero13
+```
+
+Each row:
+```
+.camera-model-row
+  padding: 16px 20px
+  min-height: 56px   ← finger-friendly tap target on mobile
+  font-size: 1rem, font-weight: 600, color: --text-primary
+  border-bottom: 1px solid --gray-border-light   ← collapses on :last-child
+  display: flex, align-items: center, justify-content: space-between
+  ::after content: "›"   ← chevron, 1.6rem, --gray-light
+  :hover, :active { background: var(--gray-bg) }
+  user-select: none, cursor: pointer
+```
+
+The list is scrollable inside the pane when the viewport is shorter than the total list height. On a typical phone all 8 rows fit without scrolling.
+
+Each row carries a `data-model="HeroN"` attribute. A single `forEach(row => row.addEventListener('click', …))` wires every row to `selectCameraModel(row.dataset.model)`.
+
+#### 13.3.2 Instructions pane
+
+`#add-camera-instructions-pane` contains, top to bottom:
+
+1. `<p id="add-camera-instructions" class="add-camera-instructions">` — the per-model body text, written by `selectCameraModel()` via `innerHTML` (so `<br>` line breaks survive). 0.95 rem, 1.45 line-height, `--text-primary`, 4 px / 20 px / 16 px / 20 px padding.
+2. `#add-camera-ble-section` — visible for BLE models (Hero7 / Hero9–Hero13), hidden for RC models. Contains:
+   - `#add-camera-scan-btn` — `.modal-action-btn`. Idle: blue `#2980b9`, label "Scan". Scanning: background `none`, `1 px --gray-border` outline, color `#333`, label "Cancel Scan". Single click handler that toggles `startScan()` / `cancelScan()`.
+   - `#add-camera-status` — small grey status line (`0.85 rem`, `--gray-label`, 20 px side padding, `min-height: 1.4em`). Carries countdown ("Scanning… Ns"), end-of-scan messages ("Scan complete." / "Scan cancelled."), and the RC "Cannot add — IP address not yet assigned. Wait a moment and try again." message.
+   - `#add-camera-ble-results` — populated by `renderFoundCameras()` as `.found-camera-row` entries with name + address + RSSI and a blue Pair button.
+3. `#add-camera-rc-section` — visible for RC models (Hero3 / Hero4), hidden for BLE models. Contains `#add-camera-rc-results`, populated by `renderRcDiscovered()` with `.found-camera-row` entries (name "Unknown Device", `addr · ip` meta, blue Add button) and a header line that reads "No unidentified devices connected." or "{N} device(s) connected — click Add to probe:".
+
+**Model → flow mapping** (`RC_MODELS = new Set(['Hero3', 'Hero4'])`):
+
+| Model | Flow | Instruction body |
+|---|---|---|
+| Hero3, Hero4 | WiFi RC discovered list | "Reset all wireless connections on the camera, and then choose to pair with a new WiFi RC." |
+| Hero7 | BLE Scan | "Reset all wireless connections on the camera. After resetting you MUST update the camera Wifi to 2.4ghz manually. Then, choose to pair with the GoPro App. Once in Pairing mode, click Scan.&lt;br&gt;&lt;br&gt;NOTE: The wireless connection to this browser may disconnect during this process. If this happens, reconnect to the controller's WiFi and refresh." |
+| Hero9, Hero10, Hero11, Hero12, Hero13 | BLE Scan | "Reset all wireless connections on the camera, and then choose to pair with the GoPro App. Once in Pairing mode, click Scan." |
+
+The Hero7 message exists because the controller's STA-side join during the pair-complete handshake (see [`hero7_pair_complete`](../../apps/main/components/gopro/open_gopro_ble/pair_complete.c) and the §12 / CHANGELOG entry for 5 GHz fail-fast) briefly drops the SoftAP, which may disconnect the user's browser if they're connected to the controller's own Wi-Fi. The "MUST switch to 2.4 GHz" reminder warns the user before they try, instead of relying on the 5 GHz fail-fast error to teach them after the fact.
+
+**`selectCameraModel(model)`** body:
+1. Reveal `#add-camera-back`.
+2. Write the instructions HTML via `instructionsForModel(model)`.
+3. Branch on `RC_MODELS.has(model)`:
+   - RC branch: show `#add-camera-rc-section`, hide BLE section, set `rcListActivated = true`, call `refreshRcDiscovered()` immediately, then `setInterval(refreshRcDiscovered, 3000)` on `addCameraRcPollTimer`.
+   - BLE branch: show `#add-camera-ble-section`, hide RC section, clear `#add-camera-ble-results`, clear status, reset the Scan button to "Scan" idle styling.
+4. Add `.step-instructions` to `#add-camera-track` → CSS transition slides the pane in.
+
+**`slideToList()`** body (Back button / part of close): cancel scan if active, clear `addCameraRcPollTimer`, `rcListActivated = false`, remove `.step-instructions`, hide back button, clear both result containers, clear status.
+
+**`closeAddCameraModal()`**: same as `slideToList()` plus `addCameraOverlay.classList.remove('open')` and `resetAddCameraModal()` (which also clears the instructions text).
+
+#### 13.3.3 BLE scan flow
+
+When the active model is BLE-flow and the user taps the Scan button:
+1. `scanning = true`, snapshot already-paired addresses for filtering.
+2. Pause `cameraStatusTimer`, `topSectionTimer`, and `modalPairedRefreshTimer` (the last is already null since Manage is dismissed, but the call is idempotent). This keeps the ESP32 from juggling 4 concurrent HTTP requests while NimBLE is active.
+3. `POST /api/scan`.
+4. Start 1 s `pollScanResults()` interval — `GET /api/cameras`, filtered against the snapshot.
+5. Start 1 s countdown updating `#add-camera-status` from "Scanning… 120s" down to 0; auto-stop at 0 via `stopScan(false)`.
+6. Cancel button or tapping Pair on a row → `cancelScan()` → `POST /api/scan-cancel` → `stopScan(true)` → resume `cameraStatusTimer` + `topSectionTimer`.
+
+`renderFoundCameras()` writes into `#add-camera-ble-results`. Each row carries `data-addr` and `data-addr-type`; the delegated click handler hands off to the pair-progress modal (§13.3.5) with `POST /api/pair { addr, addr_type }`.
+
+#### 13.3.4 WiFi RC add flow
+
+When the active model is RC-flow:
+
+`GET /api/rc/discovered` polls every 3 s while the instructions pane is showing a Hero3/Hero4. Returns `[{ addr, ip }]` for SoftAP-connected stations whose MAC OUI is on the GoPro allow-list (see `GOPRO_RC_OUIS[]` in `api_rc.c`) and that aren't already in a managed RC slot. Non-GoPro stations are filtered server-side so the list stays small.
+
+The poll is gated by `rcListActivated` (so callers that don't care — e.g. a stray late-arriving response — short-circuit). The flag is set in the RC branch of `selectCameraModel()` and cleared by `slideToList()` / `closeAddCameraModal()`.
+
+`renderRcDiscovered()` writes into `#add-camera-rc-results`. Empty list shows "No unidentified devices connected." (`.modal-empty` style). Non-empty shows the count header plus one `.found-camera-row` per device (name "Unknown Device", `addr · ip` or "IP pending" meta, Add button).
+
+The delegated click handler:
+1. If `ip` is missing, write the "Cannot add — IP address not yet assigned. Wait a moment and try again." message to `#add-camera-status` and abort.
+2. Otherwise clear the results, open the pair-progress modal (§13.3.5), and `POST /api/rc/add { addr, ip }`.
+
+#### 13.3.5 Pair-progress modal handoff
+
+Both Pair (BLE) and Add (RC) call `openPairModal()` first, which:
+1. Closes the Manage Cameras modal if open (defensive — at this point it should already be closed).
+2. Closes the Add Camera modal if open (the common case — this is the modal that just launched the pair).
+3. Reveals `#pair-overlay` with throbber + "Connecting to camera…" + Cancel.
+
+The pair-progress overlay then polls `GET /api/pair/status` every 1 s for `success` / `failed`. Both transports drive the same overlay; only the API endpoint that kicked off the attempt differs.
+
+- `success` → throbber → green ✓ → "Success!" → auto-dismiss after 2 s → `refreshCameraStatus()` repaints the home-screen camera list.
+- `failed` → throbber → red ✕ → mapped error label (`PAIR_ERROR_LABEL` in `app.js`, e.g. `handshake_timeout` → "Camera setup timed out. Try again."); button changes to "OK".
+- Cancel (mid-pair) → `POST /api/pair/cancel` → server returns FAILED with `error_code: "cancelled"` → button becomes "OK".
+
+On terminal dismiss the home screen takes focus — the user is not returned to either the Manage or Add Camera modals.
 
 ---
 
@@ -591,10 +697,50 @@ Each camera renders as a `.modal-paired-row` (background `#fafafa`, border `#eee
 |---|---|---|---|
 | Camera status | 3s | `GET /api/paired-cameras` | Camera cards on main screen |
 | RC status + UTC + auto-control | 2s | `GET /api/logging-state`, `GET /api/utc`, `GET /api/auto-control` | Top two sections |
-| BLE scan results | 1s (during scan only) | `GET /api/cameras`, `GET /api/paired-cameras` | Found cameras list in modal |
-| Modal refresh | 3s (modal open only) | `GET /api/paired-cameras`, `GET /api/rc/discovered` | Paired list + RC-emulation list in modal |
+| Clock display tick | 1s | — (local only) | Smooth seconds tick in System Time; see §8 |
+| BLE scan results | 1s (during scan only) | `GET /api/cameras` | Found cameras list in the Add Camera modal (§13.3.3) |
+| Manage modal refresh | 3s (Manage modal open only) | `GET /api/paired-cameras` | Paired list in Manage Cameras modal (§13.1) |
+| Add Camera RC discovered | 3s (Hero3/Hero4 instructions pane only) | `GET /api/rc/discovered` | SoftAP-connected devices list in the Add Camera modal (§13.3.4) |
+| Reconnect probe | 1s (disconnected only) | `GET /api/version` (raw `fetch`) | Detects controller recovery; reloads page on first 2xx. See §14a |
 
-All polls fire independently via `setInterval`; no coordination or debouncing between timers.
+All polls fire independently via `setInterval`; no coordination or debouncing between timers. The clock display tick consumes no network.
+
+### 14a. Disconnect detection
+
+Every call through `apiFetch()` contributes to a connection-health counter:
+
+- Success → `consecutiveFailures = 0`.
+- Failure (network error *or* non-2xx) → `consecutiveFailures++`. When the counter reaches `DISCONNECT_THRESHOLD = 3` and we are not already disconnected, `enterDisconnected()` fires.
+
+With the polls above feeding the counter, idle detection lands in ~3–6 s of true unreachability (faster during a BLE scan or pair attempt, where 1 s polls are also feeding in). 5xx responses count too — the UI treats "server is broken" the same as "server is gone."
+
+`enterDisconnected()`:
+
+1. Clears every UI timer: top-section, camera status, modal refresh, BLE scan poll, scan countdown, pair-status poll, pair-dismiss timeout, and the clock-tick timer. No further requests fire from the page.
+2. Hides every visible modal — removes `.open` from all `.modal-overlay` and sets the `#pair-overlay` `hidden` attribute. No teardown calls (we're about to reload on recovery anyway).
+3. Reveals `#disconnect-overlay` (§14b).
+4. Starts `reconnectProbeTimer = setInterval(reconnectProbe, 1000)`.
+
+`reconnectProbe()` uses raw `fetch('/api/version')` with a 1.5 s `AbortController` timeout — it deliberately bypasses `apiFetch` so it does not feed the failure counter (which would loop) and does not reset `consecutiveFailures` on success. On the first 2xx response it sets `reloading = true`, clears the probe interval, and calls `location.reload()`.
+
+### 14b. Disconnect overlay
+
+```
+id: disconnect-overlay
+position: fixed, inset: 0
+z-index: 9999                ← above the pair-progress overlay (1000) and all modals (200)
+background: var(--white)
+display: flex                ← centered both axes
+hidden by default via the `hidden` attribute
+```
+
+Inner `.disconnect-box`: `max-width: 320px` (fits the smallest common phone, ~320 CSS px), centered column. Contents top-to-bottom:
+
+- `.disconnect-icon` — inline SVG no-Wi-Fi symbol (three concentric arcs + base dot, diagonal slash), 96×96 px, `color: #000`.
+- `.disconnect-title` — text `DISCONNECTED`, font-size `2.2rem`, weight `800`, black. Sized to fill most of the 320 px box at 12 characters.
+- `#disconnect-reload-btn` — clones the `#manage-btn` style: `background: var(--blue)`, white text, `min-height: 48px`, `border-radius: 8px`, full-width inside the 320 px box. Click → `reloading = true; location.reload()`.
+
+The overlay is fully opaque — no UI bleeds through. Tapping the backdrop does nothing (no dismiss handler).
 
 ---
 
@@ -634,7 +780,22 @@ All polls fire independently via `setInterval`; no coordination or debouncing be
 | `cameraStatusLoaded` | bool | `false` | Suppresses spinner after first poll |
 | `pollTimer` | interval ID | `null` | 1s BLE scan poll |
 | `countdownTimer` | interval ID | `null` | 1s scan countdown display |
-| `modalPairedRefreshTimer` | interval ID | `null` | 3s modal refresh |
+| `modalPairedRefreshTimer` | interval ID | `null` | 3 s Manage modal paired-list refresh (§13.1) |
+| `addCameraRcPollTimer` | interval ID | `null` | 3 s `GET /api/rc/discovered` poll while on the Hero3/Hero4 instructions pane (§13.3.4) |
+| `rcListActivated` | bool | `false` | Gates `refreshRcDiscovered()` so stray late-arriving polls short-circuit. Set in the RC branch of `selectCameraModel()`, cleared by `slideToList()` / `closeAddCameraModal()` (§13.3.2) |
+| `clockTickTimer` | interval ID | `null` | 1s local clock display tick (§8) |
+| `clockServerEpochMs` | int | `0` | Last `epoch_ms` from `/api/utc` |
+| `clockFetchedAt` | DOMHighResTimeStamp | `0` | `performance.now()` when `clockServerEpochMs` was stored |
+| `clockValid` | bool | `false` | Latest `/api/utc` `valid` flag; gates display vs. `--:--:--` |
+| `clockSessionSynced` | bool | `false` | Latest `/api/utc` `session_synced` flag |
+| `consecutiveFailures` | int | `0` | Connection-health counter, fed by every `apiFetch` |
+| `disconnected` | bool | `false` | Set by `enterDisconnected`; guards re-entry |
+| `reloading` | bool | `false` | Set just before `location.reload()` so late-arriving success paths don't double-reload |
+| `reconnectProbeTimer` | interval ID | `null` | 1s `/api/version` probe while disconnected |
+
+Constants:
+- `DISCONNECT_THRESHOLD = 3` (consecutive `apiFetch` failures before the disconnect overlay appears).
+- `RC_MODELS = new Set(['Hero3', 'Hero4'])` (camera models that take the WiFi-RC discovered-devices flow in the Add Camera modal; everything else takes the BLE Scan flow — see §13.3.2).
 
 ---
 

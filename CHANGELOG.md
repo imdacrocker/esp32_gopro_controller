@@ -11,6 +11,15 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 ## [Unreleased]
 
 ### Added
+- **Disconnected overlay in the web UI.** When the page can't reach the
+  controller for ~3 consecutive requests (~3–6 s), the UI hides every modal
+  and replaces the screen with a full-screen white panel: a no-Wi-Fi icon,
+  "DISCONNECTED" in bold, and a blue RELOAD button. A background probe of
+  `GET /api/version` runs once a second; the first 2xx response triggers
+  `location.reload()` automatically, so the page comes back on its own as
+  soon as the device is reachable again. RELOAD lets the user force a
+  reload at any time. All UI timers are paused while disconnected so no
+  stale renders or background requests fire.
 - **Hero6 / Hero7 / Hero8 BLE pairing support** with a new one-shot WiFi
   pair-complete handshake at first-pair. These cameras accept BLE
   pairing at the SMP level but do not register the controller as a
@@ -52,6 +61,33 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   `"HERO8 Black"` mapping in `gopro_model_from_name()`.
 
 ### Changed
+- **Camera pairing flow redesigned in the web UI.** The Manage Cameras
+  modal now ends in a single "Add Camera" button (the previous separate
+  "Add a new Bluetooth camera" and "Add a new Wifi RC Camera" buttons
+  are gone). Tapping it opens a new "Add New" bottom sheet that lists
+  the supported camera models — Hero3, Hero4, Hero7, Hero9, Hero10,
+  Hero11, Hero12, Hero13 — as a scrollable, mobile-friendly picker.
+  Selecting a model slides left to a model-specific instructions screen
+  with a Back arrow to return to the list:
+  - **Hero3 / Hero4** → "pair with a new WiFi RC" instructions plus the
+    SoftAP connected-devices list (Add buttons), polled every 3 s.
+  - **Hero7** → "pair with the GoPro App" instructions with an extra
+    reminder to switch the camera Wi-Fi to 2.4 GHz manually after Reset
+    Connections, and a warning that the controller's STA cycle may drop
+    the user's browser session mid-pair. Same BLE Scan button as the
+    other newer cameras.
+  - **Hero9 / Hero10 / Hero11 / Hero12 / Hero13** → standard "pair with
+    the GoPro App" instructions with a Scan button.
+  Add (RC) and Pair (BLE) both hand off to the same existing
+  pair-progress overlay — only the entry funnel changed.
+- **Advanced Settings modal: "Done" relabelled to "Back"** to match the
+  actual behaviour (closing Advanced returns to the Settings modal).
+- **System Time display now ticks every second locally.** Previously the
+  seconds digit only advanced when the 2 s `/api/utc` poll returned, so it
+  jumped by 2 with visible jitter. The browser now extrapolates wall-clock
+  time from the last poll's `epoch_ms` + a monotonic `performance.now()`
+  delta and re-renders once per second. The `/api/utc` poll cadence is
+  unchanged — only the display tick is local.
 - **Hero7 BLE control is enabled** (was deliberately frozen in prior
   releases because of the misdiagnosed "SetShutter rejected with
   status 0x02" symptom). The rejection was actually

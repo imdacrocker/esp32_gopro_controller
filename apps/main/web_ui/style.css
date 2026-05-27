@@ -508,7 +508,8 @@ button {
 #settings-overlay,
 #advanced-overlay,
 #about-overlay    { align-items: flex-start; justify-content: center; }
-#modal-overlay    { align-items: flex-end;   justify-content: center; }
+#modal-overlay,
+#add-camera-overlay { align-items: flex-end;   justify-content: center; }
 
 .modal-header {
   display: flex;
@@ -785,13 +786,6 @@ button {
 
 .manage-modal .modal-header { position: sticky; top: 0; background: var(--white); z-index: 10; }
 
-#modal-status {
-  font-size: 0.85rem;
-  color: var(--gray-label);
-  padding: 6px 16px 0;
-  min-height: 1.4em;
-}
-
 .modal-section-title-row {
   display: flex;
   align-items: center;
@@ -823,20 +817,20 @@ button {
   color: var(--white);
 }
 
-#scan-btn       { background: var(--blue); }
-#scan-btn:hover { background: var(--blue-hover); }
-#scan-btn.scanning {
+#add-camera-btn       { background: var(--blue); }
+#add-camera-btn:hover { background: var(--blue-hover); }
+
+#add-camera-scan-btn       { background: var(--blue); }
+#add-camera-scan-btn:hover { background: var(--blue-hover); }
+#add-camera-scan-btn.scanning {
   background: none;
   border: 1px solid var(--gray-border);
   color: #333;
 }
 
-#rc-add-btn       { background: var(--green); }
-#rc-add-btn:hover { background: var(--green-hover); }
-
 /* Found camera rows */
-#results, #rc-results {
-  padding: 0 16px;
+#add-camera-ble-results, #add-camera-rc-results {
+  padding: 0 20px;
 }
 
 .found-camera-row {
@@ -1027,4 +1021,164 @@ button {
   background: var(--gray-disabled);
   color: var(--gray-disabled-text);
   cursor: default;
+}
+
+/* ---- Disconnect overlay -------------------------------------------------- */
+
+#disconnect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+}
+
+.disconnect-box {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.disconnect-icon {
+  width: 96px;
+  height: 96px;
+  color: #000;
+  margin-bottom: 0.5em;
+}
+
+.disconnect-title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #000;
+  letter-spacing: 0.02em;
+  margin-bottom: 1em;
+  line-height: 1;
+}
+
+#disconnect-reload-btn {
+  background: var(--blue);
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  border-radius: 8px;
+  width: 100%;
+  border: 0;
+}
+
+#disconnect-reload-btn:hover { background: var(--blue-hover); }
+
+/* ---- Add Camera modal (bottom sheet with two-pane slider) --------------- */
+
+.add-camera-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.modal-back-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-back-btn:hover { background: #f0f0f0; }
+.modal-back-btn svg   { width: 18px; height: 18px; }
+
+.add-camera-content {
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: hidden;
+  position: relative;
+}
+
+.add-camera-track {
+  display: flex;
+  width: 200%;
+  height: 100%;
+  transition: transform 0.28s ease;
+}
+
+.add-camera-track.step-instructions {
+  transform: translateX(-50%);
+}
+
+.add-camera-pane {
+  width: 50%;
+  flex-shrink: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 0 24px;
+}
+
+/* Camera model list — vertical scrollable list, mobile-friendly tap targets */
+.camera-model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.camera-model-row {
+  padding: 16px 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--gray-border-light);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  transition: background 0.12s;
+}
+
+.camera-model-row:last-child { border-bottom: none; }
+
+.camera-model-row::after {
+  content: "›";
+  color: var(--gray-light);
+  font-size: 1.6rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.camera-model-row:hover,
+.camera-model-row:active { background: var(--gray-bg); }
+
+/* Instructions pane */
+.add-camera-instructions {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  padding: 4px 20px 16px;
+  margin: 0;
+}
+
+.add-camera-status {
+  font-size: 0.85rem;
+  color: var(--gray-label);
+  padding: 6px 20px;
+  min-height: 1.4em;
+}
+
+.add-camera-modal .modal-action-btn {
+  margin: 0 20px 8px;
+  width: calc(100% - 40px);
 }
