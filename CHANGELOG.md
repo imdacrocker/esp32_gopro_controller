@@ -13,31 +13,58 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 ## [1.0.9] - 2026-05-27
 
 ### Added
-- **System shutdown.** A new `shutdown_manager` component coordinates a
-  per-slot stop-recording → sleep → BLE-terminate → teardown sequence
-  with a 5 s deadline per camera. It can be triggered two ways: the new
-  red **Shut Down** button in the web UI Settings panel, or a CAN
-  `0x603` frame with byte0 != 0. Camera sleep uses the BLE TLV `0x05`
-  command on Hero9+ (and best-effort on Hero7/8), and the HTTP
-  `/gp/gpControl/command/system/sleep` endpoint on every WiFi RC slot
-  (verified on Hero4 and Hero5).
-- **`POST /api/shutdown` / `GET /api/shutdown`** endpoints. POST starts
-  the shutdown sequence; GET reports `{state, failed_slots}` for the web
-  UI to poll.
-- **Shutdown overlay in the web UI.** On completion every modal is
-  dismissed and a full-screen "Shut down complete! OK to power off"
-  panel is revealed with an orange **REBOOT** button. REBOOT probes
-  `GET /api/version` before reloading so the page only refreshes once
-  the controller is reachable again.
+- **System shutdown (operator + CAN-triggered).** A new **Shut Down** button
+  in Settings (below Reboot, in red) puts every paired camera to sleep,
+  tears down the BLE / WiFi RC links, and parks the controller in a
+  "pending reboot" state. Confirmation dialog reads *"Shut down controller?
+  All cameras will be put to sleep and disconnected. You MUST reboot to
+  reconnect."* Once the per-slot sequence finishes, every modal dismisses
+  and the page is replaced with a full-screen **"Shut down complete! OK to
+  power off"** overlay carrying an orange **REBOOT** button. The reboot
+  button POSTs `/api/reboot` and then polls `/api/version` until the
+  device is back before reloading, so the page actually refreshes once the
+  ESP comes online again. Refreshing the page mid-shutdown lands on the
+  correct screen (overlay if complete, polling if still shutting down).
+- **CAN-bus shutdown trigger** on new ID **`0x603`** (RaceCapture → ESP32).
+  Byte 0 non-zero requests shutdown; idempotent. Lets vehicle ignition
+  logic power the rig down without touching the web UI.
+- **Per-camera sleep behaviour during shutdown.** If a camera is recording,
+  the controller issues stop-recording first and waits up to 1.5 s for
+  confirmation, then sends the model-appropriate sleep command:
+  - Hero9 / Hero10 / Hero11 / Hero12 / Hero13 — BLE TLV `0x05` on GP-0072.
+  - Hero7 / Hero8 — same TLV, best-effort (firmware may reject; falls
+    back to auto-sleep once keepalive stops).
+  - Hero4 / Hero5 / Hero6 (any WiFi RC slot) — HTTP `GET
+    /gp/gpControl/command/system/sleep`. Verified on Hero4 + Hero5;
+    sent unconditionally to every RC slot.
+  - Any model without a usable sleep path — keepalives just stop and the
+    camera auto-sleeps on its own inactivity timer.
+  Per-slot 5 s deadline; unresponsive cameras don't block shutdown from
+  completing. BLE-control links are explicitly terminated after the
+  sleep TLV so the camera doesn't wait through its own supervision
+  timeout.
+- **`POST /api/shutdown`** — kicks off the sequence. Idempotent; returns
+  the current state.
+- **`GET /api/shutdown`** — `{state, failed_slots[]}` for the web UI to
+  poll. `state` is `idle` / `shutting_down` / `complete`.
 
 ### Changed
-- **Shutdown state machine** (`IDLE → SHUTTING_DOWN → COMPLETE`,
-  RAM-only). While a shutdown is in progress, inbound CAN `0x600`
-  control frames are dropped, BLE reconnect attempts are suppressed via
-  a new `ble_core` callback, and camera-action POSTs return `503`.
-  `/api/reboot` stays available throughout. Once the sequence reaches
-  `COMPLETE`, CAN `0x601` status transmission stops — RaceCapture
-  treats the resulting CAN silence as the shutdown indicator.
+- **Action endpoints return `503 Service Unavailable` during shutdown.**
+  Shutter, pair, scan, remove-camera, reorder-cameras, repair-camera,
+  pair/cancel, rc/add, all `/api/settings/*` POSTs, and
+  `POST /api/auto-control` are gated. Read-only GETs and `POST /api/reboot`
+  stay open so the UI can observe state and the user keeps an escape
+  hatch.
+- **CAN frame handling under shutdown.** `0x600` (logging-state) frames are
+  dropped silently while the state machine is not `idle` — otherwise the
+  next RaceCapture frame would re-issue recording intent and undo the
+  per-slot stop-recording step. `0x601` (camera status TX, 5 Hz) stops
+  transmitting once the state reaches `complete`; RaceCapture-side
+  observers can treat CAN silence on `0x601` as the shutdown indicator.
+- **BLE background reconnect is suppressed during shutdown.** `ble_core`
+  honours a new `is_shutdown_active` callback and skips the scan / connect
+  loop while it returns true. Any camera-initiated reconnect that races
+  the teardown is terminated by `open_gopro_ble`'s on-connect callback.
 
 ## [1.0.8] - 2026-05-26
 
@@ -286,7 +313,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.9...HEAD
+[1.0.9]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.5...v1.0.6
