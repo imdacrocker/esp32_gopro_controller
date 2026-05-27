@@ -273,8 +273,8 @@ on_disconnected(conn_handle, addr, reason)
 |----------|-----------|
 | New camera | SMP Just Works pairing; bond stored in NVS |
 | Reconnect | LTK retrieved from NVS; encryption resumed without re-pairing |
-| Key mismatch (`BLE_HS_SM_US_ERR_PIN_OR_KEY_MISSING`) | Bond purged via `ble_gap_unpair()`; peer must re-pair |
-| Transient encryption error (timeout, controller error) | Bond preserved; disconnect triggers reconnect scan |
+| Key mismatch (`BLE_HS_HCI_ERR(BLE_ERR_AUTH_FAIL)` or `BLE_HS_HCI_ERR(BLE_ERR_PINKEY_MISSING)`) | Bond purged via `ble_gap_unpair()`; peer must re-pair |
+| Any other encryption-change failure (link timeouts, transient SMP errors, controller hiccups) | Bond preserved; disconnect triggers reconnect scan |
 | Camera has bond, ESP32 NVS erased (`BLE_GAP_EVENT_REPEAT_PAIRING`) | ESP32 purges camera's stale entry; retries fresh pairing |
 | Bond not in `camera_manager` keep-list | Purged by `ble_core_purge_unknown_bonds()` at startup |
 
@@ -296,8 +296,8 @@ on_disconnected(conn_handle, addr, reason)
 | Memory allocation failure (`malloc`) | Returns `ESP_ERR_NO_MEM`; no event posted; logged as error |
 | NimBLE stack reset (`on_reset`) | Logged as error with reason code |
 | Connection attempt failed | Logged as warning; background scan resumed |
-| Encryption failure (transient) | Logged as warning; bond preserved; disconnect handles reconnect |
-| Encryption failure (key mismatch) | Bond purged; logged |
+| Encryption failure (key mismatch — `BLE_ERR_AUTH_FAIL` / `BLE_ERR_PINKEY_MISSING`) | Bond purged; logged |
+| Encryption failure (anything else) | Logged as warning; bond preserved; disconnect handles reconnect |
 | GATT write error | Logged as error; no retry (caller's responsibility) |
 | Bond enumeration error | Logged as error; `purge_unknown_bonds` returns without action |
 

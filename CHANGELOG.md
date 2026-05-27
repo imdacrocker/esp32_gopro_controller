@@ -109,6 +109,23 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   diagnostic state from one-shot writes (e.g. setting 178 WirelessBand)
   is visible without enabling DEBUG. Keepalive responses (fire every
   3 s) stay at DEBUG.
+
+### Fixed
+- **Hero9 no longer gets stuck in a connect / "Pairing Not Supported"
+  reconnect loop.** On a quick reconnect Hero9 is slow to respond to the
+  link-layer encryption-start, which the controller used to receive as
+  HCI status `0x08` (Connection Timeout, NimBLE-wrapped value 520). The
+  `is_transient_enc_error()` allowlist did not include this code, so the
+  encryption handler took the "key mismatch" branch and called
+  `ble_gap_unpair()` on a perfectly valid LTK. From there every
+  subsequent reconnect failed with SMP peer error `0x05` ("Pairing Not
+  Supported") because the camera was no longer in pair-mode and the
+  controller had no key to resume. The classifier is now inverted: only
+  HCI `BLE_ERR_AUTH_FAIL` (MIC check failed) and `BLE_ERR_PINKEY_MISSING`
+  (peer lost our LTK) trigger bond deletion. Everything else preserves
+  the bond and lets the reconnect scan retry on the disconnect that
+  follows.
+
 ## [1.0.7] - 2026-05-18
 
 ### Fixed
