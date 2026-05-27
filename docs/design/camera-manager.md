@@ -1139,9 +1139,11 @@ See §8 for the canonical signature. The vtable has six entries: `start_recordin
 
 ### 14.2 CAN Protocol
 
-All frames use standard 11-bit IDs.
+The IDs and IDE (standard 11-bit vs. extended 29-bit) for all four channels are **user-configurable per channel** from the web UI; see [`can-id-configuration.md`](can-id-configuration.md) for the full data model. The values below are the **factory defaults** and the only IDs referenced in the rest of this document; substitute whatever the operator has configured if those have been changed.
 
-**`0x600` — RaceCapture → ESP32: logging command**
+RX dispatch matches the full `(id, ide)` tuple — a Standard `0x600` and an Extended `0x600` are distinct frames and reach distinct (or no) handlers.
+
+**`0x600` (default) — RaceCapture → ESP32: logging command**
 
 Payload byte 0 is the `isLogging` flag. The manager fires the `can_logging_state_cb_t` callback on **every received frame**, passing `LOGGING_STATE_LOGGING` or `LOGGING_STATE_NOT_LOGGING` based on the byte. The callback consumer (`camera_manager`) is responsible for idempotent handling — see §13.2.
 
@@ -1185,12 +1187,17 @@ When a live UTC source updates the anchor, `can_manager` also calls `settimeofda
 
 ### 14.3 NVS Persistence
 
-`can_manager` owns the namespace `can_mgr` with two keys:
+`can_manager` owns the namespace `can_mgr`:
 
 | Key | Type | Purpose |
 |---|---|---|
 | `tz_off` | `i8` | UTC offset in whole hours, clamped to IANA valid range `[−12, +14]` |
 | `last_utc` | `u64` | Most recent best-estimate UTC (ms since epoch) for cross-boot continuity |
+| `bitrate` | `u32` | CAN bus bitrate in bps. Allowed: 50k / 100k / 125k / 250k / 500k / 1M. Applies on next boot. |
+| `ch_logging` | `u32` | Packed channel ID for logging-command RX. Bit 31 = IDE (0=std, 1=ext), bits 0–28 = id. Applies on next boot. |
+| `ch_status` | `u32` | Same packing — camera status TX channel. Applies on next boot. |
+| `ch_utc` | `u32` | Same packing — GPS UTC RX channel. Applies on next boot. |
+| `ch_shut` | `u32` | Same packing — shutdown request RX channel. Applies on next boot. |
 
 `tz_off` is applied when setting camera date/time so recorded clips have correct local timestamps. Loaded on `can_manager_init()` before any camera clock operations.
 

@@ -105,6 +105,49 @@ async function reconnectProbe() {
     } catch (_) { /* still down; keep probing */ }
 }
 
+/* ---- Escape-key modal dismiss -------------------------------------------- *
+ *
+ * The dismissible modals each own a Done/Back/Cancel button that already
+ * encapsulates their close behaviour (including reopening the parent modal
+ * for sub-modals like CAN-BUS → Settings).  Esc just dispatches a click to
+ * the appropriate button on whichever modal is currently open.
+ *
+ * Click-outside-to-dismiss was removed — operators on a touchscreen often
+ * tap outside by accident.  Done/Back/Cancel + Esc are the only ways to
+ * close a modal now.  The disconnect, shutdown, and pair overlays are
+ * intentionally excluded — none are user-dismissible.
+ *
+ * Ordering matters: sub-modals come first so an Esc tap closes only the
+ * top-of-stack child (e.g. close CAN-BUS without also closing Settings —
+ * not currently possible in this codebase since openers explicitly close
+ * the parent, but cheap defence against a future change). */
+const ESC_DISMISS_TARGETS = [
+    /* Add-Camera's Back slides instructions → list when visible — handle
+     * that before falling through to Cancel. */
+    { overlayId: 'add-camera-overlay', buttonId: 'add-camera-back',   onlyIfVisible: true },
+    { overlayId: 'add-camera-overlay', buttonId: 'add-camera-cancel' },
+    { overlayId: 'can-bus-overlay',    buttonId: 'can-bus-done' },
+    { overlayId: 'updates-overlay',    buttonId: 'updates-done' },
+    { overlayId: 'advanced-overlay',   buttonId: 'advanced-done' },
+    { overlayId: 'power-overlay',      buttonId: 'power-done' },
+    { overlayId: 'modal-overlay',      buttonId: 'modal-done' },
+    { overlayId: 'settings-overlay',   buttonId: 'settings-done' },
+];
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    for (const { overlayId, buttonId, onlyIfVisible } of ESC_DISMISS_TARGETS) {
+        const overlay = document.getElementById(overlayId);
+        if (!overlay || !overlay.classList.contains('open')) continue;
+        const btn = document.getElementById(buttonId);
+        if (!btn) continue;
+        if (onlyIfVisible && btn.hidden) continue;
+        btn.click();
+        e.preventDefault();
+        return;
+    }
+});
+
 /* ---- Timezone dropdown --------------------------------------------------- */
 
 function formatTzLabel(h) {
@@ -133,19 +176,207 @@ function buildTimezoneDropdown() {
     });
 }
 
-/* ---- CAN bitrate dropdown ------------------------------------------------ */
+/* ---- CAN settings (bitrate + per-channel IDs) ---------------------------- *
+ *
+ * One combined model behind /api/settings/can — see
+ * docs/design/can-id-configuration.md.  Each field posts on change/blur
+ * independently, but a live collision check across all four channels runs
+ * before any channel post fires.  Apply-on-reboot, so we surface a hint
+ * whenever any field differs from what the modal was opened with.
+ */
 
-let canBitrateInitial = null;
+const CAN_CHANNEL_KEYS = ['logging_cmd', 'cam_status', 'gps_utc', 'shutdown_req'];
+
+const CAN_ID_LIMITS = {
+    /* Standard 11-bit and extended 29-bit upper bounds, with a shared lower
+     * bound (the firmware reserves IDs below 0x008 for high-priority traffic). */
+    std: { min: 0x008, max: 0x7FF },
+    ext: { min: 0x008, max: 0x1FFFFFFF },
+};
+
+let canSettingsInitial = null;   // last server-confirmed snapshot, used by reboot-hint comparison
+
+function formatCanId(n) {
+    return '0x' + n.toString(16).toUpperCase();
+}
+
+/* Parse a user-entered hex string ("0x600" / "0x600 ") to a number, or null
+ * on bad input.  Decimal entry is intentionally rejected — design §7.2. */
+function parseCanIdHex(s) {
+    if (typeof s !== 'string') return null;
+    const trimmed = s.trim();
+    if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return null;
+    const n = parseInt(trimmed.slice(2), 16);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+}
+
+function readChannelRow(key) {
+    const row = document.querySelector(`.can-channel-row[data-channel="${key}"]`);
+    const ide = row.querySelector('.can-ide-select').value;
+    const id  = parseCanIdHex(row.querySelector('.can-id-input').value);
+    return { row, ide, id };
+}
+
+/* Returns either {ok:true} or {ok:false, msg:string, badKeys:[key,...]}. */
+function validateCanSet(set) {
+    /* Per-channel range/IDE check. */
+    for (const k of CAN_CHANNEL_KEYS) {
+        const ch = set[k];
+        if (ch.id === null) {
+            return { ok: false, msg: `${k}: id must be 0x… hex`, badKeys: [k] };
+        }
+        const lim = CAN_ID_LIMITS[ch.ide];
+        if (!lim) {
+            return { ok: false, msg: `${k}: invalid ide`, badKeys: [k] };
+        }
+        if (ch.id < lim.min || ch.id > lim.max) {
+            return {
+                ok: false,
+                msg: `${k}: ${formatCanId(ch.id)} out of range for ${ch.ide} (allowed ${formatCanId(lim.min)}–${formatCanId(lim.max)})`,
+                badKeys: [k],
+            };
+        }
+    }
+    /* Cross-channel collision check.  Cross-IDE same-ID counts as a collision
+     * even though the bus permits it (design §8.6). */
+    for (let i = 0; i < CAN_CHANNEL_KEYS.length; i++) {
+        for (let j = i + 1; j < CAN_CHANNEL_KEYS.length; j++) {
+            const a = set[CAN_CHANNEL_KEYS[i]], b = set[CAN_CHANNEL_KEYS[j]];
+            if (a.ide === b.ide && a.id === b.id) {
+                return {
+                    ok: false,
+                    msg: `${CAN_CHANNEL_KEYS[i]} and ${CAN_CHANNEL_KEYS[j]} share ${formatCanId(a.id)} — IDs must be distinct`,
+                    badKeys: [CAN_CHANNEL_KEYS[i], CAN_CHANNEL_KEYS[j]],
+                };
+            }
+        }
+    }
+    return { ok: true };
+}
+
+/* Compare current visible state to canSettingsInitial. */
+function canSettingsHasChanges() {
+    if (!canSettingsInitial) return false;
+    const bitrate = parseInt(document.getElementById('can-bitrate-select').value, 10);
+    if (bitrate !== canSettingsInitial.bitrate_bps) return true;
+    for (const k of CAN_CHANNEL_KEYS) {
+        const cur = readChannelRow(k);
+        const init = canSettingsInitial.channels[k];
+        if (cur.ide !== init.ide || cur.id !== init.id) return true;
+    }
+    return false;
+}
+
+function updateCanHint() {
+    const hint = document.getElementById('can-settings-hint');
+    if (hint) hint.hidden = !canSettingsHasChanges();
+}
+
+function clearCanError() {
+    const errEl = document.getElementById('can-settings-error');
+    errEl.hidden = true;
+    errEl.textContent = '';
+    document.querySelectorAll('.can-channel-row.has-error')
+        .forEach(r => r.classList.remove('has-error'));
+}
+
+function showCanError(msg, badKeys) {
+    const errEl = document.getElementById('can-settings-error');
+    errEl.textContent = msg;
+    errEl.hidden = false;
+    document.querySelectorAll('.can-channel-row.has-error')
+        .forEach(r => r.classList.remove('has-error'));
+    for (const k of (badKeys || [])) {
+        const row = document.querySelector(`.can-channel-row[data-channel="${k}"]`);
+        if (row) row.classList.add('has-error');
+    }
+}
+
+function readCanSet() {
+    const set = {};
+    for (const k of CAN_CHANNEL_KEYS) {
+        const r = readChannelRow(k);
+        set[k] = { ide: r.ide, id: r.id };
+    }
+    return set;
+}
+
+/* POST helper.  Updates the visible hint by comparing the new server state
+ * against the modal-open-time snapshot (canSettingsInitial) — never updates
+ * the snapshot itself, because the hint's job is to remind the user that the
+ * running config still hasn't picked up changes saved this modal session. */
+function postCanSettings(body) {
+    return apiFetch('POST', '/api/settings/can', body).then(() => {
+        updateCanHint();
+        clearCanError();
+    });
+}
 
 document.getElementById('can-bitrate-select').addEventListener('change', () => {
-    const sel = document.getElementById('can-bitrate-select');
-    const hint = document.getElementById('can-bitrate-hint');
-    const bps = parseInt(sel.value, 10);
-    apiFetch('POST', '/api/settings/can-bitrate', { bitrate_bps: bps })
-        .then(() => {
-            if (hint) hint.hidden = (bps === canBitrateInitial);
-        })
-        .catch(() => {});
+    const bps = parseInt(document.getElementById('can-bitrate-select').value, 10);
+    postCanSettings({ bitrate_bps: bps }).catch(() => {});
+});
+
+/* Per-row blur handler — validate full set first, post one channel if OK. */
+function onChannelChange(key) {
+    /* Live validation reflects the current visible state (incl. the just-edited
+     * row), so collisions surface immediately even before blur fires the post. */
+    const set = readCanSet();
+    const v = validateCanSet(set);
+    if (!v.ok) {
+        showCanError(v.msg, v.badKeys);
+        return;                                          /* don't post */
+    }
+    clearCanError();
+    postCanSettings({ channels: { [key]: set[key] } }).catch(() => {
+        /* Server rejected — most likely a race where another tab edited the
+         * same field, or our client-side validator drifted out of sync with
+         * the server.  Re-render from current server state without disturbing
+         * the modal-open-time snapshot. */
+        apiFetch('GET', '/api/settings/can').then(renderCanSettings).catch(() => {});
+    });
+}
+
+CAN_CHANNEL_KEYS.forEach(key => {
+    const row = document.querySelector(`.can-channel-row[data-channel="${key}"]`);
+    const ideSel = row.querySelector('.can-ide-select');
+    const idInp  = row.querySelector('.can-id-input');
+    /* IDE dropdown change re-runs validation (range may have flipped) and posts
+     * if still valid.  Hex input posts on blur to avoid flapping mid-typing. */
+    ideSel.addEventListener('change', () => onChannelChange(key));
+    idInp.addEventListener('blur',   () => onChannelChange(key));
+});
+
+function renderCanSettings(d) {
+    document.getElementById('can-bitrate-select').value = String(d.bitrate_bps);
+    for (const k of CAN_CHANNEL_KEYS) {
+        const row = document.querySelector(`.can-channel-row[data-channel="${k}"]`);
+        row.querySelector('.can-ide-select').value = d.channels[k].ide;
+        row.querySelector('.can-id-input').value   = formatCanId(d.channels[k].id);
+    }
+    updateCanHint();
+    clearCanError();
+}
+
+document.getElementById('can-reset-btn').addEventListener('click', () => {
+    if (!confirm('Restore default CAN identifiers? Reboot to apply.')) return;
+    /* Defaults mirror the firmware's CHANNEL_DEFAULTS — see can_manager.c. */
+    const body = {
+        channels: {
+            logging_cmd:  { ide: 'std', id: 0x600 },
+            cam_status:   { ide: 'std', id: 0x601 },
+            gps_utc:      { ide: 'std', id: 0x602 },
+            shutdown_req: { ide: 'std', id: 0x603 },
+        },
+    };
+    postCanSettings(body).then(() => {
+        /* Re-render inputs from the server's now-authoritative snapshot so
+         * the four channel rows show 0x600/0x601/0x602/0x603.  Re-fetch
+         * rather than reuse canSettingsInitial — that snapshot may be older
+         * than the server (e.g. another tab changed something). */
+        apiFetch('GET', '/api/settings/can').then(renderCanSettings).catch(() => {});
+    }).catch(() => {});
 });
 
 /* ---- Logging settings ---------------------------------------------------- */
@@ -521,7 +752,6 @@ const settingsOverlay = document.getElementById('settings-overlay');
 
 document.getElementById('settings-btn').addEventListener('click', openSettings);
 document.getElementById('settings-done').addEventListener('click', closeSettings);
-settingsOverlay.addEventListener('click', e => { if (e.target === settingsOverlay) closeSettings(); });
 
 function openSettings() {
     settingsOverlay.classList.add('open');
@@ -551,20 +781,12 @@ document.getElementById('can-bus-done').addEventListener('click', () => {
     closeCanBus();
     settingsOverlay.classList.add('open');
 });
-canBusOverlay.addEventListener('click', e => {
-    if (e.target === canBusOverlay) {
-        closeCanBus();
-        settingsOverlay.classList.add('open');
-    }
-});
 
 function openCanBus() {
     canBusOverlay.classList.add('open');
-    apiFetch('GET', '/api/settings/can-bitrate').then(d => {
-        canBitrateInitial = d.bitrate_bps;
-        document.getElementById('can-bitrate-select').value = String(d.bitrate_bps);
-        const hint = document.getElementById('can-bitrate-hint');
-        if (hint) hint.hidden = true;
+    apiFetch('GET', '/api/settings/can').then(d => {
+        canSettingsInitial = d;
+        renderCanSettings(d);
     }).catch(() => {});
 }
 
@@ -586,12 +808,6 @@ document.getElementById('updates-done').addEventListener('click', () => {
     updatesOverlay.classList.remove('open');
     settingsOverlay.classList.add('open');
 });
-updatesOverlay.addEventListener('click', e => {
-    if (e.target === updatesOverlay) {
-        updatesOverlay.classList.remove('open');
-        settingsOverlay.classList.add('open');
-    }
-});
 
 /* ---- Power modal --------------------------------------------------------- */
 
@@ -602,9 +818,6 @@ document.getElementById('power-btn').addEventListener('click', () => {
 });
 document.getElementById('power-done').addEventListener('click', () => {
     powerOverlay.classList.remove('open');
-});
-powerOverlay.addEventListener('click', e => {
-    if (e.target === powerOverlay) powerOverlay.classList.remove('open');
 });
 
 /* ---- Advanced modal ------------------------------------------------------ *
@@ -621,12 +834,6 @@ document.getElementById('advanced-btn').addEventListener('click', () => {
 document.getElementById('advanced-done').addEventListener('click', () => {
     closeAdvanced();
     settingsOverlay.classList.add('open');
-});
-advancedOverlay.addEventListener('click', e => {
-    if (e.target === advancedOverlay) {
-        closeAdvanced();
-        settingsOverlay.classList.add('open');
-    }
 });
 
 function openAdvanced() {
@@ -787,7 +994,6 @@ const modalOverlay = document.getElementById('modal-overlay');
 
 document.getElementById('manage-btn').addEventListener('click', openModal);
 document.getElementById('modal-done').addEventListener('click', closeModal);
-modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
 
 function openModal() {
     modalOverlay.classList.add('open');
@@ -821,10 +1027,6 @@ document.getElementById('add-camera-btn').addEventListener('click', () => {
 
 document.getElementById('add-camera-cancel').addEventListener('click', closeAddCameraModal);
 document.getElementById('add-camera-back').addEventListener('click', slideToList);
-
-addCameraOverlay.addEventListener('click', e => {
-    if (e.target === addCameraOverlay) closeAddCameraModal();
-});
 
 document.querySelectorAll('.camera-model-row').forEach(row => {
     row.addEventListener('click', () => selectCameraModel(row.dataset.model));

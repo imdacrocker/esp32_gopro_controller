@@ -423,9 +423,7 @@ width: 100%, max-width: 480px
 padding: 0 0 1.5em
 ```
 
-**Header:** "Settings" title left, "Done" button right (blue, closes modal)
-
-Clicking the overlay backdrop (not the modal card) also closes the modal.
+**Header:** "Settings" title left, "Done" button right (blue, closes modal). Esc also closes — see §12.7.
 
 ### 12.1 Sections (top to bottom)
 
@@ -437,7 +435,7 @@ The Settings sheet is a navigation hub — only **Time Zone** is editable inline
   - On Settings open: `GET /api/settings/timezone` → selects value, rewrites the System Time section label.
 
 **Entry buttons** (each a blue `.settings-action-btn`, stacked, full-width minus 16 px side margins, top-to-bottom):
-- **CAN-BUS Settings** → opens the CAN-BUS sub-modal (§12.2). Dismisses Settings on open; closing the sub-modal (Back / click-outside) reopens Settings.
+- **CAN-BUS Settings** → opens the CAN-BUS sub-modal (§12.2). Dismisses Settings on open; closing the sub-modal (Back / Esc key) reopens Settings.
 - **Advanced Settings** → opens the Advanced modal (§12.3). Same round-trip pattern.
 - **Updates** → opens the Updates sub-modal (§12.4). Same round-trip pattern.
 - **About** → opens a native browser `alert()` (no modal) with three lines: "Main App: <version>", "Built: <date> <time>", "Recovery App: <version>". Just an OK button. Backed by `GET /api/version`.
@@ -447,19 +445,27 @@ The Settings sheet is a navigation hub — only **Time Zone** is editable inline
 Separate top-sheet modal (`#can-bus-overlay`) with the same `.settings-modal` styling as Settings. Always exactly one of {Settings, CAN-BUS} is visible — never both.
 
 - Opened from the "CAN-BUS Settings" button in Settings; Settings closes simultaneously.
-- Closed via the **Back** button or click-outside; Settings reopens.
+- Closed via the **Back** button or Esc key; Settings reopens.
 
 **Contents:**
 - **CAN Baud Rate** — `<select>` with 50k / 100k / 125k / 250k / 500k / 1M options.
-  - On change: `POST /api/settings/can-bitrate` with `{ bitrate_bps: N }` and reveal an orange "Reboot to apply new CAN baud rate" hint (`#can-bitrate-hint`) until the bitrate matches the value at open.
-  - On sub-modal open: `GET /api/settings/can-bitrate` → selects value, hides hint, stores the opened value as `canBitrateInitial` so the hint can be re-hidden if the user reverts.
+- **Per-channel identifier rows** — one row each for Logging Command (RX), Camera Status (TX), GPS UTC (RX), Shutdown Request (RX). Each row pairs a Standard/Extended `<select>` with a hex `<input>` (e.g. `0x600`). Decimal entry is rejected; the input always renders as `0x…`.
+- **Reset to defaults** button at the modal footer restores the four factory channel IDs (`0x600`/`0x601`/`0x602`/`0x603`, all standard) in one POST.
+
+**API:**
+- On sub-modal open: `GET /api/settings/can` → returns `{ bitrate_bps, channels: { logging_cmd, cam_status, gps_utc, shutdown_req } }`. Snapshot stored as `canSettingsInitial` so the reboot hint can compare against the modal-open-time state.
+- Bitrate `<select>` change and per-row blur each POST to `/api/settings/can` with only the touched field(s); server merges against current values, validates the full set (range + IDE + cross-channel collision), persists atomically.
+- An orange "Reboot to apply new CAN settings" hint (`#can-settings-hint`) shows whenever any visible field differs from `canSettingsInitial`. Hides once the user reverts every change.
+- A red error line (`#can-settings-error`) shows live client-side validation failures (bad hex, out-of-range, collision); offending rows get `.has-error` for the red border.
+
+Full design: [`can-id-configuration.md`](can-id-configuration.md).
 
 ### 12.3 Advanced Settings Modal
 
 Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings. Always exactly one of {Settings, Advanced} is visible — never both.
 
 - Opened from the "Advanced Settings" button in Settings; Settings closes simultaneously.
-- Closed via the **Back** button (labelled "Back" to reflect that it returns to Settings) or click-outside; Settings reopens.
+- Closed via the **Back** button (labelled "Back" to reflect that it returns to Settings) or Esc key; Settings reopens.
 
 **Logging section** — collects diagnostic logs for support reports. See [`log-capture.md`](log-capture.md) for the full design.
 - Enable Logging toggle (reuses `.toggle-wrap` styling from the home-screen Auto Control toggle).
@@ -479,7 +485,7 @@ Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings
 Separate top-sheet modal (`#updates-overlay`) with the same `.settings-modal` styling. Same Settings→sub-modal→Settings round-trip as the Advanced and CAN-BUS modals.
 
 - Opened from the "Updates" button in Settings; Settings closes simultaneously.
-- Closed via the **Back** button or click-outside; Settings reopens.
+- Closed via the **Back** button or Esc key; Settings reopens.
 
 **Contents:**
 - **Channel** `<select>` (`stable` / `beta`). On change: `POST /api/ota/channel`.
@@ -498,7 +504,7 @@ id: power-overlay
 align-items: flex-start (top sheet)
 ```
 
-**Header:** "Power" title left, "Done" button right (blue, closes modal). Clicking the overlay backdrop also closes.
+**Header:** "Power" title left, "Done" button right (blue, closes modal). Esc also closes — see §12.7.
 
 **Body (top to bottom):**
 
@@ -510,6 +516,17 @@ align-items: flex-start (top sheet)
   - On confirm: `POST /api/shutdown`, starts the `/api/shutdown` polling loop. Once `state == "complete"` the global shutdown-complete overlay takes over (see CHANGELOG v1.0.9 for the full sequence).
 
 These two buttons moved out of the Settings modal in [Unreleased] — see CHANGELOG. The JS handlers and confirm-dialog wording are unchanged; only the parent overlay differs.
+
+### 12.7 Modal dismissal — Esc-or-button only
+
+Every dismissible modal (Settings, CAN-BUS, Updates, Advanced, Power, Manage Cameras, Add Camera) is closed by **its own Done / Back / Cancel button**, or by the **Esc key**. There is no click-outside-to-dismiss behaviour — operators on a touchscreen mounted in a vehicle tap outside by accident too easily.
+
+Implementation: `ESC_DISMISS_TARGETS` in `app.js` maps each `.modal-overlay` id to the dom id of its dismiss button. A single document-level `keydown` listener finds the first `.open` overlay in that table and dispatches a synthetic click on its button — which means every modal's existing close logic (including reopening the parent for sub-modals like CAN-BUS → Settings) runs unchanged. Add Camera has two entries: the Back button (slides instructions → list) is preferred when visible; the Cancel button is the fallback for the list pane.
+
+Excluded from Esc handling (intentionally non-dismissible):
+- **Pair-progress overlay** (`#pair-overlay`, z-index 1000) — has its own Cancel button; pairing is an in-progress operation, not a menu.
+- **Disconnect overlay** (`#disconnect-overlay`, z-index 9999) — only escape is the auto-reload probe.
+- **Shutdown-complete overlay** (`#shutdown-overlay`, z-index 9999) — only escape is the REBOOT button.
 
 ---
 
@@ -544,7 +561,7 @@ On open: calls `refreshModalPairedCameras()` and starts a 3 s interval that refr
 
 On close: clears the 3 s paired-list interval. Modal state otherwise persists.
 
-Clicking the backdrop also closes the modal.
+Esc also closes the modal — see §12.7.
 
 ### 13.1 Paired Cameras
 
@@ -601,7 +618,7 @@ padding-bottom: 0
 - `.modal-title` — "Add New", centered visually because the back button is hidden on the initial pane.
 - `#add-camera-cancel` — `.modal-done-btn` (blue "Cancel" text). Always closes the whole modal. Closing from the instructions pane resets the modal back to the list pane so the next open starts fresh.
 
-Backdrop click is equivalent to Cancel.
+Esc behaviour (per §12.7): when the Back button is visible (instructions pane), Esc clicks Back — slides to the list pane. On the list pane, Back is hidden so Esc clicks Cancel — closes the modal.
 
 **Slider mechanics:**
 ```

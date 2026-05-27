@@ -33,12 +33,12 @@ static const char *TAG = "can_manager";
 #define CAN_RX_GPIO          6
 #define CAN_TX_QUEUE_DEPTH   8
 
-/* ---- Protocol constants (§14.2) ------------------------------------------ */
-
-#define CAN_ID_LOGGING_CMD   0x600u
-#define CAN_ID_CAM_STATUS    0x601u
-#define CAN_ID_GPS_UTC       0x602u
-#define CAN_ID_SHUTDOWN_REQ  0x603u
+/* ---- Protocol constants (§14.2) ------------------------------------------ *
+ *
+ * The four CAN identifiers (logging command, camera status, GPS UTC, shutdown
+ * request) are no longer hard-coded — they're user-configurable per
+ * docs/design/can-id-configuration.md.  Defaults still match the §14.2 values:
+ * 0x600/0x601/0x602/0x603, all standard 11-bit.  See CHANNEL_DEFAULTS below. */
 
 #define STATUS_TX_PERIOD_US  200000   /* 5 Hz */
 #define WATCHDOG_TIMEOUT_US  5000000  /* 5 s  */
@@ -52,6 +52,19 @@ static const char *TAG = "can_manager";
 #define NVS_KEY_TZ_OFFSET    "tz_off"
 #define NVS_KEY_LAST_UTC_MS  "last_utc"
 #define NVS_KEY_BITRATE      "bitrate"
+
+/* One packed u32 per channel: bit 31 = IDE flag (1 = extended), bits 28..0 =
+ * the CAN identifier.  Bits 30..29 are reserved-zero; a read with either set
+ * is treated as missing and the default is substituted (and a warning logged).
+ * See docs/design/can-id-configuration.md §4.2. */
+#define NVS_KEY_CH_LOGGING   "ch_logging"
+#define NVS_KEY_CH_STATUS    "ch_status"
+#define NVS_KEY_CH_UTC       "ch_utc"
+#define NVS_KEY_CH_SHUT      "ch_shut"
+
+#define CH_PACK_IDE_BIT      (1u << 31)
+#define CH_PACK_RESERVED     (3u << 29)   /* bits 30..29 must read back zero */
+#define CH_PACK_ID_MASK      0x1FFFFFFFu  /* 29 bits */
 
 /* ---- Bitrate -------------------------------------------------------------- */
 
@@ -78,6 +91,7 @@ static bool bitrate_is_allowed(uint32_t bps)
 
 typedef struct {
     uint32_t id;
+    bool     extended;   /* ide flag — must match s_channels[].extended */
     uint8_t  dlc;
     uint8_t  data[TWAI_FRAME_MAX_LEN];
 } can_rx_item_t;
@@ -113,6 +127,28 @@ static struct {
 static int8_t s_tz_offset = 0; /* UTC by default; user-configurable via /api/settings/timezone, persisted in NVS. */
 
 static uint32_t s_bitrate_bps = CAN_BITRATE_DEFAULT; /* loaded from NVS at init; applies on next boot. */
+
+/* Per-channel CAN identifiers — frozen at can_manager_init() from NVS (with
+ * defaults filled in) and treated as read-only for the boot session.  Writes
+ * via can_manager_set_channel() touch NVS only; the running dispatch table
+ * and TX header keep boot-time values.  See docs/design/can-id-configuration.md. */
+static can_channel_t s_channels[CAN_CH_COUNT];
+
+/* Compile-time defaults — kept in one place so the API reset-to-defaults path
+ * and the NVS-not-found path read from the same source. */
+static const can_channel_t CHANNEL_DEFAULTS[CAN_CH_COUNT] = {
+    [CAN_CH_LOGGING_CMD]   = { .extended = false, .id = 0x600u },
+    [CAN_CH_CAM_STATUS]    = { .extended = false, .id = 0x601u },
+    [CAN_CH_GPS_UTC]       = { .extended = false, .id = 0x602u },
+    [CAN_CH_SHUTDOWN_REQ]  = { .extended = false, .id = 0x603u },
+};
+
+static const char *CHANNEL_NVS_KEYS[CAN_CH_COUNT] = {
+    [CAN_CH_LOGGING_CMD]   = NVS_KEY_CH_LOGGING,
+    [CAN_CH_CAM_STATUS]    = NVS_KEY_CH_STATUS,
+    [CAN_CH_GPS_UTC]       = NVS_KEY_CH_UTC,
+    [CAN_CH_SHUTDOWN_REQ]  = NVS_KEY_CH_SHUT,
+};
 
 static esp_timer_handle_t s_tx_timer;
 static esp_timer_handle_t s_watchdog_timer;
@@ -331,8 +367,9 @@ static bool IRAM_ATTR on_rx_done_isr(twai_node_handle_t handle,
         return false;
     }
 
-    item.id  = frame.header.id;
-    item.dlc = (uint8_t)frame.header.dlc;
+    item.id       = frame.header.id;
+    item.extended = frame.header.ide != 0;
+    item.dlc      = (uint8_t)frame.header.dlc;
 
     BaseType_t higher_prio_woken = pdFALSE;
     xQueueSendFromISR(s_rx_queue, &item, &higher_prio_woken);
@@ -387,6 +424,19 @@ static void recovery_task(void *arg)
     }
 }
 
+/* ---- RX dispatch table — keyed by can_channel_id_t ----------------------- */
+
+typedef void (*rx_handler_fn)(const can_rx_item_t *);
+
+/* NULL for CAN_CH_CAM_STATUS — it's TX-only.  We still need a slot so the
+ * table lines up with can_channel_id_t for direct indexing. */
+static const rx_handler_fn RX_HANDLERS[CAN_CH_COUNT] = {
+    [CAN_CH_LOGGING_CMD]   = handle_logging_cmd,
+    [CAN_CH_CAM_STATUS]    = NULL,
+    [CAN_CH_GPS_UTC]       = handle_gps_utc,
+    [CAN_CH_SHUTDOWN_REQ]  = handle_shutdown_request,
+};
+
 /* ---- RX task (§14.4 — priority 5, core 1) -------------------------------- */
 
 static void rx_task(void *arg)
@@ -403,18 +453,16 @@ static void rx_task(void *arg)
                                s_cbs.on_rx_frame_arg);
         }
 
-        switch (item.id) {
-        case CAN_ID_LOGGING_CMD:
-            handle_logging_cmd(&item);
-            break;
-        case CAN_ID_GPS_UTC:
-            handle_gps_utc(&item);
-            break;
-        case CAN_ID_SHUTDOWN_REQ:
-            handle_shutdown_request(&item);
-            break;
-        default:
-            break;
+        /* Linear scan over four entries — branch-predicted hot path on the
+         * configured ID, plus the (ide, id) tuple matches what the bus actually
+         * delivers (standard 0x600 and extended 0x600 are distinct frames). */
+        for (int i = 0; i < CAN_CH_COUNT; i++) {
+            if (RX_HANDLERS[i] == NULL) continue;                /* TX-only */
+            if (item.id == s_channels[i].id &&
+                item.extended == s_channels[i].extended) {
+                RX_HANDLERS[i](&item);
+                break;
+            }
         }
     }
 }
@@ -445,11 +493,12 @@ static void tx_timer_cb(void *arg)
         data[i] = (uint8_t)camera_manager_get_slot_can_state(i);
     }
 
+    const can_channel_t status_ch = s_channels[CAN_CH_CAM_STATUS];
     twai_frame_t frame = {
         .header = {
-            .id  = CAN_ID_CAM_STATUS,
+            .id  = status_ch.id,
             .dlc = CAMERA_MAX_SLOTS,
-            .ide = 0,
+            .ide = status_ch.extended ? 1 : 0,
             .rtr = 0,
             .fdf = 0,
         },
@@ -504,6 +553,57 @@ static void save_tz_offset(void)
     nvs_close(h);
 }
 
+/* ---- Per-channel ID helpers ---------------------------------------------- */
+
+static bool channel_value_is_valid(can_channel_t v)
+{
+    if (v.id < 0x008u) return false;                              /* reserved low */
+    if (v.extended) {
+        return v.id <= CH_PACK_ID_MASK;                           /* 29-bit */
+    }
+    return v.id <= 0x7FFu;                                        /* 11-bit */
+}
+
+static uint32_t channel_pack(can_channel_t v)
+{
+    return (v.extended ? CH_PACK_IDE_BIT : 0u) | (v.id & CH_PACK_ID_MASK);
+}
+
+/* Returns false if the packed value's reserved bits are non-zero — caller
+ * should fall back to the default and overwrite on next legitimate write. */
+static bool channel_unpack(uint32_t packed, can_channel_t *out)
+{
+    if (packed & CH_PACK_RESERVED) return false;
+    out->extended = (packed & CH_PACK_IDE_BIT) != 0;
+    out->id       = packed & CH_PACK_ID_MASK;
+    return channel_value_is_valid(*out);
+}
+
+static void load_channels(void)
+{
+    nvs_handle_t h;
+    bool have_handle = (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK);
+
+    for (int i = 0; i < CAN_CH_COUNT; i++) {
+        s_channels[i] = CHANNEL_DEFAULTS[i];
+        if (!have_handle) continue;
+
+        uint32_t packed;
+        if (nvs_get_u32(h, CHANNEL_NVS_KEYS[i], &packed) != ESP_OK) {
+            continue;                                /* missing -> default */
+        }
+        can_channel_t v;
+        if (!channel_unpack(packed, &v)) {
+            ESP_LOGW(TAG, "%s NVS value 0x%08x malformed; using default",
+                     CHANNEL_NVS_KEYS[i], (unsigned)packed);
+            continue;                                /* keep default */
+        }
+        s_channels[i] = v;
+    }
+
+    if (have_handle) nvs_close(h);
+}
+
 /* ---- Public API ----------------------------------------------------------- */
 
 void can_manager_register_callbacks(const can_manager_callbacks_t *cbs)
@@ -515,6 +615,7 @@ void can_manager_init(void)
 {
     load_tz_offset();
     load_bitrate();
+    load_channels();
 
     s_utc_mutex = xSemaphoreCreateMutex();
     configASSERT(s_utc_mutex);
@@ -698,4 +799,46 @@ esp_err_t can_manager_set_bitrate(uint32_t bitrate_bps)
     ESP_LOGI(TAG, "CAN bitrate set to %u bps (applies on reboot)",
              (unsigned)bitrate_bps);
     return ESP_OK;
+}
+
+esp_err_t can_manager_get_channel(can_channel_id_t ch, can_channel_t *out)
+{
+    if (ch >= CAN_CH_COUNT || out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = s_channels[ch];
+    return ESP_OK;
+}
+
+esp_err_t can_manager_set_channel(can_channel_id_t ch, can_channel_t value)
+{
+    if (ch >= CAN_CH_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!channel_value_is_valid(value)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed");
+        return ESP_FAIL;
+    }
+    nvs_set_u32(h, CHANNEL_NVS_KEYS[ch], channel_pack(value));
+    nvs_commit(h);
+    nvs_close(h);
+
+    ESP_LOGI(TAG, "%s set to %s 0x%x (applies on reboot)",
+             CHANNEL_NVS_KEYS[ch],
+             value.extended ? "ext" : "std",
+             (unsigned)value.id);
+    return ESP_OK;
+}
+
+can_channel_t can_manager_channel_default(can_channel_id_t ch)
+{
+    if (ch >= CAN_CH_COUNT) {
+        return (can_channel_t){ .extended = false, .id = 0 };
+    }
+    return CHANNEL_DEFAULTS[ch];
 }

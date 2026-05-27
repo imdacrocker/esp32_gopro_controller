@@ -32,7 +32,7 @@ Then on your phone or laptop:
 
 > **No internet on the flashing machine?** Download `factory.bin` from the [latest release](https://github.com/imdacrocker/esp32_gopro_controller/releases/latest) and use Launchpad's **DIY** tab to flash it at address `0x0`.
 
-To send information from the RaceCapture, you will need to use Lua.  Here is an example script:
+To send information from the RaceCapture, you will need to use Lua.  Here is an example script (the IDs `0x600` and `0x602` below are the factory defaults — if you've changed them in **Settings → CAN-BUS Settings** on the web UI, update the script to match):
 
 ```lua
 local function isLeapYear(year)
