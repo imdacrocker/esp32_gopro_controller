@@ -12,6 +12,25 @@ let scanSecondsLeft      = 0;
 let modalPairedRefreshTimer = null;
 let cameraStatusTimer    = null;    // 3s camera status poll (paused during BLE scan)
 let topSectionTimer      = null;    // 2s top-section poll (paused during BLE scan)
+let clockTickTimer       = null;    // 1s local clock display tick
+
+/* Clock state: server epoch fetched at perf time. renderClock extrapolates
+ * locally each second so the seconds tick smoothly without polling /api/utc
+ * faster than the top-section rate. */
+let clockServerEpochMs   = 0;
+let clockFetchedAt       = 0;
+let clockValid           = false;
+let clockSessionSynced   = false;
+
+/* Connection tracker: every apiFetch contributes a heartbeat. After
+ * DISCONNECT_THRESHOLD consecutive failures we enter the disconnected
+ * state, freeze the UI under an overlay, and probe /api/version for a
+ * clean recovery → location.reload(). */
+const DISCONNECT_THRESHOLD = 3;
+let consecutiveFailures  = 0;
+let disconnected         = false;
+let reloading            = false;
+let reconnectProbeTimer  = null;
 
 /* ---- Helpers ------------------------------------------------------------- */
 
@@ -25,10 +44,65 @@ async function apiFetch(method, path, body) {
         opts.headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(body);
     }
-    const r = await fetch(path, opts);
-    if (!r.ok) throw new Error(`${method} ${path} → ${r.status}`);
-    const text = await r.text();
-    return text ? JSON.parse(text) : {};
+    try {
+        const r = await fetch(path, opts);
+        if (!r.ok) throw new Error(`${method} ${path} → ${r.status}`);
+        const text = await r.text();
+        consecutiveFailures = 0;
+        return text ? JSON.parse(text) : {};
+    } catch (err) {
+        consecutiveFailures++;
+        if (!disconnected && consecutiveFailures >= DISCONNECT_THRESHOLD) {
+            enterDisconnected();
+        }
+        throw err;
+    }
+}
+
+/* ---- Disconnect handling ------------------------------------------------- */
+
+function enterDisconnected() {
+    if (disconnected) return;
+    disconnected = true;
+
+    // Halt every UI timer so no further requests fire and no stale renders
+    // happen while the overlay is up. The reconnect probe (below) uses raw
+    // fetch and is the only thing talking to the device until we reload.
+    clearInterval(topSectionTimer);       topSectionTimer       = null;
+    clearInterval(cameraStatusTimer);     cameraStatusTimer     = null;
+    clearInterval(modalPairedRefreshTimer); modalPairedRefreshTimer = null;
+    clearInterval(pollTimer);             pollTimer             = null;
+    clearInterval(countdownTimer);        countdownTimer        = null;
+    clearInterval(pairStatusTimer);       pairStatusTimer       = null;
+    clearTimeout(pairDismissTimer);       pairDismissTimer      = null;
+    clearInterval(clockTickTimer);        clockTickTimer        = null;
+
+    // Hide every visible modal/sheet. We're about to reload on recovery
+    // anyway, so no teardown — just remove the visibility classes/attrs.
+    document.querySelectorAll('.modal-overlay.open').forEach(el => el.classList.remove('open'));
+    const pairOverlay = document.getElementById('pair-overlay');
+    if (pairOverlay) pairOverlay.hidden = true;
+
+    const overlay = document.getElementById('disconnect-overlay');
+    if (overlay) overlay.hidden = false;
+
+    reconnectProbeTimer = setInterval(reconnectProbe, 1000);
+}
+
+async function reconnectProbe() {
+    if (reloading) return;
+    try {
+        const ctrl = new AbortController();
+        const t    = setTimeout(() => ctrl.abort(), 1500);
+        const r    = await fetch('/api/version', { signal: ctrl.signal });
+        clearTimeout(t);
+        if (r.ok) {
+            reloading = true;
+            clearInterval(reconnectProbeTimer);
+            reconnectProbeTimer = null;
+            location.reload();
+        }
+    } catch (_) { /* still down; keep probing */ }
 }
 
 /* ---- Timezone dropdown --------------------------------------------------- */
@@ -370,6 +444,61 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
 const RC_LABEL = { logging: 'Logging', not_logging: 'Not Logging', unknown: 'Disconnected' };
 const RC_CAM_STATE = { logging: 'recording', not_logging: 'idle', unknown: 'disconnected' };
 
+/* Update the per-fetch UTC state (validity, sync-button visibility, tooltip).
+ * Display formatting happens in renderClock, which ticks locally every second
+ * so the seconds digit advances smoothly between polls. */
+function applyUtcResponse(d) {
+    const display = document.getElementById('utc-display');
+    const syncBtn = document.getElementById('datetime-btn');
+    const infoBtn = document.getElementById('time-info-btn');
+    const tip     = display.querySelector('.modal-info-tooltip');
+
+    clockValid         = !!d.valid;
+    clockSessionSynced = !!d.session_synced;
+    if (clockValid) {
+        clockServerEpochMs = d.epoch_ms;
+        clockFetchedAt     = performance.now();
+    }
+
+    const stale = clockValid && !clockSessionSynced;
+    display.classList.toggle('stale', !clockValid || stale);
+    if (tip) {
+        tip.textContent = clockValid
+            ? 'System time was restored from memory but is stale and needs to be updated. Either wait for the RaceCapture to send UTC, or manually sync from this device.'
+            : 'No time synced. Either wait for the RaceCapture to send UTC, or manually sync from this device.';
+    }
+
+    // Hide both the SYNC and the info button on the same condition. The
+    // !dataset.busy gate keeps the buttons stable while a manual sync is
+    // animating its "Set ✓" confirmation.
+    const synced = clockSessionSynced;
+    const busy   = syncBtn && syncBtn.dataset.busy;
+    if (syncBtn && !busy) syncBtn.hidden = synced;
+    if (infoBtn && !busy) {
+        infoBtn.hidden = synced;
+        if (synced && tip) tip.classList.remove('show');
+    }
+
+    renderClock();
+}
+
+function renderClock() {
+    const dateLine = document.getElementById('utc-date-line');
+    const timeLine = document.getElementById('utc-time-line');
+    if (!clockValid) {
+        dateLine.textContent = '';
+        timeLine.textContent = '--:--:--';
+        return;
+    }
+    const nowMs = clockServerEpochMs + (performance.now() - clockFetchedAt);
+    const dt    = new Date(nowMs);
+    const h24   = dt.getUTCHours();
+    const ampm  = h24 >= 12 ? 'PM' : 'AM';
+    const h12   = h24 % 12 || 12;
+    dateLine.textContent = `${MONTH_NAMES[dt.getUTCMonth()]} ${dt.getUTCDate()}, ${dt.getUTCFullYear()}`;
+    timeLine.textContent = `${String(h12).padStart(2,'0')}:${String(dt.getUTCMinutes()).padStart(2,'0')}:${String(dt.getUTCSeconds()).padStart(2,'0')} ${ampm}`;
+}
+
 function refreshTopSection() {
     apiFetch('GET', '/api/logging-state').then(d => {
         const pill   = document.getElementById('rc-logging-pill');
@@ -379,41 +508,7 @@ function refreshTopSection() {
         pill.innerHTML = (STATUS_ICON[camSt] || '') + `<span>${label}</span>`;
     }).catch(() => {});
 
-    apiFetch('GET', '/api/utc').then(d => {
-        const display  = document.getElementById('utc-display');
-        const dateLine = document.getElementById('utc-date-line');
-        const timeLine = document.getElementById('utc-time-line');
-        const syncBtn  = document.getElementById('datetime-btn');
-        const infoBtn  = document.getElementById('time-info-btn');
-        const tip      = display.querySelector('.modal-info-tooltip');
-        const unknown  = !d.valid;
-        const stale    = d.valid && !d.session_synced;
-        if (unknown) {
-            dateLine.textContent = '';
-            timeLine.textContent = '--:--:--';
-            display.classList.add('stale');
-            if (tip) tip.textContent = 'No time synced. Either wait for the RaceCapture to send UTC, or manually sync from this device.';
-        } else {
-            const dt = new Date(d.epoch_ms);
-            const h24 = dt.getUTCHours();
-            const ampm = h24 >= 12 ? 'PM' : 'AM';
-            const h12  = h24 % 12 || 12;
-            dateLine.textContent = `${MONTH_NAMES[dt.getUTCMonth()]} ${dt.getUTCDate()}, ${dt.getUTCFullYear()}`;
-            timeLine.textContent = `${String(h12).padStart(2,'0')}:${String(dt.getUTCMinutes()).padStart(2,'0')}:${String(dt.getUTCSeconds()).padStart(2,'0')} ${ampm}`;
-            display.classList.toggle('stale', stale);
-            if (tip) tip.textContent = 'System time was restored from memory but is stale and needs to be updated. Either wait for the RaceCapture to send UTC, or manually sync from this device.';
-        }
-        // Hide both the SYNC and the info button on the same condition. The
-        // !dataset.busy gate keeps the buttons stable while a manual sync is
-        // animating its "Set ✓" confirmation.
-        const synced = !!d.session_synced;
-        const busy   = syncBtn && syncBtn.dataset.busy;
-        if (syncBtn && !busy) syncBtn.hidden = synced;
-        if (infoBtn && !busy) {
-            infoBtn.hidden = synced;
-            if (synced && tip) tip.classList.remove('show');
-        }
-    }).catch(() => {});
+    apiFetch('GET', '/api/utc').then(applyUtcResponse).catch(() => {});
 
     apiFetch('GET', '/api/auto-control').then(d => {
         applyAutoControl(d.enabled);
@@ -551,27 +646,124 @@ modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) clo
 function openModal() {
     modalOverlay.classList.add('open');
     refreshModalPairedCameras();
-    modalPairedRefreshTimer = setInterval(() => {
-        refreshModalPairedCameras();
-        refreshRcDiscovered();
-    }, 3000);
+    modalPairedRefreshTimer = setInterval(refreshModalPairedCameras, 3000);
 }
 
 function closeModal() {
-    if (scanning) cancelScan();
     clearInterval(modalPairedRefreshTimer);
     modalPairedRefreshTimer = null;
-    document.getElementById('modal-status').textContent = '';
-    document.getElementById('results').innerHTML = '';
-    document.getElementById('rc-results').innerHTML = '';
-    rcListActivated = false;
     modalOverlay.classList.remove('open');
     /* Note: the pair-progress modal is a separate overlay with higher
      * z-index and manages its own lifecycle. */
 }
 
-function setModalStatus(msg) {
-    document.getElementById('modal-status').textContent = msg;
+/* ---- Add Camera modal ---------------------------------------------------- *
+ * Two-pane slider: model picker → instructions. Hero3/Hero4 use the WiFi-RC
+ * "discovered devices" flow; everything else uses BLE scan. Opening this
+ * modal dismisses the Manage modal. Both Add (RC) and Pair (BLE) hand off
+ * to the existing pair-progress overlay. */
+
+const RC_MODELS         = new Set(['Hero3', 'Hero4']);
+const addCameraOverlay  = document.getElementById('add-camera-overlay');
+const addCameraTrack    = document.getElementById('add-camera-track');
+let   addCameraRcPollTimer = null;
+
+document.getElementById('add-camera-btn').addEventListener('click', () => {
+    closeModal();
+    openAddCameraModal();
+});
+
+document.getElementById('add-camera-cancel').addEventListener('click', closeAddCameraModal);
+document.getElementById('add-camera-back').addEventListener('click', slideToList);
+
+addCameraOverlay.addEventListener('click', e => {
+    if (e.target === addCameraOverlay) closeAddCameraModal();
+});
+
+document.querySelectorAll('.camera-model-row').forEach(row => {
+    row.addEventListener('click', () => selectCameraModel(row.dataset.model));
+});
+
+function openAddCameraModal() {
+    resetAddCameraModal();
+    addCameraOverlay.classList.add('open');
+}
+
+function closeAddCameraModal() {
+    if (scanning) cancelScan();
+    clearInterval(addCameraRcPollTimer);
+    addCameraRcPollTimer = null;
+    rcListActivated = false;
+    addCameraOverlay.classList.remove('open');
+    resetAddCameraModal();
+}
+
+function resetAddCameraModal() {
+    addCameraTrack.classList.remove('step-instructions');
+    document.getElementById('add-camera-back').hidden = true;
+    document.getElementById('add-camera-ble-section').hidden = true;
+    document.getElementById('add-camera-rc-section').hidden = true;
+    document.getElementById('add-camera-ble-results').innerHTML = '';
+    document.getElementById('add-camera-rc-results').innerHTML = '';
+    document.getElementById('add-camera-status').textContent = '';
+    document.getElementById('add-camera-instructions').textContent = '';
+}
+
+function instructionsForModel(model) {
+    if (RC_MODELS.has(model)) {
+        return 'Reset all wireless connections on the camera, and then choose to pair with a new WiFi RC.';
+    }
+    if (model === 'Hero7') {
+        /* Hero7 forces the controller's STA to bounce while we negotiate the
+         * AP/STA dance, which can drop the user's own browser if they're on
+         * the same WiFi — call that out so they don't think it failed. */
+        return 'Reset all wireless connections on the camera. After resetting you MUST update the camera Wifi to 2.4ghz manually. Then, choose to pair with the GoPro App. Once in Pairing mode, click Scan.<br><br>NOTE: The wireless connection to this browser may disconnect during this process. If this happens, reconnect to the controller\'s WiFi and refresh.';
+    }
+    return 'Reset all wireless connections on the camera, and then choose to pair with the GoPro App. Once in Pairing mode, click Scan.';
+}
+
+function selectCameraModel(model) {
+    const instructionsEl = document.getElementById('add-camera-instructions');
+    const bleSection     = document.getElementById('add-camera-ble-section');
+    const rcSection      = document.getElementById('add-camera-rc-section');
+    document.getElementById('add-camera-back').hidden = false;
+
+    instructionsEl.innerHTML = instructionsForModel(model);
+
+    if (RC_MODELS.has(model)) {
+        bleSection.hidden = true;
+        rcSection.hidden  = false;
+        rcListActivated = true;
+        refreshRcDiscovered();
+        clearInterval(addCameraRcPollTimer);
+        addCameraRcPollTimer = setInterval(refreshRcDiscovered, 3000);
+    } else {
+        bleSection.hidden = false;
+        rcSection.hidden  = true;
+        document.getElementById('add-camera-ble-results').innerHTML = '';
+        setAddCameraStatus('');
+        const scanBtn = document.getElementById('add-camera-scan-btn');
+        scanBtn.textContent = 'Scan';
+        scanBtn.classList.remove('scanning');
+    }
+
+    addCameraTrack.classList.add('step-instructions');
+}
+
+function slideToList() {
+    if (scanning) cancelScan();
+    clearInterval(addCameraRcPollTimer);
+    addCameraRcPollTimer = null;
+    rcListActivated = false;
+    addCameraTrack.classList.remove('step-instructions');
+    document.getElementById('add-camera-back').hidden = true;
+    document.getElementById('add-camera-ble-results').innerHTML = '';
+    document.getElementById('add-camera-rc-results').innerHTML = '';
+    setAddCameraStatus('');
+}
+
+function setAddCameraStatus(msg) {
+    document.getElementById('add-camera-status').textContent = msg;
 }
 
 /* ---- Info-button tooltips ----------------------------------------------- */
@@ -593,7 +785,7 @@ document.addEventListener('click', e => {
 
 /* ---- BLE Scan ------------------------------------------------------------ */
 
-document.getElementById('scan-btn').addEventListener('click', () => {
+document.getElementById('add-camera-scan-btn').addEventListener('click', () => {
     if (scanning) {
         cancelScan();
     } else {
@@ -604,10 +796,10 @@ document.getElementById('scan-btn').addEventListener('click', () => {
 function startScan() {
     scanning = true;
     scanSecondsLeft = 120;
-    const btn = document.getElementById('scan-btn');
+    const btn = document.getElementById('add-camera-scan-btn');
     btn.textContent = 'Cancel Scan';
     btn.classList.add('scanning');
-    setModalStatus(`Scanning… ${scanSecondsLeft}s`);
+    setAddCameraStatus(`Scanning… ${scanSecondsLeft}s`);
 
     // Snapshot known-paired addrs so pollScanResults can filter without polling /api/paired-cameras
     lastPairedAddrs = new Set(lastCameraList.map(c => c.addr));
@@ -623,7 +815,7 @@ function startScan() {
     countdownTimer = setInterval(() => {
         scanSecondsLeft--;
         if (scanSecondsLeft > 0) {
-            setModalStatus(`Scanning… ${scanSecondsLeft}s`);
+            setAddCameraStatus(`Scanning… ${scanSecondsLeft}s`);
         } else {
             stopScan(false);
         }
@@ -642,20 +834,15 @@ function stopScan(cancelled) {
     pollTimer = null;
     countdownTimer = null;
 
-    const btn = document.getElementById('scan-btn');
-    btn.textContent = 'Scan for Cameras';
+    const btn = document.getElementById('add-camera-scan-btn');
+    btn.textContent = 'Scan';
     btn.classList.remove('scanning');
-    setModalStatus(cancelled ? 'Scan cancelled.' : 'Scan complete.');
+    setAddCameraStatus(cancelled ? 'Scan cancelled.' : 'Scan complete.');
 
-    // Resume background polls
+    // Resume background polls (manage modal is closed while add-camera is open,
+    // so its paired-list poll doesn't need restarting here)
     if (!cameraStatusTimer) cameraStatusTimer = setInterval(refreshCameraStatus, 3000);
     if (!topSectionTimer)   topSectionTimer   = setInterval(refreshTopSection, 2000);
-    if (!modalPairedRefreshTimer && modalOverlay.classList.contains('open')) {
-        modalPairedRefreshTimer = setInterval(() => {
-            refreshModalPairedCameras();
-            refreshRcDiscovered();
-        }, 3000);
-    }
 }
 
 let lastPairedAddrs = new Set();
@@ -669,7 +856,7 @@ function pollScanResults() {
 }
 
 function renderFoundCameras(cameras) {
-    const results = document.getElementById('results');
+    const results = document.getElementById('add-camera-ble-results');
     results.innerHTML = '';
     cameras.forEach(cam => {
         const row = document.createElement('div');
@@ -684,7 +871,7 @@ function renderFoundCameras(cameras) {
     });
 }
 
-document.getElementById('results').addEventListener('click', async e => {
+document.getElementById('add-camera-ble-results').addEventListener('click', async e => {
     const btn = e.target.closest('.pair-this-btn');
     if (!btn) return;
     const addr      = btn.dataset.addr;
@@ -697,21 +884,15 @@ document.getElementById('results').addEventListener('click', async e => {
         clearInterval(countdownTimer);
         pollTimer = null;
         countdownTimer = null;
-        const scanBtn = document.getElementById('scan-btn');
-        scanBtn.textContent = 'Scan for Cameras';
+        const scanBtn = document.getElementById('add-camera-scan-btn');
+        scanBtn.textContent = 'Scan';
         scanBtn.classList.remove('scanning');
 
         if (!cameraStatusTimer) cameraStatusTimer = setInterval(refreshCameraStatus, 3000);
         if (!topSectionTimer)   topSectionTimer   = setInterval(refreshTopSection, 2000);
-        if (!modalPairedRefreshTimer && modalOverlay.classList.contains('open')) {
-            modalPairedRefreshTimer = setInterval(() => {
-                refreshModalPairedCameras();
-                refreshRcDiscovered();
-            }, 3000);
-        }
     }
 
-    document.getElementById('results').innerHTML = '';
+    document.getElementById('add-camera-ble-results').innerHTML = '';
 
     // Cancel the BLE scan first, then pair — avoids 4 concurrent requests to the ESP32
     await apiFetch('POST', '/api/scan-cancel').catch(() => {});
@@ -757,10 +938,13 @@ const PAIR_ERROR_LABEL = {
 };
 
 function openPairModal() {
-    /* Dismiss the Add/Manage modal first so the pair sheet is the only
-     * thing visible — on terminate, the home screen takes focus. */
+    /* Dismiss any visible camera-management sheet first so the pair sheet is
+     * the only thing on screen — on terminate, the home screen takes focus. */
     if (modalOverlay.classList.contains('open')) {
         closeModal();
+    }
+    if (addCameraOverlay.classList.contains('open')) {
+        closeAddCameraModal();
     }
     pairCancelInFlight = false;
     pairThrobber.className = 'pair-throbber';
@@ -883,14 +1067,11 @@ pairCancelBtn.addEventListener('click', () => {
      * showPairModalFailure(), which re-enables the button as "OK". */
 });
 
-/* ---- RC Emulation discovered --------------------------------------------- */
+/* ---- RC Emulation discovered --------------------------------------------- *
+ * Activated when the user picks a Hero3 / Hero4 in the Add Camera picker;
+ * polled every 3 s from there. Click "Add" on a row → pair-progress modal. */
 
 let rcListActivated = false;
-
-document.getElementById('rc-add-btn').addEventListener('click', () => {
-    rcListActivated = true;
-    refreshRcDiscovered();
-});
 
 function refreshRcDiscovered() {
     if (!rcListActivated) return;
@@ -900,7 +1081,7 @@ function refreshRcDiscovered() {
 }
 
 function renderRcDiscovered(devices) {
-    const container = document.getElementById('rc-results');
+    const container = document.getElementById('add-camera-rc-results');
     container.innerHTML = '';
 
     if (!devices.length) {
@@ -930,21 +1111,21 @@ function renderRcDiscovered(devices) {
     });
 }
 
-document.getElementById('rc-results').addEventListener('click', async e => {
+document.getElementById('add-camera-rc-results').addEventListener('click', async e => {
     const btn = e.target.closest('.pair-this-btn');
     if (!btn) return;
     const addr = btn.dataset.addr;
     const ip   = btn.dataset.ip;
 
     if (!ip) {
-        setModalStatus('Cannot add — IP address not yet assigned. Wait a moment and click Add a new Wifi RC Camera again.');
+        setAddCameraStatus('Cannot add — IP address not yet assigned. Wait a moment and try again.');
         return;
     }
 
     /* Same UX as the BLE pair flow — open the pair-progress modal, kick off
      * the add, then poll /api/pair/status for the shared state machine.
      * Success auto-dismisses; failure shows the error and an OK button. */
-    document.getElementById('rc-results').innerHTML = '';
+    document.getElementById('add-camera-rc-results').innerHTML = '';
 
     openPairModal();
     try {
@@ -1017,18 +1198,11 @@ document.getElementById('paired-list').addEventListener('click', e => {
     const btn = e.target.closest('.remove-btn');
     if (!btn) return;
     const slot = parseInt(btn.dataset.slot);
-    const isRc = btn.dataset.rc === 'true';
-    const verb = 'Remove';
 
-    if (!confirm(`${verb} this camera?`)) return;
+    if (!confirm('Remove this camera?')) return;
 
     apiFetch('POST', '/api/remove-camera', { slot })
-        .then(() => {
-            refreshModalPairedCameras();
-            if (isRc) {
-                setTimeout(refreshRcDiscovered, 1500);
-            }
-        })
+        .then(refreshModalPairedCameras)
         .catch(() => {});
 });
 
@@ -1043,3 +1217,9 @@ refreshCameraStatus();
 
 cameraStatusTimer = setInterval(refreshCameraStatus, 3000);
 topSectionTimer   = setInterval(refreshTopSection, 2000);
+clockTickTimer    = setInterval(renderClock, 1000);
+
+document.getElementById('disconnect-reload-btn').addEventListener('click', () => {
+    reloading = true;
+    location.reload();
+});

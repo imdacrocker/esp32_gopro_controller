@@ -139,7 +139,7 @@
   <div class="settings-modal">
     <div class="modal-header">
       <span class="modal-title">Advanced</span>
-      <button class="modal-done-btn" id="advanced-done">Done</button>
+      <button class="modal-done-btn" id="advanced-done">Back</button>
     </div>
 
     <div class="modal-section-title">Logging</div>
@@ -176,38 +176,68 @@
       <button class="modal-done-btn" id="modal-done">Done</button>
     </div>
 
-    <div id="modal-status"></div>
-
-    <!-- Section 1: BLE pairing -->
-    <div class="modal-action-row">
-      <button class="modal-action-btn" id="scan-btn">Add a new Bluetooth camera</button>
-      <button class="modal-info-btn" type="button" aria-label="More info">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-      </button>
-      <div class="modal-info-tooltip">Put your camera into Pairing mode, like you would for the GoPro Quik App</div>
-    </div>
-    <div class="modal-section-title" style="padding-top:0">Pair a Hero9 Black or newer over BLE</div>
-    <div class="modal-separator"></div>
-    <div id="results"></div>
-
-    <!-- Section 2: WiFi RC Emulation -->
-    <div class="modal-action-row">
-      <button class="modal-action-btn" id="rc-add-btn">Add a new Wifi RC Camera</button>
-      <button class="modal-info-btn" type="button" aria-label="More info">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-      </button>
-      <div class="modal-info-tooltip">On your camera, add a new connection, and choose either the Wifi RC or Smart Remote option. The camera will automatically pair successfully. Then you can add it to the controller here.</div>
-    </div>
-    <div class="modal-section-title" style="padding-top:0">Pair an older camera as a Wifi Remote</div>
-    <div class="modal-separator"></div>
-    <div id="rc-results"></div>
-
-    <!-- Section 3: Paired cameras -->
+    <!-- Paired cameras -->
     <div class="modal-section-title-row">
       <span class="modal-section-title" style="padding:0;color:var(--text-primary)">Paired Cameras</span>
       <span class="modal-count-badge" id="paired-count"></span>
     </div>
     <div id="paired-list"></div>
+
+    <!-- Add Camera entry — opens the Add New picker -->
+    <div class="modal-action-row">
+      <button class="modal-action-btn" id="add-camera-btn">Add Camera</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Camera modal (bottom sheet, two-pane slider) -->
+<div class="modal-overlay" id="add-camera-overlay">
+  <div class="manage-modal add-camera-modal">
+    <div class="modal-header">
+      <button class="modal-back-btn" id="add-camera-back" hidden aria-label="Back">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <span>Back</span>
+      </button>
+      <span class="modal-title">Add New</span>
+      <button class="modal-done-btn" id="add-camera-cancel">Cancel</button>
+    </div>
+
+    <div class="add-camera-content">
+      <div class="add-camera-track" id="add-camera-track">
+
+        <!-- Pane 1: model picker -->
+        <div class="add-camera-pane" id="add-camera-list-pane">
+          <ul class="camera-model-list">
+            <li class="camera-model-row" data-model="Hero3">Hero3</li>
+            <li class="camera-model-row" data-model="Hero4">Hero4</li>
+            <li class="camera-model-row" data-model="Hero7">Hero7</li>
+            <li class="camera-model-row" data-model="Hero9">Hero9</li>
+            <li class="camera-model-row" data-model="Hero10">Hero10</li>
+            <li class="camera-model-row" data-model="Hero11">Hero11</li>
+            <li class="camera-model-row" data-model="Hero12">Hero12</li>
+            <li class="camera-model-row" data-model="Hero13">Hero13</li>
+          </ul>
+        </div>
+
+        <!-- Pane 2: instructions for the selected model -->
+        <div class="add-camera-pane" id="add-camera-instructions-pane">
+          <p class="add-camera-instructions" id="add-camera-instructions"></p>
+
+          <!-- BLE path (Hero7 + Hero9 and newer): Scan button → discovered list -->
+          <div id="add-camera-ble-section" hidden>
+            <button class="modal-action-btn" id="add-camera-scan-btn">Scan</button>
+            <div class="add-camera-status" id="add-camera-status"></div>
+            <div id="add-camera-ble-results"></div>
+          </div>
+
+          <!-- RC path (Hero3 / Hero4): connected devices list -->
+          <div id="add-camera-rc-section" hidden>
+            <div id="add-camera-rc-results"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
   </div>
 </div>
 
@@ -220,6 +250,22 @@
     <div class="pair-throbber" id="pair-throbber"></div>
     <div class="pair-status" id="pair-status">Connecting…</div>
     <button class="pair-cancel-btn" id="pair-cancel-btn">Cancel</button>
+  </div>
+</div>
+
+<!-- Disconnect overlay (full-screen, highest z-index). Replaces the UI when
+     apiFetch has seen too many consecutive failures. Hidden by default. -->
+<div id="disconnect-overlay" hidden>
+  <div class="disconnect-box">
+    <svg class="disconnect-icon" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M8 24 C20 12, 44 12, 56 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <path d="M16 32 C24 24, 40 24, 48 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <path d="M24 40 C28 36, 36 36, 40 40" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="32" cy="50" r="3.2" fill="currentColor"/>
+      <line x1="10" y1="10" x2="54" y2="54" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+    </svg>
+    <div class="disconnect-title">DISCONNECTED</div>
+    <button id="disconnect-reload-btn">RELOAD</button>
   </div>
 </div>
 
