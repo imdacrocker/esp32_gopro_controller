@@ -166,10 +166,9 @@ padding: 16px 20px
 ```
 
 - **Title:** "GoPro Controller" — centered, `h1`, `1.15rem`, weight 600
-- **Settings button** (`id="settings-btn"`): absolute, vertically centered, right edge (right: 16px)
-  - Gear SVG icon, 22×22, stroke currentColor
-  - Default color: `#888`; hover: `#333`, background `#f0f0f0`
-  - Opens the Settings top-sheet modal
+- **Header actions container** (`id="header-actions"`): absolute, vertically centered, right edge (right: 12 px), `display: flex`, `gap: 4px`. Holds the two icon buttons below in DOM order (settings on the left, power on the right).
+  - **Settings button** (`id="settings-btn"`): gear SVG icon, 22×22, stroke `currentColor`. Default color `#888`; hover `#333`, background `#f0f0f0`. Opens the Settings top-sheet modal (§12).
+  - **Power button** (`id="power-btn"`): power-symbol SVG icon (broken-arc + vertical stroke), 22×22, stroke `currentColor`. Same default/hover styling as the settings button. Opens the Power top-sheet modal (§12.4).
 
 <!-- Title is "GoPro Controller" — update if desired. -->
 
@@ -430,34 +429,32 @@ Clicking the overlay backdrop (not the modal card) also closes the modal.
 
 ### 12.1 Sections (top to bottom)
 
-**Device**
-- Time Zone — `<select>` UTC-12 … UTC+14 (whole hours), populated by `buildTimezoneDropdown()` on page load.
-  - On change: `POST /api/settings/timezone` with `{ tz_offset_hours: int }`
-  - On open: `GET /api/settings/timezone` → selects value
-- CAN Baud Rate — `<select>` with 50k/100k/125k/250k/500k/1M options.
-  - On change: `POST /api/settings/can-bitrate` with `{ bitrate_bps: N }` and reveal an orange "Reboot to apply new CAN baud rate" hint until the bitrate matches the value at open.
-  - On open: `GET /api/settings/can-bitrate` → selects value, hides hint.
+The Settings sheet is a navigation hub — only **Time Zone** is editable inline. Long-form groups (CAN-BUS, Updates) live in their own sub-modals reached from the buttons below, mirroring the existing Advanced Settings pattern. Reboot / Shut Down are no longer in this sheet — they live in the Power modal (§12.5), opened from the header's power icon.
 
-**Updates**
-- Channel `<select>` (`stable` / `beta`). On change: `POST /api/ota/channel`.
-- "Check for updates" `.settings-action-btn` (blue, full-width minus margins).
-- `#upd-result` block — populated by `updates.js` when a check completes (info / success / error states).
+**Inline control:**
+- **Time Zone** — `<select>` UTC-12 … UTC+14 (whole hours), populated by `buildTimezoneDropdown()` on page load.
+  - On change: `POST /api/settings/timezone` with `{ tz_offset_hours: int }`.
+  - On Settings open: `GET /api/settings/timezone` → selects value, rewrites the System Time section label.
 
-**Action buttons** (each a blue `.settings-action-btn`, stacked, full-width minus 16 px side margins):
-- **Advanced Settings** → opens the Advanced modal (§12.2). Dismisses Settings on open so the two are never stacked; closing Advanced reopens Settings.
+**Entry buttons** (each a blue `.settings-action-btn`, stacked, full-width minus 16 px side margins, top-to-bottom):
+- **CAN-BUS Settings** → opens the CAN-BUS sub-modal (§12.2). Dismisses Settings on open; closing the sub-modal (Back / click-outside) reopens Settings.
+- **Advanced Settings** → opens the Advanced modal (§12.3). Same round-trip pattern.
+- **Updates** → opens the Updates sub-modal (§12.4). Same round-trip pattern.
 - **About** → opens a native browser `alert()` (no modal) with three lines: "Main App: <version>", "Built: <date> <time>", "Recovery App: <version>". Just an OK button. Backed by `GET /api/version`.
 
-**Reboot button** (bottom of modal, orange):
-```
-display: block, width: calc(100% - 32px), margin: 16px 16px 0
-background: #e67e22 (orange-dark), color: #fff
-font-size: 0.88rem, font-weight: 700, min-height: 48px, border-radius: 8px
-```
-- Confirm dialog: "Reboot Controller?\n\nThe device will restart. Paired cameras and settings will be preserved."
-- On confirm: `POST /api/reboot`, disable button, show "Rebooting…" with dot animation
-- After 3s: `location.reload()`
+### 12.2 CAN-BUS Settings Modal
 
-### 12.2 Advanced Settings Modal
+Separate top-sheet modal (`#can-bus-overlay`) with the same `.settings-modal` styling as Settings. Always exactly one of {Settings, CAN-BUS} is visible — never both.
+
+- Opened from the "CAN-BUS Settings" button in Settings; Settings closes simultaneously.
+- Closed via the **Back** button or click-outside; Settings reopens.
+
+**Contents:**
+- **CAN Baud Rate** — `<select>` with 50k / 100k / 125k / 250k / 500k / 1M options.
+  - On change: `POST /api/settings/can-bitrate` with `{ bitrate_bps: N }` and reveal an orange "Reboot to apply new CAN baud rate" hint (`#can-bitrate-hint`) until the bitrate matches the value at open.
+  - On sub-modal open: `GET /api/settings/can-bitrate` → selects value, hides hint, stores the opened value as `canBitrateInitial` so the hint can be re-hidden if the user reverts.
+
+### 12.3 Advanced Settings Modal
 
 Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings. Always exactly one of {Settings, Advanced} is visible — never both.
 
@@ -476,6 +473,43 @@ Separate top-sheet modal (`#advanced-overlay`) with the same styling as Settings
 
 **Recovery section**
 - **Restart to Recovery** button — orange `.settings-recovery-btn`. Calls `POST /api/ota/reboot-recovery` and reloads after a short delay. Used when a user needs to upload firmware / web UI bundles via the recovery app's embedded form (e.g. when the storage partition is empty).
+
+### 12.4 Updates Modal
+
+Separate top-sheet modal (`#updates-overlay`) with the same `.settings-modal` styling. Same Settings→sub-modal→Settings round-trip as the Advanced and CAN-BUS modals.
+
+- Opened from the "Updates" button in Settings; Settings closes simultaneously.
+- Closed via the **Back** button or click-outside; Settings reopens.
+
+**Contents:**
+- **Channel** `<select>` (`stable` / `beta`). On change: `POST /api/ota/channel`.
+- **Check for updates** `.settings-action-btn` (blue, full-width minus margins).
+- `#upd-result` block — populated by `updates.js` when a check completes (info / success / error states).
+
+`updates.js` binds its `loadPanel()` refresh to the **Updates button click** (not the gear icon as in v1.0.9 and earlier) so version + channel + OTA base URL are re-fetched whenever the user opens this sub-modal.
+
+### 12.5 Power Modal
+
+Separate top-sheet modal (`#power-overlay`) opened from the **power icon** in the page header (§6), not from Settings. Holds the only destructive controls the operator needs at runtime.
+
+```
+id: power-overlay
+.settings-modal styling (same panel as Settings)
+align-items: flex-start (top sheet)
+```
+
+**Header:** "Power" title left, "Done" button right (blue, closes modal). Clicking the overlay backdrop also closes.
+
+**Body (top to bottom):**
+
+- **Reboot button** (`#reboot-btn`, `.settings-reboot-btn`) — orange (`--orange-dark`), full-width minus 16 px side margins, 48 px min-height.
+  - Confirm dialog: *"Reboot Controller?\n\nThe device will restart. Paired cameras and settings will be preserved."*
+  - On confirm: `POST /api/reboot`, disable button, label flips to "Rebooting…"; after 3 s the page reloads.
+- **Shut Down button** (`#shutdown-btn`, `.settings-reboot-btn .settings-shutdown-btn`) — red, same dimensions as Reboot.
+  - Confirm dialog: *"Shut down controller?\n\nAll cameras will be put to sleep and disconnected. You MUST reboot to reconnect."*
+  - On confirm: `POST /api/shutdown`, starts the `/api/shutdown` polling loop. Once `state == "complete"` the global shutdown-complete overlay takes over (see CHANGELOG v1.0.9 for the full sequence).
+
+These two buttons moved out of the Settings modal in [Unreleased] — see CHANGELOG. The JS handlers and confirm-dialog wording are unchanged; only the parent overlay differs.
 
 ---
 

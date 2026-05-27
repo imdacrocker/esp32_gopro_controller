@@ -395,7 +395,7 @@ Free the snapshot before returning.
 All log-related controls live inside the **Advanced Settings** modal —
 reachable via gear icon → Advanced Settings button. There is no standalone
 Diagnostics section on the home page. Follows the visual conventions
-documented in [`web-ui.md`](web-ui.md) §12.2.
+documented in [`web-ui.md`](web-ui.md) §12.3.
 
 ### Advanced Settings modal — Logging section
 
@@ -627,7 +627,7 @@ ring without sacrificing capture history.
 6. One-time audit pass over `ESP_LOG*` callers for secret material.
 7. Add the Logging section inside the Advanced Settings modal (web UI): the
    toggle, the conditionally-rendered stats line, and the three buttons.
-8. Update [`web-ui.md`](web-ui.md) §12.2 to reflect the new Advanced modal,
+8. Update [`web-ui.md`](web-ui.md) §12.3 to reflect the new Advanced modal,
    and update
    [`memory/project_http_server.md`](../../memory/project_http_server.md)
    with the new endpoints and `max_uri_handlers` value.
