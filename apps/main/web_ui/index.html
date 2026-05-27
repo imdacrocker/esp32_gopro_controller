@@ -11,12 +11,20 @@
 <!-- Page header -->
 <header id="page-header">
   <h1>GoPro Controller</h1>
-  <button id="settings-btn" aria-label="Settings">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-    </svg>
-  </button>
+  <div id="header-actions">
+    <button id="settings-btn" aria-label="Settings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+    <button id="power-btn" aria-label="Power">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+        <line x1="12" y1="2" x2="12" y2="12"/>
+      </svg>
+    </button>
+  </div>
 </header>
 
 <!-- RaceCapture status -->
@@ -92,11 +100,27 @@
       <button class="modal-done-btn" id="settings-done">Done</button>
     </div>
 
-    <div class="modal-section-title">Device</div>
-
     <div class="settings-row">
       <span class="settings-row-label">Time Zone</span>
       <select class="settings-select" id="tz-select"></select>
+    </div>
+
+    <button class="settings-action-btn" id="can-bus-btn">CAN-BUS Settings</button>
+
+    <button class="settings-action-btn" id="advanced-btn">Advanced Settings</button>
+
+    <button class="settings-action-btn" id="updates-btn">Updates</button>
+
+    <button class="settings-action-btn" id="about-btn">About</button>
+  </div>
+</div>
+
+<!-- CAN-BUS Settings modal -->
+<div class="modal-overlay" id="can-bus-overlay">
+  <div class="settings-modal">
+    <div class="modal-header">
+      <span class="modal-title">CAN-BUS Settings</span>
+      <button class="modal-done-btn" id="can-bus-done">Back</button>
     </div>
 
     <div class="settings-row">
@@ -111,8 +135,16 @@
       </select>
     </div>
     <div class="settings-hint" id="can-bitrate-hint" hidden>Reboot to apply new CAN baud rate.</div>
+  </div>
+</div>
 
-    <div class="modal-section-title">Updates</div>
+<!-- Updates modal -->
+<div class="modal-overlay" id="updates-overlay">
+  <div class="settings-modal">
+    <div class="modal-header">
+      <span class="modal-title">Updates</span>
+      <button class="modal-done-btn" id="updates-done">Back</button>
+    </div>
 
     <div class="settings-row">
       <span class="settings-row-label">Channel</span>
@@ -125,10 +157,16 @@
     <button class="settings-action-btn" id="upd-check-btn" disabled>Check for updates</button>
 
     <div id="upd-result" class="upd-result" hidden></div>
+  </div>
+</div>
 
-    <button class="settings-action-btn" id="advanced-btn">Advanced Settings</button>
-
-    <button class="settings-action-btn" id="about-btn">About</button>
+<!-- Power modal (top sheet) -->
+<div class="modal-overlay" id="power-overlay">
+  <div class="settings-modal">
+    <div class="modal-header">
+      <span class="modal-title">Power</span>
+      <button class="modal-done-btn" id="power-done">Done</button>
+    </div>
 
     <button class="settings-reboot-btn" id="reboot-btn">Reboot</button>
 
