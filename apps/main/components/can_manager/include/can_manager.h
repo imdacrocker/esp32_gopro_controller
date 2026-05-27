@@ -102,6 +102,64 @@ bool can_manager_utc_is_session_synced(void);
 uint32_t  can_manager_get_bitrate(void);
 esp_err_t can_manager_set_bitrate(uint32_t bitrate_bps);
 
+/* ---- Per-channel CAN identifier configuration ----------------------------- *
+ *
+ * Each of the four CAN channels (logging command RX, camera status TX, GPS
+ * UTC RX, shutdown request RX) is independently configurable as either a
+ * standard 11-bit ID or an extended 29-bit ID.  Persisted in NVS; takes
+ * effect on next boot — see docs/design/can-id-configuration.md.
+ *
+ * Defaults:  logging=0x600 std, status=0x601 std, utc=0x602 std, shut=0x603 std.
+ *
+ * Ranges:    std  -> [0x008 .. 0x7FF]
+ *            ext  -> [0x008 .. 0x1FFFFFFF]
+ *
+ * IDs below 0x008 are reserved for high-priority traffic on most vehicle
+ * networks and are rejected by can_manager_set_channel().
+ */
+
+typedef enum {
+    CAN_CH_LOGGING_CMD = 0,
+    CAN_CH_CAM_STATUS,
+    CAN_CH_GPS_UTC,
+    CAN_CH_SHUTDOWN_REQ,
+    CAN_CH_COUNT,
+} can_channel_id_t;
+
+typedef struct {
+    bool     extended;   /* false = 11-bit standard, true = 29-bit extended */
+    uint32_t id;
+} can_channel_t;
+
+/*
+ * Read the boot-time channel configuration.  Safe to call from any task at
+ * any time after can_manager_init() returns — values are frozen for the
+ * boot session.  Callers (camera_manager debug screens, /api/settings/can)
+ * use this when they need the values currently driving RX dispatch/TX header.
+ *
+ * Returns ESP_ERR_INVALID_ARG for an out-of-range ch.
+ */
+esp_err_t can_manager_get_channel(can_channel_id_t ch, can_channel_t *out);
+
+/*
+ * Persist a new value for one channel to NVS.  Does NOT update s_channels
+ * for the current boot session — the running dispatch table and TX header
+ * keep boot-time values until reboot.  Matches the bitrate model.
+ *
+ * Validates range + IDE per the ranges above.  Does NOT validate against
+ * collisions with other channels — that is the API handler's job
+ * (api_settings.c validates the merged set before persisting any value).
+ *
+ * Returns ESP_ERR_INVALID_ARG for bad ch, bad id range, or reserved low id.
+ */
+esp_err_t can_manager_set_channel(can_channel_id_t ch, can_channel_t value);
+
+/*
+ * Read the compile-time default for a channel.  Used by the reset-to-defaults
+ * path and by can_manager_init()'s NVS fall-back when no saved value exists.
+ */
+can_channel_t can_manager_channel_default(can_channel_id_t ch);
+
 /*
  * Persist a UTC-to-local offset in NVS (§14.3).
  * Clamped to IANA valid range [−12, +14].

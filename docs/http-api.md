@@ -53,8 +53,8 @@ unaffected. See [`design/shutdown.md`](design/shutdown.md).
 | GET | `/api/settings/timezone` | Current UTC offset in whole hours |
 | POST | `/api/settings/timezone` | Set UTC offset (`−12` to `+14`) |
 | POST | `/api/settings/datetime` | Set system time manually (only when no live source has won this boot session) |
-| GET | `/api/settings/can-bitrate` | Current CAN bus baud rate (bps) |
-| POST | `/api/settings/can-bitrate` | Set CAN bus baud rate; persisted to NVS, applied on reboot |
+| GET | `/api/settings/can` | Current CAN bus baud rate **and** per-channel identifiers (ide + id) for `logging_cmd` / `cam_status` / `gps_utc` / `shutdown_req`. See `docs/design/can-id-configuration.md` for the full JSON schema |
+| POST | `/api/settings/can` | Update any subset of bitrate / channels (atomic — full set re-validated for collisions before persist); persisted to NVS, applied on reboot |
 | GET | `/api/settings/logging-enabled` | Whether the diagnostic log ring is capturing |
 | POST | `/api/settings/logging-enabled` | `{ enabled: bool }` — flip the toggle. ON → OFF additionally clears the ring before responding. Persisted to NVS. |
 

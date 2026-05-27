@@ -61,8 +61,8 @@ Otherwise the implementation tracks the design verbatim.
 
 | Topic | Decision |
 |---|---|
-| Triggers | `POST /api/shutdown` (web UI button) **and** new CAN ID `0x603` (RaceCapture → ESP32) |
-| CAN 0x603 payload | 1 byte. Non-zero = request shutdown. Idempotent — repeated frames during `SHUTTING_DOWN`/`SHUTDOWN_COMPLETE` are no-ops |
+| Triggers | `POST /api/shutdown` (web UI button) **and** the CAN shutdown-request channel (default `0x603`, RaceCapture → ESP32; user-configurable per [`can-id-configuration.md`](can-id-configuration.md)) |
+| CAN shutdown payload | 1 byte. Non-zero = request shutdown. Idempotent — repeated frames during `SHUTTING_DOWN`/`SHUTDOWN_COMPLETE` are no-ops |
 | Camera coverage | Best-effort all. Send real sleep where supported; otherwise just drop keepalives and let auto-sleep kick in. |
 | Hero9+ sleep | TLV command `0x05` on GP-0072 (Command UUID) |
 | Hero7/8 sleep | Try TLV `0x05`; swallow `INVALID_PARAM` / any non-success response (unverified support) |

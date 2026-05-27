@@ -10,7 +10,36 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Added
+- **User-configurable CAN identifiers.** The four CAN frame IDs the
+  controller uses are now editable from the **CAN-BUS Settings** sub-modal:
+  Logging Command (RX, default `0x600`), Camera Status (TX, default
+  `0x601`), GPS UTC (RX, default `0x602`), and Shutdown Request (RX,
+  default `0x603`). Each channel independently picks **Standard 11-bit**
+  or **Extended 29-bit** IDE and a hex identifier (entered as `0x600`).
+  Live client-side validation enforces the allowed range
+  (`0x008–0x7FF` std, `0x008–0x1FFFFFFF` ext) and rejects collisions
+  across the four channels. A **Reset to defaults** button restores the
+  factory IDs in one click. Settings persist to NVS and apply on the next
+  reboot — the running dispatch table and TX header keep boot-time values
+  until then. See [`docs/design/can-id-configuration.md`](docs/design/can-id-configuration.md).
+
 ### Changed
+- **Modals dismiss only via Done/Back/Cancel or Esc.** Previously,
+  tapping outside a Settings, CAN-BUS, Updates, Advanced, Power, Manage
+  Cameras, or Add Camera modal dismissed it — easy to do by accident on
+  a touchscreen mounted in a vehicle. Click-outside is removed; the close
+  button on each modal and the **Esc** key are the only ways out.
+  Disconnect / shutdown-complete / pair-in-progress overlays are
+  unaffected (still non-dismissible, or use their own Cancel button).
+- **CAN-BUS settings API consolidated.** `GET /api/settings/can-bitrate`
+  and `POST /api/settings/can-bitrate` are replaced by
+  `GET /api/settings/can` and `POST /api/settings/can`, which return /
+  accept the full CAN-bus configuration (bitrate **and** the four
+  channel `(ide, id)` pairs) in a single shape. POSTs accept partial
+  bodies — missing fields fall back to current values, the merged set is
+  validated as a unit, and persists atomically. The combined endpoint
+  preserves the existing apply-on-reboot semantics for bitrate.
 - **Settings menu reorganised in the web UI.** The Settings top-sheet is now
   a navigation hub rather than a single flat panel — long-form controls
   live in dedicated sub-modals reached the same Settings→sub-modal→Settings
@@ -21,9 +50,10 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
     and **Shut Down** (red) buttons, unchanged in behaviour. Removes the
     Reboot/Shut Down buttons from the bottom of the Settings modal.
   - **CAN-BUS Settings sub-modal.** Added a "CAN-BUS Settings" entry button
-    in Settings; tapping it opens a sub-modal containing the existing CAN
-    Baud Rate selector and the orange "Reboot to apply" hint. The bitrate
-    is loaded on sub-modal open instead of on Settings open.
+    in Settings; tapping it opens a sub-modal containing the CAN Baud Rate
+    selector, the four configurable channel rows (see Added above), a
+    Reset-to-defaults button, and the orange "Reboot to apply" hint. The
+    bitrate is loaded on sub-modal open instead of on Settings open.
   - **Updates sub-modal.** Added an "Updates" entry button in Settings;
     tapping it opens a sub-modal containing the Channel selector, the
     "Check for updates" button, and the existing `#upd-result` panel.
@@ -34,9 +64,11 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
     "Updates" section headings are dropped — every long-form group now
     lives in its own sub-modal, so the headings became redundant.
   - DOM IDs that other code relies on (`can-bitrate-select`,
-    `can-bitrate-hint`, `upd-channel-select`, `upd-check-btn`,
-    `upd-result`, `reboot-btn`, `shutdown-btn`) are unchanged — only
-    their parent overlay changed.
+    `upd-channel-select`, `upd-check-btn`, `upd-result`, `reboot-btn`,
+    `shutdown-btn`) are unchanged — only their parent overlay changed.
+    `#can-bitrate-hint` was renamed to `#can-settings-hint` as part of
+    the CAN identifier work above so the same orange hint covers any
+    change to the now-configurable channel IDs as well.
 
 ## [1.0.9] - 2026-05-27
 

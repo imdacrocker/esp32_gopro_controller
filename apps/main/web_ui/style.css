@@ -677,6 +677,36 @@ button {
   border-bottom: 1px solid var(--gray-border-light);
 }
 
+.settings-input {
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.can-channel-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.can-id-input {
+  width: 8.5em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.can-channel-row.has-error .can-id-input,
+.can-channel-row.has-error .can-ide-select {
+  border-color: var(--red, #b71c1c);
+}
+
+.can-settings-error {
+  color: var(--red, #b71c1c);
+}
+
 .settings-reboot-btn {
   display: block;
   width: calc(100% - 32px);

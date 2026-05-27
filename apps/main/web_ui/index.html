@@ -134,7 +134,57 @@
         <option value="1000000">1 Mbps</option>
       </select>
     </div>
-    <div class="settings-hint" id="can-bitrate-hint" hidden>Reboot to apply new CAN baud rate.</div>
+
+    <!-- Per-channel CAN identifiers. id-input expects 0x-prefixed hex. -->
+    <div class="settings-row can-channel-row" data-channel="logging_cmd">
+      <span class="settings-row-label">Logging Command (RX)</span>
+      <span class="can-channel-controls">
+        <select class="settings-select can-ide-select">
+          <option value="std">Standard</option>
+          <option value="ext">Extended</option>
+        </select>
+        <input class="settings-input can-id-input" type="text" inputmode="text"
+               spellcheck="false" autocomplete="off" maxlength="11">
+      </span>
+    </div>
+    <div class="settings-row can-channel-row" data-channel="cam_status">
+      <span class="settings-row-label">Camera Status (TX)</span>
+      <span class="can-channel-controls">
+        <select class="settings-select can-ide-select">
+          <option value="std">Standard</option>
+          <option value="ext">Extended</option>
+        </select>
+        <input class="settings-input can-id-input" type="text" inputmode="text"
+               spellcheck="false" autocomplete="off" maxlength="11">
+      </span>
+    </div>
+    <div class="settings-row can-channel-row" data-channel="gps_utc">
+      <span class="settings-row-label">GPS UTC (RX)</span>
+      <span class="can-channel-controls">
+        <select class="settings-select can-ide-select">
+          <option value="std">Standard</option>
+          <option value="ext">Extended</option>
+        </select>
+        <input class="settings-input can-id-input" type="text" inputmode="text"
+               spellcheck="false" autocomplete="off" maxlength="11">
+      </span>
+    </div>
+    <div class="settings-row can-channel-row" data-channel="shutdown_req">
+      <span class="settings-row-label">Shutdown Request (RX)</span>
+      <span class="can-channel-controls">
+        <select class="settings-select can-ide-select">
+          <option value="std">Standard</option>
+          <option value="ext">Extended</option>
+        </select>
+        <input class="settings-input can-id-input" type="text" inputmode="text"
+               spellcheck="false" autocomplete="off" maxlength="11">
+      </span>
+    </div>
+
+    <div class="settings-hint" id="can-settings-hint" hidden>Reboot to apply new CAN settings.</div>
+    <div class="settings-hint can-settings-error" id="can-settings-error" hidden></div>
+
+    <button class="settings-action-btn" id="can-reset-btn">Reset to defaults</button>
   </div>
 </div>
 
