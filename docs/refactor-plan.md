@@ -79,11 +79,18 @@ single mismatch underlay the paired-cameras JSON bug.
 - [ ] **open_gopro_ble/pair_complete.c:76** — global BLE-read bridge; a late
       callback after timeout gives a semaphore the *next* read waits on,
       corrupting the following read. Drain before each read and/or tag by conn_handle.
-- [ ] **gopro_model.h + gopro_wifi_rc/connection.c:240** — a `cv` response
-      identifying a Hero6/7/8 on the RC path reassigns the slot to a non-RC
-      model, after which the RC driver stops managing it → keepalive/status/
-      shutter silently die. Don't apply a model that fails `uses_rc_emulation()`
-      to an RC-managed slot.
+- [x] **gopro_model.h + gopro_wifi_rc/connection.c:240** — verified as a
+      *latent* defect, not a live bug: the model-locked UI pairing flow
+      (`RC_MODELS = {Hero3, Hero4}` in app.js) never routes a Hero6/7/8 to RC,
+      and Hero3/Hero4 cv-identify as RC-capable models. The only way to trigger
+      it was a misuse path through the unfiltered `/api/rc/discovered` list
+      (MAC-only — model unknown pre-`cv`). **Resolved** with a defensive clamp
+      in `rc_handle_apply_cv` and `rc_handle_promote`: a cv-mapped model that
+      fails `uses_rc_emulation()` is logged but NOT stored, so the slot stays
+      `LEGACY_RC` and RC control keeps working. The rc-XOR-ble unit-test
+      invariant added in Phase 0 guards the underlying premise. The transport-
+      field refactor (`gopro_model.h:62-68`) is **dropped** — the dual-transport
+      ambiguity it described is vestigial now that pairing is model-locked.
 - [ ] **log_ring.c:135** — UART-echo level detection assumes DEBUG/VERBOSE lines
       start with the level letter, but under `CONFIG_LOG_COLORS=y` they start
       with ESC → DEBUG/VERBOSE leak to UART. Detect level after stripping ANSI.
