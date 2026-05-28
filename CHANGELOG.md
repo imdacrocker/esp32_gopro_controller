@@ -10,6 +10,8 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-27
+
 ### Added
 - **User-configurable CAN identifiers.** The four CAN frame IDs the
   controller uses are now editable from the **CAN-BUS Settings** sub-modal:
@@ -23,6 +25,23 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   factory IDs in one click. Settings persist to NVS and apply on the next
   reboot — the running dispatch table and TX header keep boot-time values
   until then. See [`docs/design/can-id-configuration.md`](docs/design/can-id-configuration.md).
+- **Dev release channel.** A third OTA stream, less formal than stable
+  or beta, intended for shipping work-in-progress builds to remote
+  testers. A new **release-dev** GitHub Action (manual trigger from the
+  Actions tab, optional branch input) builds the selected ref and
+  force-moves a floating `latest-dev` release containing `manifest.json`,
+  `app.bin`, `storage.bin`, and `recovery.bin`. No VERSION bump is
+  required — the build is stamped `dev-<shortsha>-<utc>`. There is no
+  immutable per-build tag, no promotion path to beta or stable, and no
+  device-side version check: recovery installs whatever the current
+  `latest-dev` manifest points at. The dev channel is **recovery-only** —
+  the main app's Settings → Updates dropdown does not list it, so testers
+  must boot into recovery (Advanced → Restart to Recovery) and pick
+  **Dev** from the Channel selector. Includes a `--channel dev` flag on
+  `tools/release/make_manifest.py` that bypasses the semver enforcement
+  used for stable/beta manifests. No Cloudflare Worker changes — the
+  proxy is a transparent pass-through and routes `latest-dev` URLs
+  automatically.
 
 ### Changed
 - **Modals dismiss only via Done/Back/Cancel or Esc.** Previously,
@@ -43,32 +62,106 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 - **Settings menu reorganised in the web UI.** The Settings top-sheet is now
   a navigation hub rather than a single flat panel — long-form controls
   live in dedicated sub-modals reached the same Settings→sub-modal→Settings
-  round-trip pattern already used by Advanced Settings.
-  - **Power moved out of Settings** into its own top-sheet modal opened by
-    a new power-icon button placed immediately right of the gear icon in
-    the page header. The modal contains the existing **Reboot** (orange)
-    and **Shut Down** (red) buttons, unchanged in behaviour. Removes the
-    Reboot/Shut Down buttons from the bottom of the Settings modal.
-  - **CAN-BUS Settings sub-modal.** Added a "CAN-BUS Settings" entry button
-    in Settings; tapping it opens a sub-modal containing the CAN Baud Rate
-    selector, the four configurable channel rows (see Added above), a
-    Reset-to-defaults button, and the orange "Reboot to apply" hint. The
-    bitrate is loaded on sub-modal open instead of on Settings open.
-  - **Updates sub-modal.** Added an "Updates" entry button in Settings;
-    tapping it opens a sub-modal containing the Channel selector, the
-    "Check for updates" button, and the existing `#upd-result` panel.
-    `updates.js` now refreshes the version / channel state when the
-    Updates button is clicked instead of when the gear icon is clicked.
-  - **Settings modal body now contains:** Time Zone (inline) → CAN-BUS
-    Settings → Advanced Settings → Updates → About. The "Device" and
-    "Updates" section headings are dropped — every long-form group now
-    lives in its own sub-modal, so the headings became redundant.
-  - DOM IDs that other code relies on (`can-bitrate-select`,
-    `upd-channel-select`, `upd-check-btn`, `upd-result`, `reboot-btn`,
-    `shutdown-btn`) are unchanged — only their parent overlay changed.
-    `#can-bitrate-hint` was renamed to `#can-settings-hint` as part of
-    the CAN identifier work above so the same orange hint covers any
-    change to the now-configurable channel IDs as well.
+round-trip pattern already used by Advanced Settings.
+- **Power moved out of Settings** into its own top-sheet modal opened by
+  a new power-icon button placed immediately right of the gear icon in
+  the page header. The modal contains the existing **Reboot** (orange)
+  and **Shut Down** (red) buttons, unchanged in behaviour. Removes the
+  Reboot/Shut Down buttons from the bottom of the Settings modal.
+- **CAN-BUS Settings sub-modal.** Added a "CAN-BUS Settings" entry button
+  in Settings; tapping it opens a sub-modal containing the CAN Baud Rate
+  selector, the four configurable channel rows (see Added above), a
+  Reset-to-defaults button, and the orange "Reboot to apply" hint. The
+  bitrate is loaded on sub-modal open instead of on Settings open.
+- **Updates sub-modal.** Added an "Updates" entry button in Settings;
+  tapping it opens a sub-modal containing the Channel selector, the
+  "Check for updates" button, and the existing `#upd-result` panel.
+  `updates.js` now refreshes the version / channel state when the
+  Updates button is clicked instead of when the gear icon is clicked.
+- **Settings modal body now contains:** Time Zone (inline) → CAN-BUS
+  Settings → Advanced Settings → Updates → About. The "Device" and
+  "Updates" section headings are dropped — every long-form group now
+  lives in its own sub-modal, so the headings became redundant.
+- DOM IDs that other code relies on (`can-bitrate-select`,
+  `upd-channel-select`, `upd-check-btn`, `upd-result`, `reboot-btn`,
+  `shutdown-btn`) are unchanged — only their parent overlay changed.
+  `#can-bitrate-hint` was renamed to `#can-settings-hint` as part of
+  the CAN identifier work above so the same orange hint covers any
+  change to the now-configurable channel IDs as well.
+- **HTTP server enables LRU socket purge.** When all 8 sockets are in use
+  and a 9th client connects, ESP-IDF now evicts the least-recently-used
+  socket. Mitigates slow-trickle slowloris-style stalls that could
+  otherwise hold every socket and lock the UI out of the controller.
+- **NVS initialization failure is now fatal at boot.** A retried
+  `nvs_flash_init()` after `nvs_flash_erase()` previously ignored its
+  return code; the app would proceed with NVS effectively unavailable
+  and every persistence operation would silently fail. Wrapped in
+  `ESP_ERROR_CHECK` so the device panics loudly instead.
+- **Recovery firmware bumped to 1.0.1.** Enables
+  `CONFIG_OTA_ALLOW_DEV_CHANNEL=y` so the recovery web UI's channel
+  dropdown and `POST /api/ota/channel` allowlist include `"dev"` in
+  addition to `"stable"` and `"beta"`. The equivalent flag in the main
+  app remains off, keeping dev out of the main UI. Existing devices
+  must reflash recovery (or install a stable/beta build that bundles
+  the updated recovery image) before the Dev option appears.
+
+### Fixed
+- **Second camera now reliably completes first-pair when two cameras are
+  paired in quick succession.** Previously, if both cameras' BLE-readiness
+  pipelines completed close together (e.g. auto-reconnect at boot, or
+  first-pairing two new cameras through the UI in rapid succession), the
+  second pair-complete request was logged with a warning and silently
+  dropped. The second camera was then marked BLE-ready but never went
+  through SSID/password read, STA-join, or the HTTP wireless/pair/complete
+  call — leaving it half-paired until reboot. Pair-complete now queues
+  the deferred slot under a mutex and runs it when the in-flight one
+  finishes.
+- **Removing a camera while it's recording no longer crashes the device.**
+  The mismatch-poll timer used to release the slot lock before calling
+  into the driver's start_recording / stop_recording, opening a window in
+  which a concurrent remove-camera could free the driver context. The
+  timer now holds the lock through the dispatch.
+- **Recovery's "Boot to Main" picks the correct (newer) OTA slot across
+  month-name boundaries.** The previous date comparator sorted the
+  ESP-IDF `__DATE__` strings lexically, so e.g. "Nov 30 2024" was reported
+  as newer than "Jan 15 2025" (because 'J' < 'N'). On continuous-
+  development builds the bug fired on roughly half of month transitions,
+  causing recovery to boot the older image after a fresh OTA. Replaced
+  with a proper "MMM DD YYYY" / "hh:mm:ss" parser; covered by a 17-case
+  host unit test.
+- **CAN configuration updates over the web UI are robust to TCP
+  segmentation.** The HTTP body reader did a single `recv()` and assumed
+  the whole body arrived in one chunk. On a congested SoftAP the ~512-byte
+  CAN config POST could split across segments and the JSON parse would
+  reject the truncated body. The reader now loops until the full
+  `Content-Length` is received.
+- **GoPro notifications are discovered correctly across firmware versions
+  with non-standard GATT layouts.** The BLE driver previously assumed the
+  CCCD descriptor sat immediately after each characteristic's value
+  handle. Older Hero firmwares can legally place other descriptors first
+  (notably the writable Characteristic User Description), in which case
+  the 2-byte CCCD enable would succeed against the wrong descriptor and
+  notifications would silently never arrive. Discovery now walks the
+  descriptors per spec and writes to the actual 0x2902.
+- **Background BLE keepalive no longer fires one stale UDP packet after
+  a WiFi RC camera disconnects.** The keepalive timer's
+  `esp_timer_stop()` returned before any in-flight callback drained;
+  switched to `stop+delete` so disarm waits for the callback. `last_ip`
+  is also cleared on disassociate so a SoftAP-reassigned IP can't route
+  back to the dead slot.
+- **CAN bus-off recovery no longer drops the recovery event under
+  sustained bus errors.** The ISR-to-recovery-task queue depth was 4,
+  one short of what a back-to-back ACTIVE→WARNING→PASSIVE→BUS_OFF cycle
+  during in-progress recovery can require. Doubled to 8.
+
+### Internal
+- New host-test binaries (`tests/host/`) cover the pure-logic pieces
+  extracted during this round: `test_reorder_validate` (17 cases for
+  slot-reorder permutation validation), `test_app_date_compare`
+  (17 cases for the OTA date/time comparator). `CAMERA_MAX_SLOTS`
+  moved from `camera_manager.h` to `camera_types.h` so host tests can
+  reach it without pulling in ESP-IDF deps.
+    
 
 ## [1.0.9] - 2026-05-27
 
@@ -373,7 +466,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.9...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.9...v1.1.0
 [1.0.9]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.6...v1.0.7
