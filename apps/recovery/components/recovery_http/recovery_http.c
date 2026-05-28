@@ -97,6 +97,28 @@ static esp_err_t handler_root(httpd_req_t *req)
     return httpd_resp_send(req, s_html, s_html_len);
 }
 
+/* ---- Captive portal ------------------------------------------------------ *
+ * Mirrors the main app: with captive_dns resolving every name to this device,
+ * redirect any unmatched path to http://control.gp/ so the OS join probe
+ * auto-opens the recovery UI and a browser left on control.gp reloads here.
+ * /api/ paths get a real 404 so OTA clients see a clean error.
+ */
+#define PORTAL_URL "http://control.gp/"
+
+static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
+{
+    (void)err;
+    if (strncmp(req->uri, "/api/", 5) == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", PORTAL_URL);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, "Redirecting to control.gp", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* ---- GET /api/version ---------------------------------------------------- *
  *
  *   app:               recovery's own version (no main-app version is
@@ -549,6 +571,9 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
             return err;
         }
     }
+
+    /* Captive-portal: redirect any unmatched path to the recovery UI. */
+    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_redirect);
 
     ESP_LOGI(TAG, "listening on :80 (%zu URIs registered)",
              sizeof(routes) / sizeof(routes[0]));

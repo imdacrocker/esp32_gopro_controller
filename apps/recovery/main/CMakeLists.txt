@@ -7,5 +7,6 @@ idf_component_register(
         esp_netif
         esp_event
         wifi_manager
+        captive_dns
         recovery_http
 )

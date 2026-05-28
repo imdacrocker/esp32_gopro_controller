@@ -13,6 +13,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "wifi_manager.h"
+#include "captive_dns.h"
 #include "recovery_http.h"
 
 static const char *TAG = "recovery_main";
@@ -45,5 +46,11 @@ void app_main(void)
     size_t html_len = (size_t)(recovery_html_end - recovery_html_start) - 1;
     ESP_ERROR_CHECK(recovery_http_init(recovery_html_start, html_len));
 
-    ESP_LOGI(TAG, "ready — browse to http://10.71.79.1/");
+    /* Wildcard DNS responder so "control.gp" resolves here too. Without it,
+     * a browser left on control.gp from the main app (e.g. after an OTA
+     * commit reboots us into recovery) would fail to reload — wifi_manager
+     * hands out this device as the DNS server, so something must answer. */
+    captive_dns_start();
+
+    ESP_LOGI(TAG, "ready — browse to http://control.gp/ (or http://10.71.79.1/)");
 }
