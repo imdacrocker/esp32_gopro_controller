@@ -10,7 +10,9 @@ Channel derivation:
     v1.2.3         -> stable
     v1.2.3-rc.N    -> beta
     v1.2.3-beta.N  -> beta
-    v1.2.3-dev.*   -> rejected (dev channel is local-only, never published)
+    --channel dev  -> dev (free-form --version, no semver enforcement;
+                      used by release-dev.yml to ship branch builds as
+                      dev-<shortsha>-<utcstamp>. Recovery-only consumption.)
 
 Usage:
     python make_manifest.py \\
@@ -36,8 +38,12 @@ SEMVER_RE = re.compile(
 )
 
 
-def parse_version(raw: str) -> tuple[str, str]:
-    """Return (semver-without-v, channel). Raises SystemExit on bad input."""
+def parse_version(raw: str, channel_override: str | None = None) -> tuple[str, str]:
+    """Return (version-string, channel). Raises SystemExit on bad input."""
+    if channel_override == "dev":
+        # Dev releases are free-form (e.g. dev-abcd123-202605281530). Strip a
+        # leading 'v' if the caller passed one so the stamp displays cleanly.
+        return raw.lstrip("v"), "dev"
     m = SEMVER_RE.match(raw)
     if not m:
         sys.exit(f"error: version {raw!r} does not look like vMAJOR.MINOR.PATCH[-rc.N|-beta.N]")
@@ -47,7 +53,7 @@ def parse_version(raw: str) -> tuple[str, str]:
         return core, "stable"
     kind = pre.split(".", 1)[0]
     if kind == "dev":
-        sys.exit("error: dev versions are local-only and must not be published")
+        sys.exit("error: pass --channel dev explicitly for dev releases")
     if kind in ("rc", "beta"):
         return f"{core}-{pre}", "beta"
     sys.exit(f"error: unrecognized prerelease tag {pre!r}")
@@ -65,6 +71,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--version", required=True,
                    help="Release tag, e.g. v0.1.0 or v0.1.0-rc.1")
+    p.add_argument("--channel", choices=["dev"], default=None,
+                   help="Force a channel (only 'dev' supported — stable/beta are derived from --version)")
     p.add_argument("--app-bin", required=True, type=Path,
                    help="Path to the main app binary (typically esp32_gopro_canbus_controller_v2.bin)")
     p.add_argument("--storage-bin", required=True, type=Path,
@@ -77,7 +85,7 @@ def main() -> int:
                    help="Where to write manifest.json")
     args = p.parse_args()
 
-    version, channel = parse_version(args.version)
+    version, channel = parse_version(args.version, args.channel)
 
     for label, path in (("app", args.app_bin), ("storage", args.storage_bin)):
         if not path.exists():
