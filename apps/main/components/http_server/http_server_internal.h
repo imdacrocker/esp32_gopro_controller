@@ -31,7 +31,16 @@ void api_shutdown_register(httpd_handle_t server);
  * fewer bytes than requested when the body is split across segments.  A
  * single-call read truncated the body silently on segmented POSTs (most
  * relevant for the ~512 B CAN config payload under WiFi congestion).
- * Same shape as api_ota.c:pump_body and recovery_http.c:read_body_capped.
+ *
+ * Unlike api_ota.c:pump_body we deliberately do NOT retry on
+ * HTTPD_SOCK_ERR_TIMEOUT.  For pump_body's multi-MB OTA streams a 5 s
+ * pause is a legitimate pacing artefact of a slow WiFi link.  For our
+ * small (≤512 B) JSON payloads it means the client is broken or
+ * malicious — bouncing the connection releases the socket back to the
+ * pool instead of holding it indefinitely while we re-call recv in a
+ * loop.  The default recv_wait_timeout (5 s, from HTTPD_DEFAULT_CONFIG)
+ * thus caps the per-byte stall; combined with lru_purge_enable in
+ * driver.c, slow-trickle slowloris no longer monopolises sockets.
  */
 static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
 {
@@ -48,12 +57,10 @@ static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
     while (total < (size_t)req->content_len) {
         int n = httpd_req_recv(req, buf + total,
                                 (size_t)req->content_len - total);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            /* Transient — httpd's per-recv timeout fired but the connection
-             * may still deliver more bytes.  Mirrors api_ota.c:pump_body. */
-            continue;
-        }
         if (n <= 0) {
+            /* Timeout, peer closed, or real socket error — bail.  Letting
+             * the handler return closes the connection (keep_alive_enable
+             * is false), releasing the socket for legitimate clients. */
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
             return -1;
         }

@@ -228,12 +228,23 @@ void http_server_init(void)
         }
     }
 
-    /* Start esp_httpd (§20.2). */
+    /* Start esp_httpd (§20.2).
+     *
+     * Default 5 s recv_wait_timeout / send_wait_timeout from HTTPD_DEFAULT_CONFIG
+     * are retained — they bound any single recv/send stall.  lru_purge_enable
+     * is the slow-trickle slowloris defence: when all 8 sockets are in use and
+     * a 9th client connects, ESP-IDF evicts the least-recently-used socket.
+     * Without LRU purge, a client sending one byte every 4 s could hold a
+     * socket for 30+ minutes per request and 8 such clients would exhaust the
+     * pool with no recourse.  Trade-off: a legitimate slow client could be
+     * evicted under burst load, but this is a single-user controller so the
+     * concurrent-fast-client scenario isn't realistic. */
     httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
     config.stack_size        = 12288;
     config.max_open_sockets  = 8;
     config.max_uri_handlers  = 44;   /* 5 assets + 7 system + 10 cameras + 2 rc + 7 settings + 6 ota + 3 logs + 2 shutdown = 42, +2 margin */
     config.uri_match_fn      = httpd_uri_match_wildcard;
+    config.lru_purge_enable  = true;
 
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &config));

@@ -174,17 +174,37 @@ single mismatch underlay the paired-cameras JSON bug.
       POST body could truncate. **Resolved** by looping `httpd_req_recv` until
       `content_len` bytes have been accumulated, matching the established
       pattern in `api_ota.c:pump_body` (OTA streams) and recovery's
-      `recovery_http.c:read_body_capped`. The `HTTPD_SOCK_ERR_TIMEOUT continue`
-      mirrors `pump_body` and will engage once `recv_wait_timeout` is set
-      (Phase 3 next item). Reachable under WiFi congestion on the ~512-byte
-      CAN config POST (`api_settings.c:251`); the 64–128 B endpoints were
-      unlikely to segment but the fix is in the shared helper so all 12 POST
-      call sites are covered without per-handler changes.
+      `recovery_http.c:read_body_capped`. Reachable under WiFi congestion on
+      the ~512-byte CAN config POST (`api_settings.c:251`); the 64–128 B
+      endpoints were unlikely to segment but the fix is in the shared helper
+      so all 12 POST call sites are covered without per-handler changes.
+      **NB**: an earlier version of this fix also retried on
+      `HTTPD_SOCK_ERR_TIMEOUT` (mirroring `pump_body`), which is appropriate
+      for multi-MB OTA streams but wrong for short JSON bodies — a malicious
+      client sending no bytes would have held the socket forever. The
+      timeout-retry was removed in the follow-up commit; for read_body any
+      `n <= 0` (timeout, peer close, error) now correctly returns 500 and
+      releases the socket. The 5 s recv_wait_timeout from
+      `HTTPD_DEFAULT_CONFIG` (which is the default, not 0 as the original
+      commit message implied) bounds the worst-case stall.
 - [ ] **http_server OTA session statics** (api_ota.c:35) — `s_app_uploaded`/
       `s_ui_uploaded` shared across concurrent workers, no lock. Serialize / reject
       if in progress.
-- [ ] **http_server socket timeouts** (driver.c:232) — no `recv_wait_timeout`/
-      `send_wait_timeout`; stuck clients can exhaust all 8 sockets.
+- [x] **http_server socket timeouts** (driver.c:232) — flagged as "no
+      `recv_wait_timeout`/`send_wait_timeout`", but **verified that ESP-IDF
+      v6.0.1's `HTTPD_DEFAULT_CONFIG()` already sets both to 5 s by default**
+      and the main app retains that default. The "no timeout" framing in the
+      plan entry was wrong. The real gap was **slow-trickle slowloris**: a
+      malicious client sending one byte every 4 s keeps each `httpd_req_recv`
+      under the 5 s timeout and holds the socket for ~30+ minutes per
+      request; eight such clients exhaust `max_open_sockets`. **Resolved** by
+      setting `config.lru_purge_enable = true` in driver.c — when all 8
+      sockets are in use and a 9th client connects, ESP-IDF evicts the
+      least-recently-used socket, breaking slowloris's grip. Trade-off: a
+      legitimate slow client could be evicted under burst load; not realistic
+      for a single-user controller. Also fixed a regression in the previous
+      `read_body` commit (see above) that made the slowloris-with-zero-bytes
+      case strictly worse.
 - [ ] **main.c:89** — retried `nvs_flash_init()` return code ignored; `ESP_ERROR_CHECK` it.
 - [ ] **ota_io/boot_helpers.c:105 `app_desc_is_newer`** — sorts `__DATE__`
       strings lexically; can boot the *older* image on a `secure_version` tie.
