@@ -207,9 +207,32 @@ single mismatch underlay the paired-cameras JSON bug.
           `delete()` (on the default ESP_TIMER_TASK dispatch) blocks until
           any pending callback finishes, so after disarm no stale tick can
           land. The arm functions already re-create from NULL.
-- [ ] **Unlocked shared state**: camera_manager `s_slot_count`/`s_auto_control`
-      (611, 786) and driver-registration table (188); wifi_manager `s_sta_busy`
-      TOCTOU (309). Take the lock or document/relax explicitly.
+- [~] **Unlocked shared state** — flagged as four sites but **verified that
+      none are live bugs** under current callers:
+    - `wifi_manager.c:309` `s_sta_busy` TOCTOU is latent: the only callers
+      of `wifi_manager_sta_join`/`wifi_manager_sta_leave` are inside
+      `pair_complete_task`, which is itself single-flight under
+      `pair_complete.c`'s `s_busy`+`s_gate_lock`+`s_pending[]` gate (the
+      pair_complete-queue commit). Documented the load-bearing
+      single-flight assumption at the `s_sta_busy` declaration so a future
+      maintainer adding a non-pair_complete caller (UI WiFi scan/connect,
+      CLI sta-join, etc.) gets a clear "this needs to become atomic" note.
+    - `camera_manager.c:612` `s_slot_count` read in `get_slot_count` is a
+      single 32-bit aligned load (atomic on ESP32-S3 by hardware). The
+      Phase 0 slot-count-semantics work already documented the return
+      value as an iteration upper bound; "stale by one tick" is the
+      documented contract, not a bug.
+    - `camera_manager.c:797-798` `s_auto_control` getter/setter is an
+      aligned `bool` (atomic single-byte). Worst case is stale-by-one
+      polling cycle (microseconds). Cosmetic.
+    - `camera_manager.c:188` driver-registration table write is outside
+      the lock by intent. Verified init order in `app_main` is sequential
+      (`camera_manager_init` → `gopro_wifi_rc_init` → `open_gopro_ble_init`)
+      before any other task spawns. Added an init-time-only-contract comment
+      block at the function header so any future runtime-registration call
+      site gets a clear "move the write under the lock" note.
+    - **No code change** beyond the two documentation blocks. Original plan
+      entry was an over-eager scan that didn't trace callers.
 - [x] **http_server `read_body`** (http_server_internal.h:29) — single `recv`
       assumed the whole body arrived in one chunk; under TCP segmentation any
       POST body could truncate. **Resolved** by looping `httpd_req_recv` until

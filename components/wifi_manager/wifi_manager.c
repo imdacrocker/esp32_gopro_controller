@@ -38,6 +38,24 @@ static esp_netif_t                        *s_ap_netif;
 static esp_netif_t                        *s_sta_netif;     /* created on first sta_join */
 static wifi_config_t                       s_ap_config;     /* saved at init so we can re-apply */
 static target_mode_t                       s_target_mode;
+
+/*
+ * LOAD-BEARING SINGLE-FLIGHT ASSUMPTION: s_sta_busy is read+set without a
+ * mutex in wifi_manager_sta_join (the check-then-set at lines 309/313) on
+ * the premise that exactly one caller can be in flight at a time.  The
+ * only caller of wifi_manager_sta_join / wifi_manager_sta_leave is
+ * pair_complete.c:pair_complete_task, which itself is single-flight under
+ * pair_complete.c's s_busy gate (backed by s_gate_lock + s_pending[] queue
+ * since the pair_complete-queue commit).
+ *
+ * If a non-pair_complete caller is ever added — e.g. a UI-initiated WiFi
+ * scan/connect, or a CLI command that joins a STA — the check-then-set
+ * MUST become atomic.  The minimal change is atomic_compare_exchange_strong
+ * on an atomic_bool, plus matching atomic_store on the false-writes at
+ * lines 333/341/359/367/375/413/427.  Same pattern as
+ * apps/main/components/gopro/open_gopro_ble/pair_complete.c:s_busy and
+ * apps/main/components/gopro/open_gopro_ble/status.c:s_band_busy.
+ */
 static bool                                s_sta_busy;
 static uint32_t                            s_sta_gw_ip;     /* last STA gateway IP */
 static sta_entry_t                         s_stations[AP_MAX_CONN];

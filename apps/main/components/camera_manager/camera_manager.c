@@ -172,8 +172,23 @@ void camera_manager_init(void)
 
 /* ================================================================
  * Driver registration (§21.4)
- * ================================================================ */
-
+ * ================================================================
+ *
+ * INIT-TIME-ONLY CONTRACT: the write to s_drivers[s_driver_count++] below
+ * is intentionally OUTSIDE the lock.  This is safe ONLY because every
+ * caller (gopro_wifi_rc_init at app_main:109, open_gopro_ble_init at
+ * app_main:114) runs sequentially during app_main before any other task
+ * spawns — at registration time there is no concurrency to race against.
+ * The follow-up "Assign to already-loaded matching slots" loop acquires
+ * the lock because it reads s_slots[] which CAN be concurrently touched
+ * by the time later registrations happen.
+ *
+ * Do NOT call camera_manager_register_driver from a runtime context (UI,
+ * HTTP handler, timer callback, BLE host task).  If a future need to
+ * register drivers at runtime arises, the write at line 188 below must
+ * move inside the lock and s_driver_count must be re-read after each
+ * lock acquisition.
+ */
 esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
                                           camera_model_match_fn   matches,
                                           camera_ctx_create_fn    create_ctx,
