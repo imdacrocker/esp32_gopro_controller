@@ -99,11 +99,18 @@ static esp_err_t handler_root(httpd_req_t *req)
 
 /* ---- Captive portal ------------------------------------------------------ *
  * Mirrors the main app: with captive_dns resolving every name to this device,
- * redirect any unmatched path to http://control.gp/ so the OS join probe
+ * redirect any unmatched path to the controller so the OS join probe
  * auto-opens the recovery UI and a browser left on control.gp reloads here.
+ *
+ * Redirect to the literal IP, not "control.gp": the captive-portal browser may
+ * use Secure DNS (DoH) that bypasses our resolver (notably Windows/Edge), in
+ * which case a hostname redirect fails and the browser opens its home page
+ * instead. The IP always loads. See the matching note in the main app's
+ * http_server/driver.c.
+ *
  * /api/ paths get a real 404 so OTA clients see a clean error.
  */
-#define PORTAL_URL "http://control.gp/"
+#define PORTAL_URL "http://10.71.79.1/"
 
 static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
 {
@@ -115,7 +122,7 @@ static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", PORTAL_URL);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, "Redirecting to control.gp", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, "Redirecting to the controller", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -552,6 +559,11 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
         ESP_LOGE(TAG, "httpd_start: %s", esp_err_to_name(err));
         return err;
     }
+
+    /* Silence the per-probe "httpd_uri: URI '…' not found" WARN spam from
+     * captive-portal detection (e.g. Windows /connecttest.txt); those misses
+     * are expected and handled by captive_portal_redirect. */
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
 
     static const httpd_uri_t routes[] = {
         { .uri = "/",                     .method = HTTP_GET,  .handler = handler_root         },
