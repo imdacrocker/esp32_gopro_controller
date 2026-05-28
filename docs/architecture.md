@@ -148,17 +148,17 @@ app_main()
  4a. shutdown_manager_init()                 ← before any subsystem that consults its gate
  5. gopro_wifi_rc_init()
  6. open_gopro_ble_init()                    ← registers is_shutdown_active w/ ble_core
- 7. ble_core_init()
- 8. can_manager_register_callbacks(...)      ← on_shutdown_request → shutdown_manager_on_can_request
- 9. can_manager_init()
-10. wifi_manager_set_callbacks(...)
-11. wifi_manager_init()
-12. wifi_manager_wait_for_ap_ready()
-13. http_server_init()                       ← also: reboots to factory if /www/index.html is missing
-14. arm 30 s one-shot timer → esp_ota_mark_app_valid_cancel_rollback()
+ 7. wifi_manager_set_callbacks(...)          ← before wifi_manager_init() so no events are lost
+ 8. wifi_manager_init()                      ← raises the SoftAP
+ 9. wifi_manager_wait_for_ap_ready()         ← AP beacon on-air before BLE engages coex
+10. http_server_init()                       ← also: reboots to factory if /www/index.html is missing
+11. mark_ota_valid()                         ← esp_ota_mark_app_valid_cancel_rollback(), httpd up = "healthy enough"
+12. ble_core_init()                          ← starts NimBLE host; deferred until after the AP beacon
+13. can_manager_register_callbacks(...)      ← on_shutdown_request → shutdown_manager_on_can_request
+14. can_manager_init()
 ```
 
-`ble_core_init()` and `wifi_manager_init()` overlap intentionally: NimBLE startup is asynchronous, so the AP can be raised while the host comes up. The rollback timer disarms only after the HTTP server has been listening for 30 s — sufficient signal that the new app is healthy enough that the bootloader shouldn't revert to factory.
+WiFi is brought fully up (`wifi_manager_init()` + `wait_for_ap_ready()`) *before* `ble_core_init()` starts the NimBLE controller: the ESP32 shares one antenna between WiFi and BLE, so giving the AP a clear window to get its beacon on air avoids the coex scheduler starving WiFi during BLE bring-up. The rollback is disarmed synchronously the moment `http_server_init()` returns — a listening HTTP server is taken as sufficient signal that the new app is healthy enough that the bootloader shouldn't revert to factory. (There is no soak timer; see [`design/ota.md`](design/ota.md) §11.)
 
 ---
 

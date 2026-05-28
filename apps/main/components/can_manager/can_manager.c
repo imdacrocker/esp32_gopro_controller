@@ -192,6 +192,12 @@ static void handle_logging_cmd(const can_rx_item_t *item)
         return;
     }
 
+    /* A zero-length frame would read uninitialised stack (the driver fills only
+     * dlc bytes of item->data); ignore it rather than flip recording intent. */
+    if (item->dlc < 1) {
+        return;
+    }
+
     can_logging_state_t state = item->data[0]
         ? LOGGING_STATE_LOGGING
         : LOGGING_STATE_NOT_LOGGING;
