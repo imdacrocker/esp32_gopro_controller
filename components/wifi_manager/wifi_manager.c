@@ -9,6 +9,7 @@
 #include "freertos/event_groups.h"
 #include "lwip/ip4_addr.h"
 #include "dhcpserver/dhcpserver.h"
+#include "dhcpserver/dhcpserver_options.h"
 
 #include <string.h>
 
@@ -229,6 +230,21 @@ void wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
                                             ESP_NETIF_REQUESTED_IP_ADDRESS,
                                             &lease, sizeof(lease)));
+
+    /* Captive portal: hand out our own IP (10.71.79.1) as the DNS server so
+     * connected clients send name lookups here. captive_dns answers every
+     * query with this address, which is what lets "control.gp" — and the
+     * OS captive-portal probe domains — resolve to the web UI on both iPhone
+     * and Android. Must be set while the DHCP server is stopped. */
+    esp_netif_dns_info_t dns_info = {};
+    dns_info.ip.type             = ESP_IPADDR_TYPE_V4;
+    dns_info.ip.u_addr.ip4.addr  = ip_info.ip.addr;   /* 10.71.79.1 */
+    ESP_ERROR_CHECK(esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_info));
+
+    dhcps_offer_t dhcps_dns = OFFER_DNS;
+    ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
+                                            ESP_NETIF_DOMAIN_NAME_SERVER,
+                                            &dhcps_dns, sizeof(dhcps_dns)));
 
     ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
 

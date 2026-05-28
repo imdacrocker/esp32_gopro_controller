@@ -200,6 +200,35 @@ static void reboot_to_factory(const char *reason)
     esp_restart();
 }
 
+/* ---- Captive portal ------------------------------------------------------ *
+ * The SoftAP hands out the device as the DNS server (wifi_manager.c) and
+ * captive_dns resolves every hostname to our IP. On joining an open network,
+ * phones fetch a known probe URL to decide "is there internet here?"; by
+ * answering that probe — which arrives as an unregistered path and so lands
+ * in this 404 handler — with a redirect to the UI instead of the success
+ * response the OS expects, iOS and Android pop up their captive-portal
+ * browser pointed at the controller. Typed names like http://control.gp/
+ * resolve here too and get sent to the canonical root.
+ *
+ * /api/ paths are exempt: a genuine API 404 should read as a 404, not bounce
+ * a programmatic client to an HTML page.
+ */
+#define PORTAL_URL "http://control.gp/"
+
+static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
+{
+    (void)err;
+    if (strncmp(req->uri, "/api/", 5) == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", PORTAL_URL);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, "Redirecting to control.gp", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* ---- Component init ------------------------------------------------------ */
 
 void http_server_init(void)
@@ -280,6 +309,9 @@ void http_server_init(void)
     httpd_register_uri_handler(server, &uri_app_js);
     httpd_register_uri_handler(server, &uri_style_css);
     httpd_register_uri_handler(server, &uri_updates_js);
+
+    /* Captive-portal: redirect any unmatched path to the web UI (see above). */
+    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_redirect);
 
     /* API handler registration. */
     api_system_register(server);

@@ -26,7 +26,7 @@ That's it for USB. The board boots straight into the main app.
 Then on your phone or laptop:
 
 1. Join the WiFi network **`HERO-RC-XXXXXX`** (open, no password — last 3 MAC bytes in the SSID).
-2. Open **<http://10.71.79.1/>** in a browser.
+2. The controller UI should pop up automatically (captive portal). If it doesn't, open **<http://control.gp/>** in a browser — or **<http://10.71.79.1/>** if your device can't resolve the name.
 3. Set your UTC offset from the settings menu at the top right.
 4. Add cameras from the Add/Manage cameras menu at the bottom.
 
@@ -158,7 +158,7 @@ That's it for USB. The board boots straight into the main app.
 Then on your phone or laptop:
 
 1. Join the WiFi network **`HERO-RC-XXXXXX`** (open, no password — last 3 MAC bytes in the SSID).
-2. Open **<http://10.71.79.1/>** in a browser.
+2. The controller UI should pop up automatically (captive portal). If it doesn't, open **<http://control.gp/>** in a browser — or **<http://10.71.79.1/>** if your device can't resolve the name.
 3. Set your UTC offset from the settings menu at the top right.
 4. Add cameras from the Add/Manage cameras menu at the bottom.
 
