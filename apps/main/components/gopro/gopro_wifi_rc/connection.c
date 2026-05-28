@@ -172,6 +172,11 @@ void rc_handle_station_disconnected(const uint8_t mac[6])
     rc_disarm_wol_retry_timer(ctx);
     ctx->wifi_ready       = false;
     ctx->recording_status = CAMERA_RECORDING_UNKNOWN;
+    /* Clear last_ip so a subsequent UDP datagram for that IP (e.g. the
+     * SoftAP reassigned it to a different client) doesn't get attributed
+     * to this slot by find_slot_by_ip in udp.c.  Re-populated on the next
+     * station-associated / DHCP event. */
+    ctx->last_ip          = 0;
     /* identify_attempted is intentionally NOT cleared — once a probe has run
      * this firmware session, the slot's model is settled (HERO4_* on success,
      * HERO_LEGACY_RC on failure).  Re-running the probe on every reconnect

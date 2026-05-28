@@ -650,9 +650,17 @@ void can_manager_init(void)
     };
     ESP_ERROR_CHECK(twai_new_node_onchip(&node_cfg, &s_node));
 
-    /* Bus-state transition queue — depth 4 is plenty: the controller can only
-     * traverse 4 error states, and the recovery task drains immediately. */
-    s_state_queue = xQueueCreate(4, sizeof(twai_state_change_event_data_t));
+    /* Bus-state transition queue.  Depth 8 (was 4) so a burst of error-FSM
+     * transitions during sustained bus errors can't drop a BUS_OFF event
+     * the recovery task relies on.  The ISR enqueues every transition and
+     * if xQueueSendFromISR silently fails (queue full), a BUS_OFF-entry
+     * event could be lost — leaving twai_node_recover() un-called and the
+     * TX gate clamped false until the next BUS_OFF cycle.  The TX gate
+     * itself is set/cleared directly by the ISR (lines ~397-399) so it
+     * recovers independently, but the queue-driven recover() call is the
+     * sole path back to ACTIVE.  Depth 8 leaves headroom for ~2 full
+     * ACTIVE→WARNING→PASSIVE→BUS_OFF cycles before drop. */
+    s_state_queue = xQueueCreate(8, sizeof(twai_state_change_event_data_t));
     configASSERT(s_state_queue);
 
     twai_event_callbacks_t twai_cbs = {

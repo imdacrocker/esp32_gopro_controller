@@ -82,11 +82,15 @@ void app_main(void)
              CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0 ? 0 : 1,
              AP_CHANNEL);
 
-    /* NVS is required by BLE for bonding info. */
+    /* NVS is required by BLE for bonding info.  If the first init fails
+     * with the standard "needs erase" errors, wipe and retry.  ESP_ERROR_CHECK
+     * the second init's result: if even a fresh erase doesn't yield a usable
+     * NVS partition the device is unrecoverable and we'd rather panic loudly
+     * than proceed with every NVS write silently failing downstream. */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        nvs_flash_erase();
-        nvs_flash_init();
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
     }
 
     /* Apply the persisted "Enable Logging" toggle. Default is OFF, so on a

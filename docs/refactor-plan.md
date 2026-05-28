@@ -251,9 +251,16 @@ single mismatch underlay the paired-cameras JSON bug.
       releases the socket. The 5 s recv_wait_timeout from
       `HTTPD_DEFAULT_CONFIG` (which is the default, not 0 as the original
       commit message implied) bounds the worst-case stall.
-- [ ] **http_server OTA session statics** (api_ota.c:35) — `s_app_uploaded`/
-      `s_ui_uploaded` shared across concurrent workers, no lock. Serialize / reject
-      if in progress.
+- [~] **http_server OTA session statics** (api_ota.c:35) — flagged as
+      `s_app_uploaded`/`s_ui_uploaded` "shared across concurrent workers",
+      but **verified there are no concurrent workers**: ESP-IDF httpd is a
+      single-task select-based server, so handler_upload_app /
+      handler_upload_ui / handler_commit are serialised by httpd's worker
+      itself. Client retries while a previous upload is mid-stream queue at
+      TCP; the second handler invocation starts after the first returns.
+      No mutex needed. Documented the load-bearing single-task assumption
+      inline at the static declarations so any future move to a thread-
+      pooled httpd gets an explicit "must add mutex here" pointer.
 - [x] **http_server socket timeouts** (driver.c:232) — flagged as "no
       `recv_wait_timeout`/`send_wait_timeout`", but **verified that ESP-IDF
       v6.0.1's `HTTPD_DEFAULT_CONFIG()` already sets both to 5 s by default**
@@ -269,7 +276,11 @@ single mismatch underlay the paired-cameras JSON bug.
       for a single-user controller. Also fixed a regression in the previous
       `read_body` commit (see above) that made the slowloris-with-zero-bytes
       case strictly worse.
-- [ ] **main.c:89** — retried `nvs_flash_init()` return code ignored; `ESP_ERROR_CHECK` it.
+- [x] **main.c:89** — retried `nvs_flash_init()` return code ignored.
+      **Resolved**: `ESP_ERROR_CHECK` on both `nvs_flash_erase()` and the
+      retried `nvs_flash_init()`. If even a fresh erase doesn't yield a
+      usable NVS partition, panic loudly rather than proceeding with every
+      downstream NVS write silently failing.
 - [x] **ota_io/boot_helpers.c:105 `app_desc_is_newer`** — sorted `__DATE__`
       strings lexically; on a `secure_version` tie (which is the default
       since no per-build bump is configured), the recovery `/api/ota/boot-main`
@@ -291,13 +302,38 @@ single mismatch underlay the paired-cameras JSON bug.
       day formatting (` 5` vs `15` and `31` vs `15`), time tiebreaker,
       and 5 malformed-input cases that must return 0. Also threaded
       `OTA_IO_INC` into the host-test CMake include path.
-- [ ] **gopro_wifi_rc/udp.c:155,178** — `last_ip` not cleared on disassociate →
-      stale RX/poll attribution; `find_slot_by_ip` ambiguous. Clear on disassociate
-      or gate on `wifi_ready`.
-- [ ] **camera_manager.c:637** — `get_slot_info`/`get_slot_can_state` don't NULL-
-      check `driver->get_recording_status`; a partially-populated vtable crashes.
-- [ ] **can_manager.c:649** — state queue (depth 4) can drop a BUS_OFF-entry event
-      that recovery relies on; kick recovery off the gate flag too, or deepen queue.
+- [x] **gopro_wifi_rc — `last_ip` not cleared on disassociate** (was filed as
+      `udp.c:155,178`, the actual fix site is `connection.c:rc_handle_station_disconnected`).
+      `find_slot_by_ip` (udp.c:178) demuxes UDP datagrams by matching
+      `ctx->last_ip == src_ip`, and already guards with `last_ip != 0`. The
+      disconnect handler was clearing `wifi_ready` / `recording_status` /
+      timers but NOT `last_ip`, so a UDP frame at the disconnected camera's
+      old IP — including one assigned by the SoftAP to a different client —
+      could be attributed to the dead slot. **Resolved**: one-line
+      `ctx->last_ip = 0;` in `rc_handle_station_disconnected` after the
+      existing field clears. Re-populated on the next associated/DHCP
+      event.
+- [x] **camera_manager.c:637** — `get_slot_info`/`get_slot_can_state`
+      dereference `driver->get_recording_status` under only an
+      `sl->driver != NULL` guard, on the premise that the vtable contract
+      (camera_manager.h:14) declares the three core methods (start, stop,
+      get_recording_status) "Always non-NULL". Current BLE and RC drivers
+      populate all three, so not a live crash. **Resolved** defensively by
+      adding `assert()` checks for the three required methods at the top
+      of `camera_manager_register_driver` — a future driver that violates
+      the contract panics at boot rather than crashing on first
+      mismatch-poll dispatch.
+- [x] **can_manager.c:655** — state queue depth 4 could drop a BUS_OFF-entry
+      event under sustained bus errors. The TX gate (`s_can_tx_enabled`) is
+      set/cleared directly by the ISR so it recovers independently, but the
+      `twai_node_recover()` call lives in the queue-driven recovery_task —
+      if its BUS_OFF event is dropped, the controller never re-enters
+      ACTIVE. **Resolved**: deepened the queue to 8, leaving headroom for
+      ~2 full ACTIVE→WARNING→PASSIVE→BUS_OFF cycles before any drop.
+      Considered also gating recovery off `s_can_tx_enabled`/state polling
+      directly (the plan suggestion); decided against it because the
+      queue-driven path is cleaner and the deeper buffer comfortably
+      covers realistic burst scenarios.
 
 ---
 

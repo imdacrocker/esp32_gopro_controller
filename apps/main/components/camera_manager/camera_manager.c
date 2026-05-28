@@ -200,6 +200,16 @@ esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
         return ESP_ERR_NO_MEM;
     }
 
+    /* Enforce the "Always non-NULL" vtable contract documented at
+     * camera_manager.h:14.  Several call sites (e.g. get_slot_info at
+     * camera_manager.c:663, poll_timer_cb at camera_manager.c:1037)
+     * dereference these function pointers under only an `sl->driver != NULL`
+     * guard, on the premise that a registered driver has them populated.
+     * Catch contract violations at boot rather than crashing on first poll. */
+    assert(driver->start_recording);
+    assert(driver->stop_recording);
+    assert(driver->get_recording_status);
+
     s_drivers[s_driver_count++] = (driver_reg_t){
         .driver      = driver,
         .matches     = matches,
