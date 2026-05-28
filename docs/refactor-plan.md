@@ -66,9 +66,21 @@ single mismatch underlay the paired-cameras JSON bug.
 
 ## Phase 2 — High-severity _(reported; verify before fixing)_
 
-- [ ] **camera_manager.c:939 `reorder_slots`** — when `count != s_slot_count`,
-      tail slots aren't cleared/torn down; a camera can be duplicated across
-      slots and NVS left stale. Require `count == s_slot_count` or teardown the tail.
+- [x] **camera_manager.c:921 `reorder_slots`** — when `count != s_slot_count`
+      the tail slots were left untouched in RAM/NVS while indices [0, count)
+      got overwritten, silently dropping old slot 0 and duplicating the tail
+      across two slots; duplicate indices in `new_order` had the same effect.
+      **Resolved** by extracting a pure permutation-validator
+      (`reorder_validate.c` + `reorder_is_valid_permutation`) that rejects
+      anything that isn't a permutation of [0, s_slot_count) — wrong count,
+      out-of-range, or duplicates. The endpoint isn't called by the shipped
+      UI today, so this is hardening against future use / direct API access.
+      Deletion has its own path (`camera_manager_remove_slot`) — keeping the
+      two operations cleanly separate. **Not user-reachable today**: no
+      front-end calls `/api/reorder-cameras`. Added Unity host test
+      (`test_reorder_validate.c`, 17 cases) covering accept/reject scenarios.
+      Also moved `CAMERA_MAX_SLOTS` from `camera_manager.h` (ESP-IDF deps)
+      to `camera_types.h` so pure-logic compilation units can reach it.
 - [x] **open_gopro_ble/gatt.c:226** — CCCD handle assumed `val_handle + 1`; GATT
       doesn't guarantee it. **Resolved**: added a descriptor-discovery phase
       between chr-discovery and CCCD-write that runs `ble_gattc_disc_all_dscs`

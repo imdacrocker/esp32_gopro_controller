@@ -44,3 +44,7 @@ add_host_test(test_gopro_model
 add_host_test(test_mismatch
     "${CMAKE_CURRENT_SOURCE_DIR}/test_mismatch.c"
     "${REPO_ROOT}/apps/main/components/camera_manager/mismatch.c")
+
+add_host_test(test_reorder_validate
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_reorder_validate.c"
+    "${REPO_ROOT}/apps/main/components/camera_manager/reorder_validate.c")

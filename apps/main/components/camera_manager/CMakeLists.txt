@@ -3,6 +3,7 @@ idf_component_register(
         "camera_manager.c"
         "mismatch.c"
         "pair_attempt.c"
+        "reorder_validate.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

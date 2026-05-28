@@ -920,19 +920,32 @@ esp_err_t camera_manager_remove_slot(int slot)
 
 esp_err_t camera_manager_reorder_slots(const int *new_order, int count)
 {
-    if (!new_order || count <= 0 || count > CAMERA_MAX_SLOTS) {
+    /* Strict-permutation contract: `count` must equal s_slot_count and
+     * `new_order` must contain each index in [0, s_slot_count) exactly once.
+     *
+     * Rejecting non-permutations up-front prevents two silent-data-loss
+     * paths that the previous loose validation allowed:
+     *
+     *   - Truncation (count < s_slot_count): tail slots at indices
+     *     [count, s_slot_count) were left untouched in RAM and NVS while
+     *     s_slot_count stayed unchanged, and indices [0, count) were
+     *     overwritten — so a "shrink the list" call would lose old slot 0
+     *     entirely and duplicate the tail across two slots.
+     *
+     *   - Duplicates in new_order: e.g. order=[0,0,0] would copy slot 0
+     *     into every position and overwrite slots 1 and 2 in NVS.
+     *
+     * For explicit removal, use camera_manager_remove_slot instead. */
+    lock();
+    if (!reorder_is_valid_permutation(new_order, count, s_slot_count)) {
+        unlock();
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Validate indices and check connectivity. */
-    lock();
+    /* Reject if any source slot is currently connected — reordering a live
+     * driver context out from under itself would orphan its state. */
     for (int i = 0; i < count; i++) {
-        int src = new_order[i];
-        if (src < 0 || src >= s_slot_count) {
-            unlock();
-            return ESP_ERR_INVALID_ARG;
-        }
-        camera_slot_t *sl = &s_slots[src];
+        camera_slot_t *sl = &s_slots[new_order[i]];
         if (sl->wifi_status == WIFI_CAM_READY ||
             sl->ble_status  == CAM_BLE_CONNECTED) {
             unlock();

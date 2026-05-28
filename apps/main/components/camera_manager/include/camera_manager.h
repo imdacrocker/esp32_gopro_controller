@@ -4,7 +4,10 @@
 #include "esp_err.h"
 #include "host/ble_hs.h"   /* ble_addr_t, BLE_HS_CONN_HANDLE_NONE */
 
-#define CAMERA_MAX_SLOTS 4
+/* CAMERA_MAX_SLOTS now lives in camera_types.h so it's reachable from
+ * pure-logic compilation units (e.g. reorder_validate.c) that don't pull in
+ * the ESP-IDF / NimBLE headers above.  Still visible to all consumers of
+ * this header via the include above. */
 
 /* ---- Driver vtable (§8 / §13.5) ---- */
 typedef struct camera_driver camera_driver_t;
