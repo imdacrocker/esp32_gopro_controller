@@ -58,7 +58,14 @@ void rc_arm_keepalive_timer(gopro_wifi_rc_ctx_t *ctx)
 void rc_disarm_keepalive_timer(gopro_wifi_rc_ctx_t *ctx)
 {
     if (ctx->keepalive_timer) {
+        /* stop() returns synchronously but does NOT wait for an already-
+         * dispatched callback to drain — the callback could still post
+         * RC_CMD_KEEPALIVE_TICK to the work queue against a torn-down slot.
+         * delete() (on ESP_TIMER_TASK dispatch) blocks until any pending
+         * callback finishes, so once we return no stale tick can land. */
         esp_timer_stop(ctx->keepalive_timer);
+        esp_timer_delete(ctx->keepalive_timer);
+        ctx->keepalive_timer = NULL;
     }
 }
 
@@ -90,7 +97,10 @@ void rc_arm_wol_retry_timer(gopro_wifi_rc_ctx_t *ctx)
 void rc_disarm_wol_retry_timer(gopro_wifi_rc_ctx_t *ctx)
 {
     if (ctx->wol_retry_timer) {
+        /* See rc_disarm_keepalive_timer for the stop+delete rationale. */
         esp_timer_stop(ctx->wol_retry_timer);
+        esp_timer_delete(ctx->wol_retry_timer);
+        ctx->wol_retry_timer = NULL;
     }
 }
 

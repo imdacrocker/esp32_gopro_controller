@@ -177,23 +177,36 @@ single mismatch underlay the paired-cameras JSON bug.
           the global lock is held only briefly. The two post-dispatch
           `s_slots[slot].grace_until_us` writes fold into the same locked
           section.
-    - [ ] **open_gopro_ble/readiness.c:207,274,414** — double-completion: three
-          one-shot `esp_timer` callbacks (`third_party_timeout_cb`,
-          `cam_ctrl_timeout_cb`, `on_readiness_timer`) and their matching
-          response handlers each check a `pending` bool then act, with no
-          atomic check-and-clear. Both can pass the gate and both call into
-          the completion path. Low impact (the completion path is mostly
-          idempotent) but real. Fix: convert the three flags to `atomic_bool`,
-          use `atomic_exchange(&flag, false)` so only one caller wins.
-    - [ ] **gopro_wifi_rc/connection.c:34-73** — `esp_timer_stop` doesn't wait
-          for an in-flight callback; the callback can post
-          `RC_CMD_KEEPALIVE_TICK` / `RC_CMD_WOL_RETRY` to the work queue after
-          the slot has been disarmed. The handlers (`rc_handle_keepalive_tick`,
-          `rc_handle_wol_retry`) blindly send UDP to `ctx->last_ip` with no
-          `wifi_ready` check. Impact is small (one stray UDP packet to a stale
-          IP, dropped by the network) — `ctx` is a static array entry so no
-          use-after-free. Fix: defensive `wifi_ready` check at the top of both
-          handlers.
+    - [x] **open_gopro_ble/readiness.c** double-completion: three one-shot
+          `esp_timer` callbacks (`third_party_timeout_cb`, `cam_ctrl_timeout_cb`,
+          `on_readiness_timer`) and their matching response handlers each
+          checked a `pending` bool then acted, with no atomic check-and-clear.
+          Both can pass the gate (host task reads true; timer task reads true
+          before host clears), and both call into the completion path —
+          duplicate state transitions, duplicate `camera_manager_on_camera_ready`
+          calls. **Resolved**: converted `readiness_polling`, `cam_ctrl_pending`,
+          `third_party_pending` to `atomic_bool` and replaced `check + clear`
+          at every claim point with `atomic_exchange(&flag, false)` — exactly
+          one caller observes true→false and proceeds. Subtle case: the
+          readiness retry-timer's retry path is NOT a claim (the polling
+          continues), only the retry-exhausted path is — that one's now
+          `atomic_exchange`-guarded too so it can't race a concurrent success
+          response into double-completion. `pairing.c:183` (disconnect
+          cleanup) also picked up `atomic_store`.
+    - [x] **gopro_wifi_rc/connection.c** timer-after-stop: `esp_timer_stop()`
+          returns synchronously but does NOT wait for an already-dispatched
+          callback to drain — the keepalive/WoL-retry callback can fire after
+          disarm, post `RC_CMD_KEEPALIVE_TICK`/`RC_CMD_WOL_RETRY` to the work
+          queue against a torn-down slot, and the handler blindly sends UDP
+          to `ctx->last_ip`. Initially considered a `wifi_ready` gate but
+          rejected — `wifi_ready` is legitimately false during the initial-
+          probe window (between station-associated and first UDP response)
+          and gating there would break the cv/keepalive probe. **Resolved**
+          at the source by calling `esp_timer_stop() + esp_timer_delete()` in
+          both `rc_disarm_keepalive_timer` and `rc_disarm_wol_retry_timer`;
+          `delete()` (on the default ESP_TIMER_TASK dispatch) blocks until
+          any pending callback finishes, so after disarm no stale tick can
+          land. The arm functions already re-create from NULL.
 - [ ] **Unlocked shared state**: camera_manager `s_slot_count`/`s_auto_control`
       (611, 786) and driver-registration table (188); wifi_manager `s_sta_busy`
       TOCTOU (309). Take the lock or document/relax explicitly.

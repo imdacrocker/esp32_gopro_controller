@@ -180,7 +180,7 @@ void gopro_on_disconnected(uint16_t conn_handle, ble_addr_t addr,
     memset(&ctx->gatt, 0, sizeof(ctx->gatt));
     ctx->conn_handle           = GOPRO_CONN_NONE;
     ctx->negotiated_mtu        = 0;
-    ctx->readiness_polling     = false;
+    atomic_store(&ctx->readiness_polling, false);
     ctx->readiness_retry_count = 0;
     ctx->cached_status         = CAMERA_RECORDING_UNKNOWN;
     /* Do NOT clear datetime_pending_utc — user may reconnect before UTC arrives. */
