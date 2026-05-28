@@ -14,6 +14,7 @@
 #include "nvs.h"
 
 #include "ota_io.h"
+#include "app_date_compare.h"
 #include "ota_io_priv.h"
 
 static const char *TAG = "ota_io";
@@ -100,18 +101,33 @@ esp_err_t ota_io_set_boot_factory(void)
 }
 
 /* Return 1 if a's build is more recent than b's, else 0.
- * Compares secure_version first (monotonic anti-rollback counter), then
- * the textual ISO-style date+time fields baked in by IDF (esp_app_desc_t). */
+ *
+ * Compares secure_version first (monotonic anti-rollback counter); on a
+ * tie falls back to a properly parsed __DATE__ / __TIME__ comparison via
+ * app_date_time_compare.  An earlier version used strncmp directly on
+ * the "MMM DD YYYY" date string, which sorts months alphabetically rather
+ * than calendrically — so e.g. "Nov 30 2024" > "Jan 15 2025" lex, even
+ * though Jan 2025 is calendrically newer.  That caused recovery's
+ * /api/ota/boot-main to select the OLDER of two valid OTA slots whenever
+ * the two build months sat on opposite sides of an alphabetical-vs-
+ * calendar regression — which on continuous-development builds is roughly
+ * half of all month transitions.
+ *
+ * Note: this only affects the recovery boot-main code path; normal OTA
+ * commit goes through esp_ota_set_boot_partition() and never calls here.
+ *
+ * The build system does not currently bump CONFIG_APP_SECURE_VERSION per
+ * build, so every pair of images defaults to a secure_version tie and the
+ * date/time comparator is the operative test.  If a future build process
+ * starts bumping secure_version, this function still does the right thing
+ * — the tiebreaker just becomes vestigial. */
 static int app_desc_is_newer(const esp_app_desc_t *a, const esp_app_desc_t *b)
 {
     if (a->secure_version != b->secure_version) {
         return a->secure_version > b->secure_version;
     }
-    /* date is "MMM DD YYYY" (__DATE__) — strcmp doesn't sort that nicely,
-     * so combine with time for a simple lexical tie-break. Best-effort. */
-    int d = strncmp(a->date, b->date, sizeof(a->date));
-    if (d != 0) return d > 0;
-    return strncmp(a->time, b->time, sizeof(a->time)) > 0;
+    return app_date_time_compare(a->date, a->time,
+                                  b->date, b->time) > 0;
 }
 
 esp_err_t ota_io_set_boot_main(char out_label[17])

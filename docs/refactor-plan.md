@@ -270,9 +270,27 @@ single mismatch underlay the paired-cameras JSON bug.
       `read_body` commit (see above) that made the slowloris-with-zero-bytes
       case strictly worse.
 - [ ] **main.c:89** — retried `nvs_flash_init()` return code ignored; `ESP_ERROR_CHECK` it.
-- [ ] **ota_io/boot_helpers.c:105 `app_desc_is_newer`** — sorts `__DATE__`
-      strings lexically; can boot the *older* image on a `secure_version` tie.
-      Parse the date or rely solely on `secure_version`.
+- [x] **ota_io/boot_helpers.c:105 `app_desc_is_newer`** — sorted `__DATE__`
+      strings lexically; on a `secure_version` tie (which is the default
+      since no per-build bump is configured), the recovery `/api/ota/boot-main`
+      endpoint could pick the OLDER of two valid OTA slots whenever the build
+      months sat on opposite sides of an alphabetical-vs-calendar regression
+      (e.g. `"Nov 30 2024"` vs `"Jan 15 2025"`: `'J' < 'N'` lex but Jan 2025
+      newer calendar). Reachable on the recovery boot-main path; not on
+      normal OTA commit (which goes through `esp_ota_set_boot_partition`).
+      **Resolved** by extracting a pure-logic comparator
+      (`components/ota_io/app_date_compare.c` +
+      `include/app_date_compare.h`) that parses `MMM DD YYYY` and `hh:mm:ss`
+      into sortable integers, handles the `__DATE__` leading-space day
+      format, and treats parse failures as "equal" (refuses to guess).
+      `boot_helpers.c:app_desc_is_newer` now calls into it after the
+      `secure_version` check. Added a 17-case Unity host test
+      (`tests/host/test_app_date_compare.c`) covering: identity, newer-year
+      wins, three cross-year alphabetical regressions (Nov→Jan, Sep→Jan,
+      Oct→Apr), three same-year regressions (Feb→Jan, Apr→Mar, Dec→Feb),
+      day formatting (` 5` vs `15` and `31` vs `15`), time tiebreaker,
+      and 5 malformed-input cases that must return 0. Also threaded
+      `OTA_IO_INC` into the host-test CMake include path.
 - [ ] **gopro_wifi_rc/udp.c:155,178** — `last_ip` not cleared on disassociate →
       stale RX/poll attribution; `find_slot_by_ip` ambiguous. Clear on disassociate
       or gate on `wifi_ready`.

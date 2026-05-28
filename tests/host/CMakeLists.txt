@@ -22,16 +22,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(unity)
 
-set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-set(CAM_INC   "${REPO_ROOT}/apps/main/components/camera_manager/include")
-set(GOPRO_DIR "${REPO_ROOT}/apps/main/components/gopro")
+set(REPO_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(CAM_INC    "${REPO_ROOT}/apps/main/components/camera_manager/include")
+set(GOPRO_DIR  "${REPO_ROOT}/apps/main/components/gopro")
+set(OTA_IO_INC "${REPO_ROOT}/components/ota_io/include")
 
 enable_testing()
 
 # Each entry: <test-name> <test-source> <production-source...>
 function(add_host_test name test_src)
     add_executable(${name} ${test_src} ${ARGN})
-    target_include_directories(${name} PRIVATE "${CAM_INC}" "${GOPRO_DIR}")
+    target_include_directories(${name} PRIVATE
+        "${CAM_INC}" "${GOPRO_DIR}" "${OTA_IO_INC}")
     target_link_libraries(${name} PRIVATE unity)
     target_compile_options(${name} PRIVATE -Wall -Wextra)
     add_test(NAME ${name} COMMAND ${name})
@@ -48,3 +50,7 @@ add_host_test(test_mismatch
 add_host_test(test_reorder_validate
     "${CMAKE_CURRENT_SOURCE_DIR}/test_reorder_validate.c"
     "${REPO_ROOT}/apps/main/components/camera_manager/reorder_validate.c")
+
+add_host_test(test_app_date_compare
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_app_date_compare.c"
+    "${REPO_ROOT}/components/ota_io/app_date_compare.c")

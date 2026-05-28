@@ -4,6 +4,7 @@ idf_component_register(
         "storage_writer.c"
         "boot_helpers.c"
         "ota_settings.c"
+        "app_date_compare.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
