@@ -142,9 +142,21 @@ single mismatch underlay the paired-cameras JSON bug.
       invariant added in Phase 0 guards the underlying premise. The transport-
       field refactor (`gopro_model.h:62-68`) is **dropped** — the dual-transport
       ambiguity it described is vestigial now that pairing is model-locked.
-- [ ] **log_ring.c:135** — UART-echo level detection assumes DEBUG/VERBOSE lines
-      start with the level letter, but under `CONFIG_LOG_COLORS=y` they start
-      with ESC → DEBUG/VERBOSE leak to UART. Detect level after stripping ANSI.
+- [~] **log_ring.c:135** — flagged as a UART leak of DEBUG/VERBOSE under
+      `CONFIG_LOG_COLORS=y`, but **verified not actually broken** in ESP-IDF
+      v6.0.1 (the toolchain pinned in `dev.ps1`). The macros `LOG_COLOR_D` and
+      `LOG_COLOR_V` in `components/log/include/esp_log_color.h` are
+      unconditionally defined as `""` (empty strings) in both the
+      `!ESP_LOG_COLOR_DISABLED` and `ESP_LOG_COLOR_DISABLED` branches — only
+      `LOG_COLOR_I` / `LOG_COLOR_W` / `LOG_COLOR_E` carry actual ANSI escapes.
+      So DEBUG/VERBOSE lines start with the level letter and the `buf[0] !=
+      'D' && buf[0] != 'V'` test correctly identifies them; the in-code
+      comment at log_ring.c:131-134 has the right model. **Latent risk**: if
+      a future ESP-IDF defines `LOG_COLOR_D` non-empty (e.g. adds a gray
+      colour for debug) the check would silently break with no compile-time
+      signal. Could be hardened with a `_Static_assert(sizeof(LOG_COLOR_D) ==
+      1, ...)` in log_ring.c; deferred — current toolchain is fine and the
+      assert is easy to add later if the failure ever surfaces.
 
 ---
 
