@@ -59,8 +59,19 @@ sdkconfig.old
 managed_components/
 build/
 
+# Registry components vendored from GitHub by the SessionStart hook (the web
+# container's network policy blocks the ESP Component Registry). Session-local,
+# never committed.
+/apps/main/components/joltwallet__littlefs/
+/apps/main/components/espressif__cjson/
+
 /.vscode
-/.claude
+# Claude Code: ignore personal/local config, but track the shared SessionStart
+# hook and project settings so web sessions pick them up after merge.
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
+/.claude/settings.local.json
 /apps/recovery/.vscode
 /apps/main/.vscode
 
