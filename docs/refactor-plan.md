@@ -81,9 +81,26 @@ single mismatch underlay the paired-cameras JSON bug.
       User Description and leave notifications disabled). Adds ~150 ms to
       connect time (5 extra ATT round-trips); acceptable for spec-compliance
       across firmwares.
-- [ ] **open_gopro_ble/status.c:136** — band-status query bridge uses module
-      globals matched only by status ID, not slot/conn_handle; with 2+ cameras a
-      response can satisfy the wrong waiter. Scope the bridge to the requesting ctx.
+- [~] **open_gopro_ble/status.c:136** — band-status query bridge uses module
+      globals matched only by status ID, not slot/conn_handle; in principle a
+      response can satisfy the wrong waiter with 2+ cameras. **Verified not
+      reachable in practice**: the only caller is `pair_complete_task`, which
+      is single-flight under `pair_complete.c`'s gate (now backed by
+      `s_gate_lock` + `s_pending[]` queue). Documented the load-bearing
+      assumption inline at status.c:135 so a future maintainer can't quietly
+      add a second caller without realising. **Per-slot refactor deferred**
+      until/unless a non-pair_complete caller is needed (e.g. a UI-initiated
+      "re-check WiFi band" action).
+- [x] **open_gopro_ble/pair_complete.c:371** — single-flight gate silently
+      *dropped* a second concurrent pair-complete request rather than queuing
+      it. Reachable on first-pair of two cameras booted together: the second
+      camera's BLE/readiness pipeline can complete while the first's
+      pair_complete_task is still running (the scanner resumes after CCCD
+      subscription, before readiness polling). **Resolved** by adding a
+      mutex-protected gate + `s_pending[CAMERA_MAX_SLOTS]` queue; the dying
+      task now drains pending slots via `release_busy_and_drain()` instead
+      of dropping them. Deferred slots that disconnect before their turn
+      are silently skipped (logged).
 - [ ] **open_gopro_ble/pair_complete.c:76** — global BLE-read bridge; a late
       callback after timeout gives a semaphore the *next* read waits on,
       corrupting the following read. Drain before each read and/or tag by conn_handle.

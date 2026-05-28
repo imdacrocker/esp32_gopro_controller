@@ -131,6 +131,16 @@ void gopro_status_handle_response(gopro_ble_ctx_t *ctx,
  * Lives in this file because the response handler above is what dispatches
  * incoming status entries.  Keeping the bridge co-located avoids spilling
  * status-id knowledge into a separate compilation unit.
+ *
+ * LOAD-BEARING SINGLE-FLIGHT ASSUMPTION: these globals have no slot dimension
+ * because the only caller is pair_complete.c's pair_complete_task, and the
+ * gate there (s_busy under s_gate_lock, with deferred slots queued in
+ * s_pending[]) guarantees exactly one such task runs at a time.  If a
+ * non-pair_complete caller is ever added — e.g. a UI-initiated "re-check
+ * WiFi band" action, or any code that issues a status query from a different
+ * orchestration task — these MUST become per-slot arrays keyed by ctx->slot,
+ * and band_bridge_signal() must take a ctx/slot argument routed through
+ * gopro_status_handle_response.  See refactor-plan.md (Phase 2, band-query).
  */
 
 static SemaphoreHandle_t s_band_done;
