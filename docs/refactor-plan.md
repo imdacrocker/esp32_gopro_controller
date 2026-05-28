@@ -162,10 +162,38 @@ single mismatch underlay the paired-cameras JSON bug.
 
 ## Phase 3 — Reliability / concurrency (MEDIUM)
 
-- [ ] **Timer-vs-callback races**: open_gopro_ble/readiness.c:207,274,414
-      (double-completion), gopro_wifi_rc/connection.c:34-73 (queued timer command
-      runs against torn-down/reused slot), camera_manager.c:1025 dispatch-after-
-      unlock TOCTOU. Marshal onto one task or guard with atomic flags.
+- **Timer-vs-callback races** — three independent sites, separated here so
+  each can be tracked independently:
+    - [x] **camera_manager.c:1024 `poll_timer_cb`** — classic dispatch-after-
+          unlock TOCTOU. The callback null-checked `sl->driver` under the lock,
+          then snapshotted `drv`/`ctx`, then unlocked, then called
+          `drv->start_recording(ctx)`. `camera_manager_remove_slot` could null
+          `sl->driver` and free `driver_ctx` between the snapshot and the call,
+          producing a NULL deref or use-after-free. Reachable on any
+          remove-slot or WiFi-disconnect that lands inside a recording-mismatch
+          poll tick. **Resolved**: hold the (recursive) lock through dispatch.
+          The driver methods are async on both BLE and WiFi-RC drivers — they
+          queue work to their respective task queues and return quickly — so
+          the global lock is held only briefly. The two post-dispatch
+          `s_slots[slot].grace_until_us` writes fold into the same locked
+          section.
+    - [ ] **open_gopro_ble/readiness.c:207,274,414** — double-completion: three
+          one-shot `esp_timer` callbacks (`third_party_timeout_cb`,
+          `cam_ctrl_timeout_cb`, `on_readiness_timer`) and their matching
+          response handlers each check a `pending` bool then act, with no
+          atomic check-and-clear. Both can pass the gate and both call into
+          the completion path. Low impact (the completion path is mostly
+          idempotent) but real. Fix: convert the three flags to `atomic_bool`,
+          use `atomic_exchange(&flag, false)` so only one caller wins.
+    - [ ] **gopro_wifi_rc/connection.c:34-73** — `esp_timer_stop` doesn't wait
+          for an in-flight callback; the callback can post
+          `RC_CMD_KEEPALIVE_TICK` / `RC_CMD_WOL_RETRY` to the work queue after
+          the slot has been disarmed. The handlers (`rc_handle_keepalive_tick`,
+          `rc_handle_wol_retry`) blindly send UDP to `ctx->last_ip` with no
+          `wifi_ready` check. Impact is small (one stray UDP packet to a stale
+          IP, dropped by the network) — `ctx` is a static array entry so no
+          use-after-free. Fix: defensive `wifi_ready` check at the top of both
+          handlers.
 - [ ] **Unlocked shared state**: camera_manager `s_slot_count`/`s_auto_control`
       (611, 786) and driver-registration table (188); wifi_manager `s_sta_busy`
       TOCTOU (309). Take the lock or document/relax explicitly.

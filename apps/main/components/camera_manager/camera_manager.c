@@ -1042,23 +1042,26 @@ static void poll_timer_cb(void *arg)
     mismatch_action_t action =
         mismatch_step(sl->desired_recording, status, grace_active);
 
-    const camera_driver_t *drv = sl->driver;
-    void *ctx = sl->driver_ctx;
-    unlock();
-
+    /* Dispatch the driver call WHILE the lock is still held.  An earlier
+     * version snapshotted the driver pointer + ctx, unlocked, and then
+     * called through — that opened a TOCTOU window in which
+     * camera_manager_remove_slot could null sl->driver / free driver_ctx
+     * between the snapshot and the call, producing a NULL deref or
+     * use-after-free.  The driver methods (start_recording / stop_recording
+     * on both BLE and WiFi-RC drivers) queue work to their respective task
+     * queues and return quickly, so the global lock is held only briefly.
+     * The mutex is recursive (lock()/unlock() wrap xSemaphoreTakeRecursive)
+     * so any incidental re-entry from the driver is safe. */
     if (action == MISMATCH_ACTION_START) {
         ESP_LOGI(TAG, "slot %d: mismatch — issuing start_recording", slot);
-        drv->start_recording(ctx);
-        lock();
-        s_slots[slot].grace_until_us = grace_deadline();
-        unlock();
+        sl->driver->start_recording(sl->driver_ctx);
+        sl->grace_until_us = grace_deadline();
     } else if (action == MISMATCH_ACTION_STOP) {
         ESP_LOGI(TAG, "slot %d: mismatch — issuing stop_recording", slot);
-        drv->stop_recording(ctx);
-        lock();
-        s_slots[slot].grace_until_us = grace_deadline();
-        unlock();
+        sl->driver->stop_recording(sl->driver_ctx);
+        sl->grace_until_us = grace_deadline();
     }
+    unlock();
 }
 
 static void start_poll_timer(int slot)
