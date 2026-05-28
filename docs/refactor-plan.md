@@ -169,9 +169,17 @@ single mismatch underlay the paired-cameras JSON bug.
 - [ ] **Unlocked shared state**: camera_manager `s_slot_count`/`s_auto_control`
       (611, 786) and driver-registration table (188); wifi_manager `s_sta_busy`
       TOCTOU (309). Take the lock or document/relax explicitly.
-- [ ] **http_server `read_body`** (http_server_internal.h:29) — single `recv`
-      assumes whole body arrived; truncates under TCP segmentation. Loop until
-      `content_len` received (like `pump_body`).
+- [x] **http_server `read_body`** (http_server_internal.h:29) — single `recv`
+      assumed the whole body arrived in one chunk; under TCP segmentation any
+      POST body could truncate. **Resolved** by looping `httpd_req_recv` until
+      `content_len` bytes have been accumulated, matching the established
+      pattern in `api_ota.c:pump_body` (OTA streams) and recovery's
+      `recovery_http.c:read_body_capped`. The `HTTPD_SOCK_ERR_TIMEOUT continue`
+      mirrors `pump_body` and will engage once `recv_wait_timeout` is set
+      (Phase 3 next item). Reachable under WiFi congestion on the ~512-byte
+      CAN config POST (`api_settings.c:251`); the 64–128 B endpoints were
+      unlikely to segment but the fix is in the shared helper so all 12 POST
+      call sites are covered without per-handler changes.
 - [ ] **http_server OTA session statics** (api_ota.c:35) — `s_app_uploaded`/
       `s_ui_uploaded` shared across concurrent workers, no lock. Serialize / reject
       if in progress.

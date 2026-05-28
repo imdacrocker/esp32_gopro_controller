@@ -25,6 +25,13 @@ void api_shutdown_register(httpd_handle_t server);
 /*
  * Read the entire POST body into buf.  buf_size must include room for '\0'.
  * Returns byte count on success, -1 on error (response already sent).
+ *
+ * Loops on httpd_req_recv until content_len bytes have been accumulated:
+ * the underlying socket recv is standard TCP and may legitimately return
+ * fewer bytes than requested when the body is split across segments.  A
+ * single-call read truncated the body silently on segmented POSTs (most
+ * relevant for the ~512 B CAN config payload under WiFi congestion).
+ * Same shape as api_ota.c:pump_body and recovery_http.c:read_body_capped.
  */
 static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
 {
@@ -36,13 +43,24 @@ static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large");
         return -1;
     }
-    int n = httpd_req_recv(req, buf, (size_t)req->content_len);
-    if (n <= 0) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
-        return -1;
+
+    size_t total = 0;
+    while (total < (size_t)req->content_len) {
+        int n = httpd_req_recv(req, buf + total,
+                                (size_t)req->content_len - total);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            /* Transient — httpd's per-recv timeout fired but the connection
+             * may still deliver more bytes.  Mirrors api_ota.c:pump_body. */
+            continue;
+        }
+        if (n <= 0) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+            return -1;
+        }
+        total += (size_t)n;
     }
-    buf[n] = '\0';
-    return n;
+    buf[total] = '\0';
+    return (int)total;
 }
 
 /* Format a 6-byte MAC as "XX:XX:XX:XX:XX:XX" into buf (needs ≥18 bytes). */
