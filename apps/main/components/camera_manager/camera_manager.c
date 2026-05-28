@@ -172,8 +172,23 @@ void camera_manager_init(void)
 
 /* ================================================================
  * Driver registration (§21.4)
- * ================================================================ */
-
+ * ================================================================
+ *
+ * INIT-TIME-ONLY CONTRACT: the write to s_drivers[s_driver_count++] below
+ * is intentionally OUTSIDE the lock.  This is safe ONLY because every
+ * caller (gopro_wifi_rc_init at app_main:109, open_gopro_ble_init at
+ * app_main:114) runs sequentially during app_main before any other task
+ * spawns — at registration time there is no concurrency to race against.
+ * The follow-up "Assign to already-loaded matching slots" loop acquires
+ * the lock because it reads s_slots[] which CAN be concurrently touched
+ * by the time later registrations happen.
+ *
+ * Do NOT call camera_manager_register_driver from a runtime context (UI,
+ * HTTP handler, timer callback, BLE host task).  If a future need to
+ * register drivers at runtime arises, the write at line 188 below must
+ * move inside the lock and s_driver_count must be re-read after each
+ * lock acquisition.
+ */
 esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
                                           camera_model_match_fn   matches,
                                           camera_ctx_create_fn    create_ctx,
@@ -184,6 +199,16 @@ esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
         ESP_LOGE(TAG, "register_driver: table full");
         return ESP_ERR_NO_MEM;
     }
+
+    /* Enforce the "Always non-NULL" vtable contract documented at
+     * camera_manager.h:14.  Several call sites (e.g. get_slot_info at
+     * camera_manager.c:663, poll_timer_cb at camera_manager.c:1037)
+     * dereference these function pointers under only an `sl->driver != NULL`
+     * guard, on the premise that a registered driver has them populated.
+     * Catch contract violations at boot rather than crashing on first poll. */
+    assert(driver->start_recording);
+    assert(driver->stop_recording);
+    assert(driver->get_recording_status);
 
     s_drivers[s_driver_count++] = (driver_reg_t){
         .driver      = driver,
@@ -612,6 +637,17 @@ int camera_manager_get_slot_count(void)
     return s_slot_count;
 }
 
+int camera_manager_get_configured_count(void)
+{
+    int n = 0;
+    lock();
+    for (int i = 0; i < s_slot_count; i++) {
+        if (s_slots[i].is_configured) n++;
+    }
+    unlock();
+    return n;
+}
+
 esp_err_t camera_manager_get_slot_info(int slot, camera_slot_info_t *out)
 {
     if (!out || !slot_valid(slot)) return ESP_ERR_INVALID_ARG;
@@ -909,19 +945,32 @@ esp_err_t camera_manager_remove_slot(int slot)
 
 esp_err_t camera_manager_reorder_slots(const int *new_order, int count)
 {
-    if (!new_order || count <= 0 || count > CAMERA_MAX_SLOTS) {
+    /* Strict-permutation contract: `count` must equal s_slot_count and
+     * `new_order` must contain each index in [0, s_slot_count) exactly once.
+     *
+     * Rejecting non-permutations up-front prevents two silent-data-loss
+     * paths that the previous loose validation allowed:
+     *
+     *   - Truncation (count < s_slot_count): tail slots at indices
+     *     [count, s_slot_count) were left untouched in RAM and NVS while
+     *     s_slot_count stayed unchanged, and indices [0, count) were
+     *     overwritten — so a "shrink the list" call would lose old slot 0
+     *     entirely and duplicate the tail across two slots.
+     *
+     *   - Duplicates in new_order: e.g. order=[0,0,0] would copy slot 0
+     *     into every position and overwrite slots 1 and 2 in NVS.
+     *
+     * For explicit removal, use camera_manager_remove_slot instead. */
+    lock();
+    if (!reorder_is_valid_permutation(new_order, count, s_slot_count)) {
+        unlock();
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Validate indices and check connectivity. */
-    lock();
+    /* Reject if any source slot is currently connected — reordering a live
+     * driver context out from under itself would orphan its state. */
     for (int i = 0; i < count; i++) {
-        int src = new_order[i];
-        if (src < 0 || src >= s_slot_count) {
-            unlock();
-            return ESP_ERR_INVALID_ARG;
-        }
-        camera_slot_t *sl = &s_slots[src];
+        camera_slot_t *sl = &s_slots[new_order[i]];
         if (sl->wifi_status == WIFI_CAM_READY ||
             sl->ble_status  == CAM_BLE_CONNECTED) {
             unlock();
@@ -1018,23 +1067,26 @@ static void poll_timer_cb(void *arg)
     mismatch_action_t action =
         mismatch_step(sl->desired_recording, status, grace_active);
 
-    const camera_driver_t *drv = sl->driver;
-    void *ctx = sl->driver_ctx;
-    unlock();
-
+    /* Dispatch the driver call WHILE the lock is still held.  An earlier
+     * version snapshotted the driver pointer + ctx, unlocked, and then
+     * called through — that opened a TOCTOU window in which
+     * camera_manager_remove_slot could null sl->driver / free driver_ctx
+     * between the snapshot and the call, producing a NULL deref or
+     * use-after-free.  The driver methods (start_recording / stop_recording
+     * on both BLE and WiFi-RC drivers) queue work to their respective task
+     * queues and return quickly, so the global lock is held only briefly.
+     * The mutex is recursive (lock()/unlock() wrap xSemaphoreTakeRecursive)
+     * so any incidental re-entry from the driver is safe. */
     if (action == MISMATCH_ACTION_START) {
         ESP_LOGI(TAG, "slot %d: mismatch — issuing start_recording", slot);
-        drv->start_recording(ctx);
-        lock();
-        s_slots[slot].grace_until_us = grace_deadline();
-        unlock();
+        sl->driver->start_recording(sl->driver_ctx);
+        sl->grace_until_us = grace_deadline();
     } else if (action == MISMATCH_ACTION_STOP) {
         ESP_LOGI(TAG, "slot %d: mismatch — issuing stop_recording", slot);
-        drv->stop_recording(ctx);
-        lock();
-        s_slots[slot].grace_until_us = grace_deadline();
-        unlock();
+        sl->driver->stop_recording(sl->driver_ctx);
+        sl->grace_until_us = grace_deadline();
     }
+    unlock();
 }
 
 static void start_poll_timer(int slot)

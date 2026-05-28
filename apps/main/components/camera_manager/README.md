@@ -240,9 +240,12 @@ Serialize the slot to `cam_N/camera`. Returns `ESP_ERR_INVALID_ARG` if `model ==
 uint32_t           camera_manager_get_last_ip(int slot);
 camera_model_t     camera_manager_get_model(int slot);
 int                camera_manager_get_slot_count(void);
+int                camera_manager_get_configured_count(void);
 esp_err_t          camera_manager_get_slot_info(int slot, camera_slot_info_t *out);
 camera_can_state_t camera_manager_get_slot_can_state(int slot);
 ```
+
+`get_slot_count` is an **exclusive iteration bound** (highest configured slot index + 1), not a camera count: a partial NVS load can leave unconfigured gaps below it, so callers iterating slots must skip entries where `is_configured` is false. Use `get_configured_count` when you need the actual number of cameras.
 
 `get_slot_info` copies all display-relevant state into `camera_slot_info_t` (used by HTTP handlers). `is_recording` is derived inline: `wifi_status == READY && driver->get_recording_status() == ACTIVE`.
 

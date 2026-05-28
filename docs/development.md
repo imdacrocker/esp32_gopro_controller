@@ -67,6 +67,24 @@ After any `sdkconfig.defaults` change, delete the live `sdkconfig` so the new de
 
 ---
 
+## Host-side unit tests
+
+Pure-logic sources that don't include ESP-IDF headers are unit-tested on the
+development host — no board or IDF toolchain required, just CMake and a C
+compiler (Unity is fetched and pinned by CMake at configure time). See the test
+strategy in [`design/camera-manager.md`](design/camera-manager.md) §23.
+
+```bash
+cmake -S tests/host -B tests/host/build
+cmake --build tests/host/build
+ctest --test-dir tests/host/build --output-on-failure
+```
+
+CI (`.github/workflows/ci.yml`) runs these on every push/PR alongside an
+`idf.py build` of both apps.
+
+---
+
 ## Web UI development
 
 Two separate UIs, one per app:

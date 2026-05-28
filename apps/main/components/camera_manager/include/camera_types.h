@@ -7,6 +7,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Maximum number of camera slots the manager will track.  Lives in this
+ * pure-logic header so pure-logic compilation units (mismatch.c,
+ * reorder_validate.c) and their host tests can use it without pulling
+ * in ESP-IDF headers. */
+#define CAMERA_MAX_SLOTS 4
+
 /* ---- Model identification (§5.1) ---- */
 typedef enum {
     CAMERA_MODEL_UNKNOWN            = 0,
@@ -137,3 +143,14 @@ typedef enum {
 mismatch_action_t mismatch_step(desired_recording_t       desired,
                                  camera_recording_status_t actual,
                                  bool                      grace_period_active);
+
+/*
+ * Pure reorder-permutation validator — returns true iff `order` is a valid
+ * permutation of [0, domain_size): exactly `domain_size` entries, each
+ * index in [0, domain_size) appearing exactly once.  `count` must equal
+ * `domain_size` (truncation/extension are rejected).  Used by
+ * camera_manager_reorder_slots to guard against malformed inputs that
+ * would otherwise duplicate or drop cameras.  No side effects, no
+ * platform dependencies (§23.2).
+ */
+bool reorder_is_valid_permutation(const int *order, int count, int domain_size);

@@ -189,25 +189,29 @@ static void third_party_timeout_cb(void *arg)
 {
     gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
 
-    if (!ctx->third_party_pending || ctx->conn_handle == GOPRO_CONN_NONE) {
+    if (ctx->conn_handle == GOPRO_CONN_NONE) {
+        return;
+    }
+    /* Atomic claim: if the response handler beat us to it, exchange returns
+     * false and we bail without calling proceed_after_third_party. */
+    if (!atomic_exchange(&ctx->third_party_pending, false)) {
         return;
     }
     ESP_LOGW(TAG, "slot %d: SetThirdPartyClient timed out — proceeding anyway",
              ctx->slot);
-    ctx->third_party_pending = false;
     proceed_after_third_party(ctx);
 }
 
 void gopro_readiness_handle_third_party_acked(gopro_ble_ctx_t *ctx, uint8_t status)
 {
-    if (!ctx->third_party_pending) {
+    if (!atomic_exchange(&ctx->third_party_pending, false)) {
+        /* Timeout already fired and proceeded — drop this late response. */
         return;
     }
 
     if (ctx->third_party_timer) {
         esp_timer_stop(ctx->third_party_timer);
     }
-    ctx->third_party_pending = false;
 
     if (status == GOPRO_RESP_STATUS_OK) {
         ESP_LOGI(TAG, "slot %d: SetThirdPartyClient acked", ctx->slot);
@@ -237,12 +241,12 @@ static void send_third_party_client_with_wait(gopro_ble_ctx_t *ctx)
         }
     }
 
-    ctx->third_party_pending = true;
+    atomic_store(&ctx->third_party_pending, true);
     int rc = gopro_control_send_third_party_client(ctx);
     if (rc != 0) {
         ESP_LOGW(TAG, "slot %d: SetThirdPartyClient send failed — skipping wait",
                  ctx->slot);
-        ctx->third_party_pending = false;
+        atomic_store(&ctx->third_party_pending, false);
         proceed_after_third_party(ctx);
         return;
     }
@@ -256,25 +260,28 @@ static void cam_ctrl_timeout_cb(void *arg)
 {
     gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
 
-    if (!ctx->cam_ctrl_pending || ctx->conn_handle == GOPRO_CONN_NONE) {
+    if (ctx->conn_handle == GOPRO_CONN_NONE) {
+        return;
+    }
+    /* See third_party_timeout_cb for the atomic-exchange claim rationale. */
+    if (!atomic_exchange(&ctx->cam_ctrl_pending, false)) {
         return;
     }
     ESP_LOGW(TAG, "slot %d: SetCameraControlStatus timed out — proceeding anyway",
              ctx->slot);
-    ctx->cam_ctrl_pending = false;
     complete_connection_sequence(ctx);
 }
 
 void gopro_readiness_handle_cam_ctrl_acked(gopro_ble_ctx_t *ctx, uint8_t result)
 {
-    if (!ctx->cam_ctrl_pending) {
+    if (!atomic_exchange(&ctx->cam_ctrl_pending, false)) {
+        /* Timeout already fired and proceeded — drop this late response. */
         return;
     }
 
     if (ctx->cam_ctrl_timer) {
         esp_timer_stop(ctx->cam_ctrl_timer);
     }
-    ctx->cam_ctrl_pending = false;
 
     if (result == GOPRO_RESP_GENERIC_SUCCESS) {
         ESP_LOGI(TAG, "slot %d: SetCameraControlStatus → CAMERA_EXTERNAL_CONTROL",
@@ -305,12 +312,12 @@ static void send_set_cam_ctrl(gopro_ble_ctx_t *ctx)
         }
     }
 
-    ctx->cam_ctrl_pending = true;
+    atomic_store(&ctx->cam_ctrl_pending, true);
     int rc = gopro_control_send_set_cam_ctrl(ctx);
     if (rc != 0) {
         ESP_LOGW(TAG, "slot %d: SetCameraControlStatus send failed — skipping handshake",
                  ctx->slot);
-        ctx->cam_ctrl_pending = false;
+        atomic_store(&ctx->cam_ctrl_pending, false);
         complete_connection_sequence(ctx);
         return;
     }
@@ -394,7 +401,7 @@ void gopro_readiness_on_response(gopro_ble_ctx_t *ctx,
 void gopro_readiness_on_response(gopro_ble_ctx_t *ctx,
                                   const uint8_t *data, uint16_t len)
 {
-    if (!ctx->readiness_polling) {
+    if (!atomic_load(&ctx->readiness_polling)) {
         return;
     }
 
@@ -406,11 +413,15 @@ void gopro_readiness_on_response(gopro_ble_ctx_t *ctx,
         ESP_LOGW(TAG, "slot %d: HwInfo status=0x%02x, retry %d/%d",
                  ctx->slot, data[GOPRO_RESP_STATUS_IDX],
                  ctx->readiness_retry_count, GOPRO_READINESS_RETRY_MAX);
-        return;  /* timer will fire and retry */
+        return;  /* timer will fire and retry — flag stays true */
     }
 
-    /* Success — stop poll timer before any further work. */
-    ctx->readiness_polling = false;
+    /* Success — atomically claim completion.  If the timer task's
+     * on_readiness_timer just hit its retry limit and got there first,
+     * exchange returns false and we drop this late response. */
+    if (!atomic_exchange(&ctx->readiness_polling, false)) {
+        return;
+    }
     if (ctx->readiness_timer) {
         esp_timer_stop(ctx->readiness_timer);
     }
@@ -427,14 +438,19 @@ static void on_readiness_timer(void *arg)
 {
     gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
 
-    if (!ctx->readiness_polling || ctx->conn_handle == GOPRO_CONN_NONE) {
+    if (!atomic_load(&ctx->readiness_polling) ||
+        ctx->conn_handle == GOPRO_CONN_NONE) {
         return;
     }
 
     ctx->readiness_retry_count++;
     if (ctx->readiness_retry_count > GOPRO_READINESS_RETRY_MAX) {
+        /* Final-fail path is a completion claim — atomic_exchange so a
+         * concurrent success response doesn't double-complete. */
+        if (!atomic_exchange(&ctx->readiness_polling, false)) {
+            return;
+        }
         ESP_LOGW(TAG, "slot %d: readiness timeout, disconnecting", ctx->slot);
-        ctx->readiness_polling = false;
         /* Fail the pair attempt with a specific cause before the disconnect
          * callback overwrites it with the generic DISCONNECTED reason. */
         pair_attempt_fail(PAIR_ERROR_HWINFO_TIMEOUT,
@@ -443,6 +459,8 @@ static void on_readiness_timer(void *arg)
         return;
     }
 
+    /* Retry path is NOT a completion claim — leave readiness_polling true
+     * and just kick another GetHardwareInfo write + re-arm. */
     ESP_LOGD(TAG, "slot %d: readiness retry %d", ctx->slot,
              ctx->readiness_retry_count);
 
@@ -458,7 +476,7 @@ static void on_readiness_timer(void *arg)
 void gopro_readiness_start(gopro_ble_ctx_t *ctx)
 {
     ctx->readiness_retry_count = 0;
-    ctx->readiness_polling     = true;
+    atomic_store(&ctx->readiness_polling, true);
 
     if (!ctx->readiness_timer) {
         esp_timer_create_args_t args = {
@@ -480,19 +498,19 @@ void gopro_readiness_start(gopro_ble_ctx_t *ctx)
 
 void gopro_readiness_cancel(gopro_ble_ctx_t *ctx)
 {
-    ctx->readiness_polling = false;
+    atomic_store(&ctx->readiness_polling, false);
     if (ctx->readiness_timer) {
         esp_timer_stop(ctx->readiness_timer);
         esp_timer_delete(ctx->readiness_timer);
         ctx->readiness_timer = NULL;
     }
-    ctx->cam_ctrl_pending = false;
+    atomic_store(&ctx->cam_ctrl_pending, false);
     if (ctx->cam_ctrl_timer) {
         esp_timer_stop(ctx->cam_ctrl_timer);
         esp_timer_delete(ctx->cam_ctrl_timer);
         ctx->cam_ctrl_timer = NULL;
     }
-    ctx->third_party_pending = false;
+    atomic_store(&ctx->third_party_pending, false);
     if (ctx->third_party_timer) {
         esp_timer_stop(ctx->third_party_timer);
         esp_timer_delete(ctx->third_party_timer);

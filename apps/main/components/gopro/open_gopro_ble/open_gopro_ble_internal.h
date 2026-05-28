@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_timer.h"
@@ -39,19 +40,28 @@ typedef struct {
     gopro_gatt_handles_t gatt;
     uint16_t             negotiated_mtu;
 
-    /* Readiness poll (GetHardwareInfo until status=0) */
-    bool               readiness_polling;
+    /* Readiness poll (GetHardwareInfo until status=0).
+     *
+     * readiness_polling, cam_ctrl_pending, and third_party_pending below are
+     * atomic_bool because each is read+cleared by two tasks racing each other:
+     * the response handler runs on the NimBLE host task (core 1) when a notify
+     * arrives, while the corresponding timeout callback runs on the esp_timer
+     * task (core 0).  Without atomic exchange both can pass the gate and both
+     * call the completion path, producing duplicate state transitions.
+     * Callers use atomic_exchange(&flag, false) at the claim point — exactly
+     * one caller observes a true→false transition and proceeds. */
+    atomic_bool        readiness_polling;
     uint8_t            readiness_retry_count;
     esp_timer_handle_t readiness_timer;
 
     /* SetCameraControlStatus(EXTERNAL) handshake — arms after readiness,
      * gates the rest of the connection sequence on the response or timeout. */
-    bool               cam_ctrl_pending;
+    atomic_bool        cam_ctrl_pending;
     esp_timer_handle_t cam_ctrl_timer;
 
     /* SetThirdPartyClient handshake — arms before cam_ctrl, gates the rest
      * of the sequence on a TLV response (cmd 0x50) or timeout. */
-    bool               third_party_pending;
+    atomic_bool        third_party_pending;
     esp_timer_handle_t third_party_timer;
 
     /* SetDateTime deferred-send flag — set when readiness completes but UTC

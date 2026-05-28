@@ -58,7 +58,14 @@ void rc_arm_keepalive_timer(gopro_wifi_rc_ctx_t *ctx)
 void rc_disarm_keepalive_timer(gopro_wifi_rc_ctx_t *ctx)
 {
     if (ctx->keepalive_timer) {
+        /* stop() returns synchronously but does NOT wait for an already-
+         * dispatched callback to drain — the callback could still post
+         * RC_CMD_KEEPALIVE_TICK to the work queue against a torn-down slot.
+         * delete() (on ESP_TIMER_TASK dispatch) blocks until any pending
+         * callback finishes, so once we return no stale tick can land. */
         esp_timer_stop(ctx->keepalive_timer);
+        esp_timer_delete(ctx->keepalive_timer);
+        ctx->keepalive_timer = NULL;
     }
 }
 
@@ -90,7 +97,10 @@ void rc_arm_wol_retry_timer(gopro_wifi_rc_ctx_t *ctx)
 void rc_disarm_wol_retry_timer(gopro_wifi_rc_ctx_t *ctx)
 {
     if (ctx->wol_retry_timer) {
+        /* See rc_disarm_keepalive_timer for the stop+delete rationale. */
         esp_timer_stop(ctx->wol_retry_timer);
+        esp_timer_delete(ctx->wol_retry_timer);
+        ctx->wol_retry_timer = NULL;
     }
 }
 
@@ -162,6 +172,11 @@ void rc_handle_station_disconnected(const uint8_t mac[6])
     rc_disarm_wol_retry_timer(ctx);
     ctx->wifi_ready       = false;
     ctx->recording_status = CAMERA_RECORDING_UNKNOWN;
+    /* Clear last_ip so a subsequent UDP datagram for that IP (e.g. the
+     * SoftAP reassigned it to a different client) doesn't get attributed
+     * to this slot by find_slot_by_ip in udp.c.  Re-populated on the next
+     * station-associated / DHCP event. */
+    ctx->last_ip          = 0;
     /* identify_attempted is intentionally NOT cleared — once a probe has run
      * this firmware session, the slot's model is settled (HERO4_* on success,
      * HERO_LEGACY_RC on failure).  Re-running the probe on every reconnect
@@ -199,12 +214,19 @@ void rc_handle_promote(int slot)
 
     if (!ctx->identify_attempted && ctx->parsed_model_name[0] != '\0') {
         ctx->identify_attempted = true;
-        ESP_LOGI(TAG, "slot %d: cv-identified at promote — model='%s' fw='%s'",
-                 slot, ctx->parsed_model_name, ctx->parsed_firmware);
         camera_model_t mapped = gopro_model_from_name(ctx->parsed_model_name);
-        camera_manager_set_model(slot, mapped);
-        camera_manager_save_slot(slot);
-        if (active_pair) pair_attempt_set_model(mapped);
+        if (!gopro_model_uses_rc_emulation(mapped)) {
+            /* See clamp rationale in rc_handle_apply_cv comment block. */
+            ESP_LOGW(TAG, "slot %d: cv-identified BLE-only model '%s' (fw='%s') "
+                          "on RC slot — keeping LEGACY_RC",
+                     slot, ctx->parsed_model_name, ctx->parsed_firmware);
+        } else {
+            ESP_LOGI(TAG, "slot %d: cv-identified at promote — model='%s' fw='%s'",
+                     slot, ctx->parsed_model_name, ctx->parsed_firmware);
+            camera_manager_set_model(slot, mapped);
+            camera_manager_save_slot(slot);
+            if (active_pair) pair_attempt_set_model(mapped);
+        }
     } else if (!ctx->identify_attempted) {
         /* cv hasn't arrived yet — kick another one off; keepalive_tick will
          * keep retrying every 3 s until the camera answers.  No HTTP probe. */
@@ -236,6 +258,14 @@ void rc_handle_promote(int slot)
  * name field is intentionally left blank — there is no known WiFi RC
  * protocol path to retrieve the user-set camera name, and the model_name
  * string carried by `cv` is the model identity, not a user-set name.
+ *
+ * Defensive clamp: /api/rc/discovered is filtered MAC-only (GoPro OUI), so a
+ * Hero6/7/8 incidentally on the SoftAP can be picked from the Hero3/Hero4 RC
+ * list.  Stamping a BLE-only model (uses_ble_control) onto an RC slot would
+ * orphan it on reboot — the BLE driver matches it via uses_ble_control and
+ * claims the slot, but the camera has no BLE bond, so the slot is bricked.
+ * In that case the cv-derived model is logged but NOT applied; the slot
+ * stays at its current LEGACY_RC model and RC control keeps working.
  */
 void rc_handle_apply_cv(int slot)
 {
@@ -244,6 +274,18 @@ void rc_handle_apply_cv(int slot)
     if (ctx->parsed_model_name[0] == '\0') return;  /* nothing to apply */
 
     camera_model_t mapped = gopro_model_from_name(ctx->parsed_model_name);
+
+    if (!gopro_model_uses_rc_emulation(mapped)) {
+        ESP_LOGW(TAG, "slot %d: cv reports BLE-only model '%s' (fw='%s') on an "
+                      "RC slot — keeping LEGACY_RC",
+                 slot, ctx->parsed_model_name, ctx->parsed_firmware);
+        ctx->identify_attempted = true;  /* stop the 3 s cv retries */
+        if (pair_attempt_addr_matches(ctx->mac)) {
+            pair_attempt_advance(PAIR_ATTEMPT_SUCCESS);
+        }
+        return;
+    }
+
     ESP_LOGI(TAG, "slot %d: applying cv data — model='%s' (enum=%d) fw='%s'",
              slot, ctx->parsed_model_name, (int)mapped, ctx->parsed_firmware);
 

@@ -31,6 +31,18 @@ static const char *TAG = "api_ota";
 /* ---- session state ----------------------------------------------------- *
  * "Successful" = upload completed OR was SHA-skipped. Either gates /commit.
  * Cleared on app boot (statics start at 0).
+ *
+ * No mutex: ESP-IDF's httpd is a single-task select-based server (one
+ * worker task, dispatches one handler at a time), so handler_upload_app /
+ * handler_upload_ui / handler_commit can never run concurrently against
+ * each other or against themselves.  Any client retry while a previous
+ * upload is mid-stream just queues at the TCP layer; the second handler
+ * invocation starts after the first returns.  The flags below are
+ * therefore serialised by httpd's worker, not by a mutex.
+ *
+ * If the worker model ever changes (e.g. ESP-IDF gains a thread-pooled
+ * httpd, or a second httpd_handle_t is started in the same process),
+ * these statics must move under a mutex or become atomic.
  */
 static bool s_app_uploaded;
 static bool s_ui_uploaded;

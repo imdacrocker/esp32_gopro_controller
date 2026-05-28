@@ -30,9 +30,14 @@
  * Concurrency: BLE reads/writes are issued from this task but their
  * callbacks fire on the NimBLE host task; we bridge via a single
  * binary-semaphore + scratch buffer.  Only one pair-complete may run at a
- * time (guarded by s_busy).
+ * time (guarded by s_busy under s_gate_lock).  Callers arriving while a
+ * task is running are queued via s_pending[slot]; the dying task drains
+ * the queue before exiting, so deferred slots eventually run rather than
+ * being dropped.
  */
 
+#include <stdatomic.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -71,18 +76,50 @@ static const char *TAG = "gopro_ble/pc";
  * doesn't support 178) the delay is just wasted time, not harmful. */
 #define PC_BAND_SETTLE_MS        5000
 
-/* ---- BLE-read bridge ---------------------------------------------------- */
+/* ---- BLE-read bridge ---------------------------------------------------- *
+ *
+ * Bridges ble_gattc_read (asynchronous, callback on NimBLE host task) to the
+ * synchronous pair_complete_task with a semaphore + scratch buffer.  Single-
+ * flight by design (pair_complete is gated to one task at a time), so a
+ * single set of globals suffices.
+ *
+ * Generation tag: NimBLE has no public "cancel a pending read" API.  If our
+ * timeout elapses before the callback fires (e.g. transient RF loss), the
+ * BLE-stack-side read is still in flight — the callback WILL eventually run.
+ * Without a tag, that late callback would overwrite our globals and signal
+ * the semaphore, poisoning the next read_handle_blocking call (which would
+ * then read stale data from the previous read as if it were its own result).
+ *
+ * Each call to read_handle_blocking atomically increments s_read_gen and
+ * passes the post-increment value through ble_gattc_read's cb_arg.  The
+ * callback compares its tag against the current generation; on mismatch
+ * (i.e. it's the callback for a previous, now-abandoned read) it drops
+ * itself unconditionally — no write to globals, no signal.  Combined with
+ * the defensive drain at entry, this makes the bridge correct under all
+ * timing interleavings, including cross-task interleaving introduced by
+ * the pair_complete queue.
+ */
 
-static SemaphoreHandle_t s_read_done;
-static int               s_read_status;   /* 0 = OK, !=0 = ATT status */
-static char              s_read_buf[33];
-static uint16_t          s_read_len;
+static SemaphoreHandle_t        s_read_done;
+static int                      s_read_status;   /* 0 = OK, !=0 = ATT status */
+static char                     s_read_buf[33];
+static uint16_t                 s_read_len;
+static atomic_uint_least32_t    s_read_gen;      /* bumped per read */
 
 static int on_ble_read(uint16_t conn_handle,
                         const struct ble_gatt_error *error,
                         struct ble_gatt_attr *attr, void *arg)
 {
-    (void)conn_handle; (void)arg;
+    (void)conn_handle;
+
+    uint32_t my_gen  = (uint32_t)(uintptr_t)arg;
+    uint32_t cur_gen = (uint32_t)atomic_load(&s_read_gen);
+    if (my_gen != cur_gen) {
+        ESP_LOGW(TAG, "stale BLE-read callback dropped (gen=%u, current=%u)",
+                 (unsigned)my_gen, (unsigned)cur_gen);
+        return 0;
+    }
+
     s_read_status = error->status;
     if (s_read_status == 0 && attr && attr->om) {
         uint16_t len  = OS_MBUF_PKTLEN(attr->om);
@@ -101,12 +138,26 @@ static int on_ble_read(uint16_t conn_handle,
 static esp_err_t read_handle_blocking(uint16_t conn_handle, uint16_t att_handle,
                                        char *out, size_t out_sz, const char *name)
 {
-    int rc = ble_gattc_read(conn_handle, att_handle, on_ble_read, NULL);
+    /* Bump generation atomically.  Any in-flight callback from a previous
+     * read carries an older tag and will drop itself in on_ble_read. */
+    uint32_t my_gen = (uint32_t)(atomic_fetch_add(&s_read_gen, 1) + 1);
+
+    /* Defensive drain: removes any signal a stale callback raised between
+     * our last cycle and the gen bump above.  With the gen tag in place a
+     * stale signal can no longer happen (the callback short-circuits before
+     * touching the semaphore) but the drain is essentially free and closes
+     * the window for any future code path that signals without tagging. */
+    (void)xSemaphoreTake(s_read_done, 0);
+
+    int rc = ble_gattc_read(conn_handle, att_handle, on_ble_read,
+                             (void *)(uintptr_t)my_gen);
     if (rc != 0) {
         ESP_LOGE(TAG, "%s read enqueue rc=%d", name, rc);
         return ESP_FAIL;
     }
     if (xSemaphoreTake(s_read_done, pdMS_TO_TICKS(PC_READ_TIMEOUT_MS)) != pdTRUE) {
+        /* The pending callback (if it ever fires) will see its tag mismatch
+         * the next read's tag and drop itself.  Nothing to clean up here. */
         ESP_LOGE(TAG, "%s read timed out", name);
         return ESP_ERR_TIMEOUT;
     }
@@ -153,12 +204,66 @@ static void urlencode(const char *in, char *out, size_t out_sz)
 
 /* ---- Orchestration task ------------------------------------------------- */
 
-static bool s_busy;
+/*
+ * Single-flight gate.  Only one pair_complete_task may run at a time — the
+ * STA-join step would otherwise contend on the single WiFi radio, and many
+ * pieces of state in this module (s_read_done bridge, status.c band-query
+ * bridge) are not slot-keyed for the same reason.
+ *
+ * Cross-slot serialisation is enforced by s_gate_lock + s_busy.  If a second
+ * caller arrives while a task is running, we mark s_pending[slot] = true and
+ * return; when the running task ends, release_busy_and_drain() spawns the
+ * deferred slot's task before the dying task exits.  This replaces an
+ * earlier "drop on the floor with a warning" path that left the second
+ * camera permanently half-paired on first-pair of two cameras booted
+ * together.
+ *
+ * The lock is acquired by both readiness.c (NimBLE host task) and
+ * release_busy_and_drain (the dying pair_complete_task on its own FreeRTOS
+ * task), so it's not optional even though the original single-caller code
+ * could get away without it.
+ */
+static bool             s_busy;
+static SemaphoreHandle_t s_gate_lock;
+static bool             s_pending[CAMERA_MAX_SLOTS];
 
 typedef struct {
     int      slot;
     uint16_t conn_handle;
 } pc_args_t;
+
+/*
+ * Called from every exit point of pair_complete_task (and from the spawn-
+ * failure cleanup in gopro_pair_complete_run) in place of the bare
+ * s_busy = false write.  Clears the busy flag and, if a slot was deferred
+ * while we were running, spawns its pair_complete next.
+ */
+static void release_busy_and_drain(void)
+{
+    int drain_slot = -1;
+
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    s_busy = false;
+    for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
+        if (s_pending[i]) {
+            s_pending[i] = false;
+            drain_slot = i;
+            break;
+        }
+    }
+    xSemaphoreGive(s_gate_lock);
+
+    if (drain_slot < 0) return;
+
+    gopro_ble_ctx_t *ctx = gopro_ctx_by_slot(drain_slot);
+    if (!ctx || ctx->conn_handle == GOPRO_CONN_NONE) {
+        ESP_LOGW(TAG, "slot %d: deferred pair-complete dropped (link gone "
+                      "before its turn)", drain_slot);
+        return;
+    }
+    ESP_LOGI(TAG, "slot %d: draining deferred pair-complete", drain_slot);
+    gopro_pair_complete_run(ctx);
+}
 
 static void fail_and_cleanup(int slot, uint16_t conn_handle, const char *reason)
 {
@@ -192,13 +297,13 @@ static void pair_complete_task(void *arg)
     gopro_ble_ctx_t *ctx = gopro_ctx_by_slot(slot);
     if (!ctx || ctx->conn_handle != conn_handle) {
         ESP_LOGW(TAG, "slot %d: BLE link gone before pair-complete started", slot);
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
     if (ctx->gatt.wifi_ap_ssid == 0 || ctx->gatt.wifi_ap_password == 0) {
         fail_and_cleanup(slot, conn_handle, "missing WiFi AP creds handles");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -208,7 +313,7 @@ static void pair_complete_task(void *arg)
     if (read_handle_blocking(conn_handle, ctx->gatt.wifi_ap_ssid,
                               ssid, sizeof(ssid), "SSID") != ESP_OK) {
         fail_and_cleanup(slot, conn_handle, "SSID read failed");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -219,7 +324,7 @@ static void pair_complete_task(void *arg)
     if (read_handle_blocking(conn_handle, ctx->gatt.wifi_ap_password,
                               password, sizeof(password), "password") != ESP_OK) {
         fail_and_cleanup(slot, conn_handle, "password read failed");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -246,7 +351,7 @@ static void pair_complete_task(void *arg)
                       "and re-pair", slot);
         fail_and_cleanup(slot, conn_handle,
                          "Camera on 5 GHz; set Wi-Fi Band to 2.4 GHz, re-pair");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -292,7 +397,7 @@ static void pair_complete_task(void *arg)
                        "check Hero7 Preferences -> Connections -> Wi-Fi Band is 2.4 GHz",
                  slot, PC_STA_RETRY_COUNT, (int)we);
         fail_and_cleanup(slot, conn_handle, "STA join failed (check Wi-Fi band on camera)");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -341,7 +446,7 @@ static void pair_complete_task(void *arg)
         ESP_LOGE(TAG, "slot %d: pair-complete HTTP failed err=%s status=%d",
                  slot, esp_err_to_name(herr), status);
         fail_and_cleanup(slot, conn_handle, "wireless/pair/complete HTTP failed");
-        s_busy = false;
+        release_busy_and_drain();
         vTaskDelete(NULL);
         return;
     }
@@ -356,7 +461,7 @@ static void pair_complete_task(void *arg)
     pair_attempt_advance(PAIR_ATTEMPT_SUCCESS);
 
     ESP_LOGI(TAG, "slot %d: pair-complete orchestration done", slot);
-    s_busy = false;
+    release_busy_and_drain();
     vTaskDelete(NULL);
 }
 
@@ -368,31 +473,54 @@ void gopro_pair_complete_run(gopro_ble_ctx_t *ctx)
         ESP_LOGW(TAG, "pair_complete_run called without an active link");
         return;
     }
-    if (s_busy) {
-        ESP_LOGW(TAG, "slot %d: pair-complete already in progress, ignoring",
-                 ctx->slot);
-        return;
+
+    /* Lazy-init.  The very first call always lands on the NimBLE host task
+     * (readiness completion of the first slot), and at that point no other
+     * thread can be entering this function — so initialising here without
+     * its own lock is safe.  Subsequent calls observe the initialised
+     * primitives and use s_gate_lock for mutual exclusion. */
+    if (s_gate_lock == NULL) {
+        s_gate_lock = xSemaphoreCreateMutex();
+        if (s_gate_lock == NULL) {
+            ESP_LOGE(TAG, "slot %d: gate lock alloc failed", ctx->slot);
+            fail_and_cleanup(ctx->slot, ctx->conn_handle, "gate lock OOM");
+            return;
+        }
     }
     if (s_read_done == NULL) {
         s_read_done = xSemaphoreCreateBinary();
     }
 
+    /* Atomic test-and-set on s_busy under the lock.  If another task is
+     * already running, defer this slot's pair-complete; the running task
+     * will drain s_pending[] on exit and spawn the next one. */
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    if (s_busy) {
+        s_pending[ctx->slot] = true;
+        xSemaphoreGive(s_gate_lock);
+        ESP_LOGI(TAG, "slot %d: pair-complete deferred (another in flight)",
+                 ctx->slot);
+        return;
+    }
+    s_busy = true;
+    xSemaphoreGive(s_gate_lock);
+
     pc_args_t *args = malloc(sizeof(*args));
     if (!args) {
         ESP_LOGE(TAG, "slot %d: pair-complete malloc failed", ctx->slot);
+        release_busy_and_drain();
         fail_and_cleanup(ctx->slot, ctx->conn_handle, "OOM");
         return;
     }
     args->slot        = ctx->slot;
     args->conn_handle = ctx->conn_handle;
 
-    s_busy = true;
     BaseType_t ok = xTaskCreate(pair_complete_task, "gopro_pc", 5120,
                                  args, tskIDLE_PRIORITY + 4, NULL);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "slot %d: pair-complete task create failed", ctx->slot);
         free(args);
-        s_busy = false;
+        release_busy_and_drain();
         fail_and_cleanup(ctx->slot, ctx->conn_handle, "task create failed");
     }
 }

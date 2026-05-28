@@ -159,6 +159,7 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
     size_t pos = 0;
     buf[pos++] = '[';
 
+    bool first = true;
     for (int i = 0; i < count; i++) {
         camera_slot_info_t info;
         if (camera_manager_get_slot_info(i, &info) != ESP_OK) continue;
@@ -188,7 +189,7 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
             "\"ip\":\"%s\","
             "\"status\":\"%s\""
             "}",
-            (i == 0) ? "" : ",",
+            first ? "" : ",",
             external, external,
             info.name,
             model_name_str(info.model),
@@ -202,6 +203,7 @@ static esp_err_t handler_paired_cameras(httpd_req_t *req)
             break;
         }
         pos += (size_t)n;
+        first = false;
     }
 
     if (pos < BUF_SIZE - 1) buf[pos++] = ']';
@@ -248,7 +250,7 @@ static esp_err_t handler_shutter(httpd_req_t *req)
         ESP_LOGI(TAG, "shutter %s → Cam %d", record ? "start" : "stop", external);
     } else {
         camera_manager_set_desired_recording_all(intent);
-        dispatched = camera_manager_get_slot_count();
+        dispatched = camera_manager_get_configured_count();
         ESP_LOGI(TAG, "shutter %s → all (%d slots)",
                  record ? "start" : "stop", dispatched);
     }

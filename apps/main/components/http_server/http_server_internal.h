@@ -25,6 +25,22 @@ void api_shutdown_register(httpd_handle_t server);
 /*
  * Read the entire POST body into buf.  buf_size must include room for '\0'.
  * Returns byte count on success, -1 on error (response already sent).
+ *
+ * Loops on httpd_req_recv until content_len bytes have been accumulated:
+ * the underlying socket recv is standard TCP and may legitimately return
+ * fewer bytes than requested when the body is split across segments.  A
+ * single-call read truncated the body silently on segmented POSTs (most
+ * relevant for the ~512 B CAN config payload under WiFi congestion).
+ *
+ * Unlike api_ota.c:pump_body we deliberately do NOT retry on
+ * HTTPD_SOCK_ERR_TIMEOUT.  For pump_body's multi-MB OTA streams a 5 s
+ * pause is a legitimate pacing artefact of a slow WiFi link.  For our
+ * small (≤512 B) JSON payloads it means the client is broken or
+ * malicious — bouncing the connection releases the socket back to the
+ * pool instead of holding it indefinitely while we re-call recv in a
+ * loop.  The default recv_wait_timeout (5 s, from HTTPD_DEFAULT_CONFIG)
+ * thus caps the per-byte stall; combined with lru_purge_enable in
+ * driver.c, slow-trickle slowloris no longer monopolises sockets.
  */
 static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
 {
@@ -36,13 +52,22 @@ static inline int read_body(httpd_req_t *req, char *buf, size_t buf_size)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large");
         return -1;
     }
-    int n = httpd_req_recv(req, buf, (size_t)req->content_len);
-    if (n <= 0) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
-        return -1;
+
+    size_t total = 0;
+    while (total < (size_t)req->content_len) {
+        int n = httpd_req_recv(req, buf + total,
+                                (size_t)req->content_len - total);
+        if (n <= 0) {
+            /* Timeout, peer closed, or real socket error — bail.  Letting
+             * the handler return closes the connection (keep_alive_enable
+             * is false), releasing the socket for legitimate clients. */
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+            return -1;
+        }
+        total += (size_t)n;
     }
-    buf[n] = '\0';
-    return n;
+    buf[total] = '\0';
+    return (int)total;
 }
 
 /* Format a 6-byte MAC as "XX:XX:XX:XX:XX:XX" into buf (needs ≥18 bytes). */
