@@ -200,42 +200,6 @@ static void reboot_to_factory(const char *reason)
     esp_restart();
 }
 
-/* ---- Captive portal ------------------------------------------------------ *
- * The SoftAP hands out the device as the DNS server (wifi_manager.c) and
- * captive_dns resolves every hostname to our IP. On joining an open network,
- * the OS fetches a known probe URL to decide "is there internet here?"; by
- * answering that probe — which arrives as an unregistered path and so lands
- * in this 404 handler — with a redirect to the UI instead of the success
- * response the OS expects, iOS / Android / Windows pop up their captive-portal
- * browser pointed at the controller.
- *
- * The redirect target is the literal IP, NOT "control.gp", on purpose: the
- * captive-portal browser cannot be assumed to use our DHCP-supplied DNS.
- * Windows/Edge in particular default to Secure DNS (DoH), which bypasses our
- * resolver, so a redirect to "control.gp" fails to resolve and the browser
- * falls back to its home page (e.g. msn.com). An IP needs no DNS and always
- * loads. The friendly "control.gp" name still works when the user types it on
- * any client that does use our DNS.
- *
- * /api/ paths are exempt: a genuine API 404 should read as a 404, not bounce
- * a programmatic client to an HTML page.
- */
-#define PORTAL_URL "http://10.71.79.1/"
-
-static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
-{
-    (void)err;
-    if (strncmp(req->uri, "/api/", 5) == 0) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
-        return ESP_FAIL;
-    }
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", PORTAL_URL);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, "Redirecting to the controller", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
 /* ---- Component init ------------------------------------------------------ */
 
 void http_server_init(void)
@@ -285,13 +249,6 @@ void http_server_init(void)
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &config));
 
-    /* Captive-portal probes (Windows /connecttest.txt, Android /generate_204,
-     * Apple /hotspot-detect.html, …) deliberately hit unregistered paths and
-     * are handled by captive_portal_redirect below. esp_http_server logs each
-     * miss at WARN ("httpd_uri: URI '…' not found"), which the OS fires several
-     * times a minute — pure noise here. Drop this tag to ERROR. */
-    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
-
     /* Static asset handlers. */
     httpd_uri_t uri_root = {
         .uri      = "/",
@@ -323,9 +280,6 @@ void http_server_init(void)
     httpd_register_uri_handler(server, &uri_app_js);
     httpd_register_uri_handler(server, &uri_style_css);
     httpd_register_uri_handler(server, &uri_updates_js);
-
-    /* Captive-portal: redirect any unmatched path to the web UI (see above). */
-    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_redirect);
 
     /* API handler registration. */
     api_system_register(server);

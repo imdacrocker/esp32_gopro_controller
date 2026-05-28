@@ -231,11 +231,12 @@ void wifi_manager_init(void)
                                             ESP_NETIF_REQUESTED_IP_ADDRESS,
                                             &lease, sizeof(lease)));
 
-    /* Captive portal: hand out our own IP (10.71.79.1) as the DNS server so
-     * connected clients send name lookups here. captive_dns answers every
-     * query with this address, which is what lets "control.gp" — and the
-     * OS captive-portal probe domains — resolve to the web UI on both iPhone
-     * and Android. Must be set while the DHCP server is stopped. */
+    /* Hand out our own IP (10.71.79.1) as the DNS server so connected clients
+     * send name lookups here. captive_dns resolves "control.gp" to this
+     * address (working on both iPhone and Android) and returns NXDOMAIN for
+     * everything else, so the phone treats the AP as having no internet and
+     * keeps using cellular for outside traffic. Must be set while the DHCP
+     * server is stopped. */
     esp_netif_dns_info_t dns_info = {};
     dns_info.ip.type             = ESP_IPADDR_TYPE_V4;
     dns_info.ip.u_addr.ip4.addr  = ip_info.ip.addr;   /* 10.71.79.1 */

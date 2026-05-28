@@ -97,35 +97,6 @@ static esp_err_t handler_root(httpd_req_t *req)
     return httpd_resp_send(req, s_html, s_html_len);
 }
 
-/* ---- Captive portal ------------------------------------------------------ *
- * Mirrors the main app: with captive_dns resolving every name to this device,
- * redirect any unmatched path to the controller so the OS join probe
- * auto-opens the recovery UI and a browser left on control.gp reloads here.
- *
- * Redirect to the literal IP, not "control.gp": the captive-portal browser may
- * use Secure DNS (DoH) that bypasses our resolver (notably Windows/Edge), in
- * which case a hostname redirect fails and the browser opens its home page
- * instead. The IP always loads. See the matching note in the main app's
- * http_server/driver.c.
- *
- * /api/ paths get a real 404 so OTA clients see a clean error.
- */
-#define PORTAL_URL "http://10.71.79.1/"
-
-static esp_err_t captive_portal_redirect(httpd_req_t *req, httpd_err_code_t err)
-{
-    (void)err;
-    if (strncmp(req->uri, "/api/", 5) == 0) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
-        return ESP_FAIL;
-    }
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", PORTAL_URL);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, "Redirecting to the controller", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
 /* ---- GET /api/version ---------------------------------------------------- *
  *
  *   app:               recovery's own version (no main-app version is
@@ -560,11 +531,6 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
         return err;
     }
 
-    /* Silence the per-probe "httpd_uri: URI '…' not found" WARN spam from
-     * captive-portal detection (e.g. Windows /connecttest.txt); those misses
-     * are expected and handled by captive_portal_redirect. */
-    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
-
     static const httpd_uri_t routes[] = {
         { .uri = "/",                     .method = HTTP_GET,  .handler = handler_root         },
         { .uri = "/api/version",          .method = HTTP_GET,  .handler = handler_version      },
@@ -583,9 +549,6 @@ esp_err_t recovery_http_init(const char *html, size_t html_len)
             return err;
         }
     }
-
-    /* Captive-portal: redirect any unmatched path to the recovery UI. */
-    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_redirect);
 
     ESP_LOGI(TAG, "listening on :80 (%zu URIs registered)",
              sizeof(routes) / sizeof(routes[0]));

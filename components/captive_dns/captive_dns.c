@@ -1,16 +1,21 @@
 /*
- * captive_dns.c — wildcard DNS responder (see captive_dns.h).
+ * captive_dns.c — selective local DNS responder (see captive_dns.h).
  *
- * Adapted from the ESP-IDF captive_portal example's dns_server: a single
- * UDP socket on port 53 that rewrites every inbound query into a response
- * whose A records all point at the SoftAP IP. The AP IP is read once at
- * start from the "WIFI_AP_DEF" netif, so this stays in sync with whatever
+ * A single UDP socket on port 53 that resolves only our friendly local name
+ * ("control.gp") to the SoftAP IP and answers NXDOMAIN for everything else.
+ * Returning NXDOMAIN for foreign names — including the OS captive-portal
+ * probe domains (captive.apple.com, connectivitycheck.gstatic.com, …) — is
+ * deliberate: it lets the phone correctly conclude the AP has no internet and
+ * fall back to cellular for outside traffic, instead of treating us as a
+ * captive portal that hijacks every lookup. The AP IP is read once at start
+ * from the "WIFI_AP_DEF" netif, so this stays in sync with whatever
  * wifi_manager configures (currently 10.71.79.1) without a hardcoded copy.
  */
 
 #include "captive_dns.h"
 
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
@@ -30,8 +35,12 @@ static const char *TAG = "captive_dns";
 #define DNS_MAX_LEN     256     /* enough for one question + our appended answers */
 #define DNS_TTL_SECS    300
 
-#define QR_FLAG         (1 << 7)   /* high byte of the 16-bit flags field */
+#define QR_BIT          0x80       /* QR (response) bit, in flags octet 0 */
+#define RCODE_NXDOMAIN  0x03       /* "no such name", low nibble of flags octet 1 */
 #define QD_TYPE_A       0x0001
+
+/* The only name we resolve. Everything else gets NXDOMAIN. */
+#define LOCAL_NAME      "control.gp"
 
 /* DNS wire-format structs. ptr_offset uses the 0xC0xx compression pointer
  * back to the question's name, so we never re-emit the name. */
@@ -89,8 +98,13 @@ static char *parse_dns_name(char *raw, char *out, size_t out_max)
 }
 
 /*
- * Build a reply in-place from the request: flip the QR bit, set an_count,
- * and append one A answer per question, each pointing at s_ap_ip.
+ * Build a reply in-place from the request. We look at the first question:
+ *   - an A query for LOCAL_NAME      -> NOERROR with one A answer = s_ap_ip
+ *   - any other type for LOCAL_NAME  -> NOERROR with no answers (e.g. AAAA,
+ *                                       so the client falls back to the A query)
+ *   - any other name                 -> NXDOMAIN
+ * Setting the QR bit (and, for foreign names, RCODE=NXDOMAIN) is done by
+ * indexing the flags octets directly, which is endianness-independent.
  * Returns reply length, or <=0 if the packet should be dropped.
  */
 static int build_reply(const char *req, size_t req_len, char *reply, size_t reply_max)
@@ -100,50 +114,52 @@ static int build_reply(const char *req, size_t req_len, char *reply, size_t repl
     }
     memcpy(reply, req, req_len);
 
-    dns_header_t *hdr = (dns_header_t *)reply;
-    if (hdr->flags & QR_FLAG) {
+    dns_header_t *hdr   = (dns_header_t *)reply;
+    uint8_t      *flags = (uint8_t *)&hdr->flags;   /* flags[0]=octet 2, flags[1]=octet 3 */
+    if (flags[0] & QR_BIT) {
         return 0;   /* already a response — ignore */
     }
-    hdr->flags |= QR_FLAG;
+    flags[0] |= QR_BIT;
+    hdr->an_count = 0;          /* default: no answers; overridden on a match */
 
-    uint16_t qd_count = ntohs(hdr->qd_count);
-    if (qd_count == 0) {
+    if (ntohs(hdr->qd_count) == 0) {
         return 0;
-    }
-    hdr->an_count = htons(qd_count);
-
-    int reply_len = (int)req_len + qd_count * (int)sizeof(dns_answer_t);
-    if (reply_len > (int)reply_max) {
-        return -1;
     }
 
     char  name[128];
-    char *qd_ptr  = reply + sizeof(dns_header_t);
-    char *ans_ptr = reply + req_len;
+    char *qd_ptr     = reply + sizeof(dns_header_t);
+    char *after_name = parse_dns_name(qd_ptr, name, sizeof(name));
+    if (after_name == NULL || after_name + sizeof(dns_question_t) > reply + req_len) {
+        return -1;
+    }
+    uint16_t qtype = ntohs(((dns_question_t *)after_name)->type);
 
-    for (int i = 0; i < qd_count; i++) {
-        char *after_name = parse_dns_name(qd_ptr, name, sizeof(name));
-        if (after_name == NULL || after_name + sizeof(dns_question_t) > reply + req_len) {
-            return -1;
-        }
-        dns_question_t *q = (dns_question_t *)after_name;
-        uint16_t qtype  = ntohs(q->type);
-        uint16_t qklass = ntohs(q->klass);
-
-        dns_answer_t *ans = (dns_answer_t *)ans_ptr;
-        ans->ptr_offset = htons(0xC000 | (uint16_t)(qd_ptr - reply));
-        ans->type       = htons(qtype == QD_TYPE_A ? QD_TYPE_A : qtype);
-        ans->klass      = htons(qklass);
-        ans->ttl        = htonl(DNS_TTL_SECS);
-        ans->addr_len   = htons(sizeof(uint32_t));
-        ans->ip_addr    = s_ap_ip;
-
-        ESP_LOGD(TAG, "resolved \"%s\" -> AP", name);
-
-        qd_ptr   = (char *)q + sizeof(dns_question_t);
-        ans_ptr += sizeof(dns_answer_t);
+    if (strcasecmp(name, LOCAL_NAME) != 0) {
+        flags[1] = (flags[1] & 0xF0) | RCODE_NXDOMAIN;
+        ESP_LOGD(TAG, "NXDOMAIN \"%s\"", name);
+        return (int)req_len;    /* header + question, no answer */
+    }
+    if (qtype != QD_TYPE_A) {
+        /* LOCAL_NAME exists but has no record of this type (e.g. AAAA). */
+        ESP_LOGD(TAG, "\"%s\" type 0x%04x -> NOERROR/empty", name, qtype);
+        return (int)req_len;
     }
 
+    int reply_len = (int)req_len + (int)sizeof(dns_answer_t);
+    if (reply_len > (int)reply_max) {
+        return -1;
+    }
+    hdr->an_count = htons(1);
+
+    dns_answer_t *ans = (dns_answer_t *)(reply + req_len);
+    ans->ptr_offset = htons(0xC000 | (uint16_t)(qd_ptr - reply));
+    ans->type       = htons(QD_TYPE_A);
+    ans->klass      = htons(1);   /* IN */
+    ans->ttl        = htonl(DNS_TTL_SECS);
+    ans->addr_len   = htons(sizeof(uint32_t));
+    ans->ip_addr    = s_ap_ip;
+
+    ESP_LOGD(TAG, "resolved \"%s\" -> AP", name);
     return reply_len;
 }
 
@@ -213,5 +229,6 @@ void captive_dns_start(void)
         return;
     }
     s_started = true;
-    ESP_LOGI(TAG, "started, answering all A queries with " IPSTR, IP2STR(&ip.ip));
+    ESP_LOGI(TAG, "started, resolving \"%s\" -> " IPSTR " (NXDOMAIN for all else)",
+             LOCAL_NAME, IP2STR(&ip.ip));
 }
