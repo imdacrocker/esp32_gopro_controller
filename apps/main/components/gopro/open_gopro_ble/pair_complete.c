@@ -36,6 +36,8 @@
  * being dropped.
  */
 
+#include <stdatomic.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -74,18 +76,50 @@ static const char *TAG = "gopro_ble/pc";
  * doesn't support 178) the delay is just wasted time, not harmful. */
 #define PC_BAND_SETTLE_MS        5000
 
-/* ---- BLE-read bridge ---------------------------------------------------- */
+/* ---- BLE-read bridge ---------------------------------------------------- *
+ *
+ * Bridges ble_gattc_read (asynchronous, callback on NimBLE host task) to the
+ * synchronous pair_complete_task with a semaphore + scratch buffer.  Single-
+ * flight by design (pair_complete is gated to one task at a time), so a
+ * single set of globals suffices.
+ *
+ * Generation tag: NimBLE has no public "cancel a pending read" API.  If our
+ * timeout elapses before the callback fires (e.g. transient RF loss), the
+ * BLE-stack-side read is still in flight — the callback WILL eventually run.
+ * Without a tag, that late callback would overwrite our globals and signal
+ * the semaphore, poisoning the next read_handle_blocking call (which would
+ * then read stale data from the previous read as if it were its own result).
+ *
+ * Each call to read_handle_blocking atomically increments s_read_gen and
+ * passes the post-increment value through ble_gattc_read's cb_arg.  The
+ * callback compares its tag against the current generation; on mismatch
+ * (i.e. it's the callback for a previous, now-abandoned read) it drops
+ * itself unconditionally — no write to globals, no signal.  Combined with
+ * the defensive drain at entry, this makes the bridge correct under all
+ * timing interleavings, including cross-task interleaving introduced by
+ * the pair_complete queue.
+ */
 
-static SemaphoreHandle_t s_read_done;
-static int               s_read_status;   /* 0 = OK, !=0 = ATT status */
-static char              s_read_buf[33];
-static uint16_t          s_read_len;
+static SemaphoreHandle_t        s_read_done;
+static int                      s_read_status;   /* 0 = OK, !=0 = ATT status */
+static char                     s_read_buf[33];
+static uint16_t                 s_read_len;
+static atomic_uint_least32_t    s_read_gen;      /* bumped per read */
 
 static int on_ble_read(uint16_t conn_handle,
                         const struct ble_gatt_error *error,
                         struct ble_gatt_attr *attr, void *arg)
 {
-    (void)conn_handle; (void)arg;
+    (void)conn_handle;
+
+    uint32_t my_gen  = (uint32_t)(uintptr_t)arg;
+    uint32_t cur_gen = (uint32_t)atomic_load(&s_read_gen);
+    if (my_gen != cur_gen) {
+        ESP_LOGW(TAG, "stale BLE-read callback dropped (gen=%u, current=%u)",
+                 (unsigned)my_gen, (unsigned)cur_gen);
+        return 0;
+    }
+
     s_read_status = error->status;
     if (s_read_status == 0 && attr && attr->om) {
         uint16_t len  = OS_MBUF_PKTLEN(attr->om);
@@ -104,12 +138,26 @@ static int on_ble_read(uint16_t conn_handle,
 static esp_err_t read_handle_blocking(uint16_t conn_handle, uint16_t att_handle,
                                        char *out, size_t out_sz, const char *name)
 {
-    int rc = ble_gattc_read(conn_handle, att_handle, on_ble_read, NULL);
+    /* Bump generation atomically.  Any in-flight callback from a previous
+     * read carries an older tag and will drop itself in on_ble_read. */
+    uint32_t my_gen = (uint32_t)(atomic_fetch_add(&s_read_gen, 1) + 1);
+
+    /* Defensive drain: removes any signal a stale callback raised between
+     * our last cycle and the gen bump above.  With the gen tag in place a
+     * stale signal can no longer happen (the callback short-circuits before
+     * touching the semaphore) but the drain is essentially free and closes
+     * the window for any future code path that signals without tagging. */
+    (void)xSemaphoreTake(s_read_done, 0);
+
+    int rc = ble_gattc_read(conn_handle, att_handle, on_ble_read,
+                             (void *)(uintptr_t)my_gen);
     if (rc != 0) {
         ESP_LOGE(TAG, "%s read enqueue rc=%d", name, rc);
         return ESP_FAIL;
     }
     if (xSemaphoreTake(s_read_done, pdMS_TO_TICKS(PC_READ_TIMEOUT_MS)) != pdTRUE) {
+        /* The pending callback (if it ever fires) will see its tag mismatch
+         * the next read's tag and drop itself.  Nothing to clean up here. */
         ESP_LOGE(TAG, "%s read timed out", name);
         return ESP_ERR_TIMEOUT;
     }

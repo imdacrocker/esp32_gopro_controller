@@ -113,9 +113,23 @@ single mismatch underlay the paired-cameras JSON bug.
       task now drains pending slots via `release_busy_and_drain()` instead
       of dropping them. Deferred slots that disconnect before their turn
       are silently skipped (logged).
-- [ ] **open_gopro_ble/pair_complete.c:76** — global BLE-read bridge; a late
-      callback after timeout gives a semaphore the *next* read waits on,
-      corrupting the following read. Drain before each read and/or tag by conn_handle.
+- [x] **open_gopro_ble/pair_complete.c:77** — global BLE-read bridge had no
+      guard against late callbacks: a read whose `xSemaphoreTake` timed out
+      left a pending `ble_gattc_read` in NimBLE; when that callback eventually
+      fired it overwrote the bridge globals and signalled the semaphore,
+      poisoning whatever read came next.
+      **Resolved** with an atomic generation tag (`atomic_uint_least32_t
+      s_read_gen`): each call to `read_handle_blocking` bumps the counter
+      and passes the post-increment value through NimBLE's `cb_arg`; the
+      callback compares its tag against the current generation and drops
+      itself unconditionally on mismatch — no globals write, no signal.
+      Combined with a defensive drain at entry, the bridge is now correct
+      under all timing interleavings, including the cross-task interleaving
+      enabled by the new pair_complete queue. NimBLE has no public "cancel
+      pending read" API, so this is the right shape (vs. trying to abort
+      the in-flight read). Not reachable today (first-pair-only + UI serial-
+      izes pairing) but the queue I added in the previous round makes it
+      potentially reachable for any future batched first-pair flow.
 - [x] **gopro_model.h + gopro_wifi_rc/connection.c:240** — verified as a
       *latent* defect, not a live bug: the model-locked UI pairing flow
       (`RC_MODELS = {Hero3, Hero4}` in app.js) never routes a Hero6/7/8 to RC,
