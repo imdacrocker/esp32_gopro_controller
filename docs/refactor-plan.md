@@ -30,12 +30,15 @@ high-water semantics and audit every caller. Add unit tests for the helper.
 
 ## Phase 0 — Test & CI foundation (do first; protects every later change)
 
-- [ ] **CI build gate**: GitHub Action running `idf.py build` for `apps/main`
-      and `apps/recovery` on PRs/pushes. No build today; only release workflows exist.
-- [ ] **Host unit-test harness** (native gcc + Unity) for pure logic:
-      `mismatch.c` truth table, `gopro_model` capability helpers, CAN ID
-      packing/validation (`api_settings parse_channel_field`), `cv`/status
-      response parsers, IP/MAC format+parse helpers, slot-count helper.
+- [x] **CI build gate**: `.github/workflows/ci.yml` builds `apps/main` and
+      `apps/recovery` (ESP-IDF v6.0.1 / esp32s3) on every push and PR.
+- [x] **Host unit-test harness** (`tests/host/`, CMake + CTest + Unity via
+      FetchContent, runs on plain gcc — no ESP-IDF). Initial coverage:
+      `mismatch.c` truth table (exhaustive) and `gopro_model` capability
+      helpers + name lookup. Same job runs in CI.
+- [ ] Extend host coverage: CAN ID packing/validation (`api_settings
+      parse_channel_field`), `cv`/status response parsers, IP/MAC format+parse
+      helpers, slot-count helper.
 - [ ] (later) ESP-IDF Unity component tests under QEMU for stateful modules
       (`log_ring`, `camera_manager` slot lifecycle).
 - [ ] (later) Regression fixtures from captured real GoPro frames for parsers.
