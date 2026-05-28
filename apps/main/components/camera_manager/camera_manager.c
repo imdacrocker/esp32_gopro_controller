@@ -612,6 +612,17 @@ int camera_manager_get_slot_count(void)
     return s_slot_count;
 }
 
+int camera_manager_get_configured_count(void)
+{
+    int n = 0;
+    lock();
+    for (int i = 0; i < s_slot_count; i++) {
+        if (s_slots[i].is_configured) n++;
+    }
+    unlock();
+    return n;
+}
+
 esp_err_t camera_manager_get_slot_info(int slot, camera_slot_info_t *out)
 {
     if (!out || !slot_valid(slot)) return ESP_ERR_INVALID_ARG;

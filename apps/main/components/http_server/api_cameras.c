@@ -250,7 +250,7 @@ static esp_err_t handler_shutter(httpd_req_t *req)
         ESP_LOGI(TAG, "shutter %s → Cam %d", record ? "start" : "stop", external);
     } else {
         camera_manager_set_desired_recording_all(intent);
-        dispatched = camera_manager_get_slot_count();
+        dispatched = camera_manager_get_configured_count();
         ESP_LOGI(TAG, "shutter %s → all (%d slots)",
                  record ? "start" : "stop", dispatched);
     }

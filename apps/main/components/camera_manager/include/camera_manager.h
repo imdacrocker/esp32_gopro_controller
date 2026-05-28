@@ -196,7 +196,19 @@ esp_err_t camera_manager_save_slot(int slot);
 
 uint32_t           camera_manager_get_last_ip(int slot);
 camera_model_t     camera_manager_get_model(int slot);
+
+/*
+ * Exclusive upper bound for slot iteration (highest configured slot index + 1),
+ * NOT necessarily the number of configured cameras: a partial NVS load can
+ * leave unconfigured gaps below this bound (see camera_manager_init).  Callers
+ * that iterate slots MUST skip entries whose camera_slot_info_t.is_configured
+ * is false.  Use camera_manager_get_configured_count() when you need a count of
+ * actual cameras.
+ */
 int                camera_manager_get_slot_count(void);
+
+/* Number of configured camera slots (gaps excluded). */
+int                camera_manager_get_configured_count(void);
 
 /* Copies slot state into *out.  Returns ESP_ERR_INVALID_ARG for bad index. */
 esp_err_t          camera_manager_get_slot_info(int slot, camera_slot_info_t *out);

@@ -18,13 +18,17 @@ behavior reachable in normal use) · **MEDIUM** (reliability / edge cases) ·
 
 `camera_manager_get_slot_count()` returns **`max_configured_index + 1`**
 (camera_manager.c:161); gaps are left unconfigured (camera_manager.c:157).
-Several callers wrongly treat it as *"number of configured cameras."* This single
-mismatch underlies the paired-cameras JSON bug and makes the shutdown iteration
-fragile. **Fix the contract first** — either rename/clarify it as
-`get_slot_high_water()` and add a `get_configured_count()`, or document the
-high-water semantics and audit every caller. Add unit tests for the helper.
+Several callers wrongly treated it as *"number of configured cameras."* This
+single mismatch underlay the paired-cameras JSON bug.
 
-- [ ] Decide contract; audit all callers of `camera_manager_get_slot_count()`.
+- [x] **Resolved**: header + README now document `get_slot_count()` as an
+      exclusive iteration bound (callers must skip `!is_configured`); added
+      `camera_manager_get_configured_count()` for true counts. Audited all 4
+      callers — `api_shutdown.c:57` and `shutdown_manager.c:169` use it
+      correctly as a bound; `api_cameras.c:253` (shutter `dispatched`) switched
+      to the configured count. (Gap tolerance preserved intentionally — load
+      compaction was *not* changed, to avoid reordering a user's slots / NVS
+      namespaces.)
 
 ---
 
