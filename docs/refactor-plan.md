@@ -69,10 +69,18 @@ single mismatch underlay the paired-cameras JSON bug.
 - [ ] **camera_manager.c:939 `reorder_slots`** — when `count != s_slot_count`,
       tail slots aren't cleared/torn down; a camera can be duplicated across
       slots and NVS left stale. Require `count == s_slot_count` or teardown the tail.
-- [ ] **open_gopro_ble/gatt.c:226** — CCCD handle assumed `val_handle + 1`; GATT
-      doesn't guarantee it. Discover the real `0x2902` descriptor
-      (`ble_gattc_disc_all_dscs`). Cameras with extra descriptors silently fail
-      to subscribe to notifications.
+- [x] **open_gopro_ble/gatt.c:226** — CCCD handle assumed `val_handle + 1`; GATT
+      doesn't guarantee it. **Resolved**: added a descriptor-discovery phase
+      between chr-discovery and CCCD-write that runs `ble_gattc_disc_all_dscs`
+      per notify chr over a precise (val_handle, end_handle] range and picks
+      the first 0x2902 descriptor. `end_handle` is bounded by the next chr's
+      `def_handle - 1` (back-patched in `on_chr_disc`) so no foreign-chr CCCD
+      can be misattributed. The CCCD writer now uses the discovered handle
+      and skips chrs where no 0x2902 was found, rather than writing to a
+      guessed handle (which would silently succeed against a writable 0x2901
+      User Description and leave notifications disabled). Adds ~150 ms to
+      connect time (5 extra ATT round-trips); acceptable for spec-compliance
+      across firmwares.
 - [ ] **open_gopro_ble/status.c:136** — band-status query bridge uses module
       globals matched only by status ID, not slot/conn_handle; with 2+ cameras a
       response can satisfy the wrong waiter. Scope the bridge to the requesting ctx.
