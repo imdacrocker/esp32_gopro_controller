@@ -66,3 +66,8 @@ CONFIG_MBEDTLS_HAVE_TIME_DATE=n
 
 # httpd: drop WebSocket support and oversized defaults.
 CONFIG_HTTPD_WS_SUPPORT=n
+
+# Expose the "dev" channel in the recovery UI dropdown. Dev builds are
+# recovery-only — the main app's equivalent flag stays off so dev never
+# appears in its settings dropdown (see apps/main/Kconfig.projbuild).
+CONFIG_OTA_ALLOW_DEV_CHANNEL=y
