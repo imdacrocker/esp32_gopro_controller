@@ -11,7 +11,7 @@
 #include "gopro_wifi_rc.h"
 #include "can_manager.h"
 #include "http_server.h"
-#include "captive_dns.h"
+#include "local_dns.h"
 #include "log_ring.h"
 #include "shutdown_manager.h"
 
@@ -143,7 +143,7 @@ void app_main(void)
      * (and every other lookup) to the SoftAP so users reach the UI by a
      * memorable name on any phone, and so the join-time captive-portal probe
      * auto-opens the UI. Safe here — AP is up and TCP/UDP stack is ready. */
-    captive_dns_start();
+    local_dns_start();
 
     /* Disarm OTA rollback (§11). httpd up = "healthy enough." */
     mark_ota_valid();

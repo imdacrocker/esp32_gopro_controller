@@ -232,7 +232,7 @@ void wifi_manager_init(void)
                                             &lease, sizeof(lease)));
 
     /* Hand out our own IP (10.71.79.1) as the DNS server so connected clients
-     * send name lookups here. captive_dns resolves "control.gp" to this
+     * send name lookups here. local_dns resolves "control.gp" to this
      * address (working on both iPhone and Android) and returns NXDOMAIN for
      * everything else, so the phone treats the AP as having no internet and
      * keeps using cellular for outside traffic. Must be set while the DHCP

@@ -1,5 +1,5 @@
 /*
- * captive_dns.c — selective local DNS responder (see captive_dns.h).
+ * local_dns.c — selective local DNS responder (see local_dns.h).
  *
  * A single UDP socket on port 53 that resolves only our friendly local name
  * ("control.gp") to the SoftAP IP and answers NXDOMAIN for everything else.
@@ -12,7 +12,7 @@
  * wifi_manager configures (currently 10.71.79.1) without a hardcoded copy.
  */
 
-#include "captive_dns.h"
+#include "local_dns.h"
 
 #include <string.h>
 #include <strings.h>
@@ -29,7 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "captive_dns";
+static const char *TAG = "local_dns";
 
 #define DNS_PORT        53
 #define DNS_MAX_LEN     256     /* enough for one question + our appended answers */
@@ -208,7 +208,7 @@ static void dns_server_task(void *arg)
     }
 }
 
-void captive_dns_start(void)
+void local_dns_start(void)
 {
     if (s_started) {
         return;
@@ -222,7 +222,7 @@ void captive_dns_start(void)
     }
     s_ap_ip = ip.ip.addr;   /* esp_ip4_addr_t is already network byte order */
 
-    BaseType_t ok = xTaskCreate(dns_server_task, "captive_dns", 4096,
+    BaseType_t ok = xTaskCreate(dns_server_task, "local_dns", 4096,
                                 NULL, 4, NULL);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "task create failed — DNS responder not started");

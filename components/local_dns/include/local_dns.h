@@ -1,5 +1,5 @@
 /*
- * captive_dns.h — Tiny selective DNS responder for the SoftAP.
+ * local_dns.h — Tiny selective DNS responder for the SoftAP.
  *
  * The device is an isolated SoftAP with no upstream internet. We hand out
  * our own IP (10.71.79.1) as the DHCP DNS server (see wifi_manager.c), then
@@ -25,4 +25,4 @@
  * (i.e. after wifi_manager_wait_for_ap_ready()) so the AP IP can be read.
  * Idempotent — a second call is a no-op.
  */
-void captive_dns_start(void);
+void local_dns_start(void);
