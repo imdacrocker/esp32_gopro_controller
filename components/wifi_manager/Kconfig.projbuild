@@ -1,0 +1,31 @@
+menu "GoPro Controller — SoftAP / Local network"
+
+    config WIFI_AP_IP_ADDR
+        string "SoftAP IPv4 address"
+        default "10.71.79.1"
+        help
+            IPv4 address of the controller's SoftAP interface. This is also used
+            as the gateway and as the DHCP-offered DNS server, and the DHCP lease
+            pool is derived from its /24 subnet (.2 – .50). The netmask is fixed
+            at 255.255.255.0.
+
+            Clients reach the web UI at http://<this address>/ and at the
+            friendly name below. If the string fails to parse, the firmware logs
+            a warning and falls back to 10.71.79.1.
+
+            Set the same value in both apps' sdkconfig.defaults (main + recovery)
+            so a browser left on the domain resolves identically in either mode.
+
+    config WIFI_LOCAL_DOMAIN
+        string "Friendly local domain name"
+        default "control.gp"
+        help
+            Hostname the SoftAP DNS responder (local_dns) resolves to the SoftAP
+            address; every other name gets NXDOMAIN. Typing this in a browser on
+            a connected client opens the web UI.
+
+            Keep a real, non-searchable TLD suffix (the default ".gp" is a live
+            TLD). A bare label with no dot (e.g. "controller") is treated as a
+            search term by some browsers and will not resolve.
+
+endmenu

@@ -24,6 +24,10 @@ const CORS_HEADERS = {
 // Keep in sync with tools/firmware-proxy/launchpad.toml. The Worker is the
 // canonical source so firmware_images_url can be rewritten at request time
 // from the Worker's own origin — same code works on any deployment URL.
+//
+// NOTE: the provisioning blurb below hardcodes the SoftAP IP. This Worker has
+// no access to the firmware's sdkconfig, so if you change CONFIG_WIFI_AP_IP_ADDR
+// (components/wifi_manager/Kconfig.projbuild) update the literal here to match.
 function launchpadToml(origin) {
   return `esp_toml_version = 1.0
 firmware_images_url = "${origin}${GITHUB_REPO_PATH}/releases/download/latest-stable/"

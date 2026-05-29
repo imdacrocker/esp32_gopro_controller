@@ -139,10 +139,10 @@ void app_main(void)
      * TCP-only — does not touch the radio, safe to do before BLE. */
     http_server_init();
 
-    /* Wildcard DNS responder for the captive portal: resolves "control.gp"
-     * (and every other lookup) to the SoftAP so users reach the UI by a
-     * memorable name on any phone, and so the join-time captive-portal probe
-     * auto-opens the UI. Safe here — AP is up and TCP/UDP stack is ready. */
+    /* Selective DNS responder: resolves the friendly local domain
+     * (CONFIG_WIFI_LOCAL_DOMAIN) to the SoftAP so users reach the UI by a
+     * memorable name on any phone, and returns NXDOMAIN for everything else.
+     * Safe here — AP is up and TCP/UDP stack is ready. */
     local_dns_start();
 
     /* Disarm OTA rollback (§11). httpd up = "healthy enough." */

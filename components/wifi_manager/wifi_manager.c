@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 
+#include "sdkconfig.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -210,36 +211,46 @@ void wifi_manager_init(void)
         memcpy(ap_mac, factory_mac, 6);
     }
 
-    /* DHCP: fixed IP 10.71.79.1/24, pool 10.71.79.2–50 (§11.2) */
+    /* DHCP: AP IP from CONFIG_WIFI_AP_IP_ADDR (default 10.71.79.1), /24, with
+     * the gateway, offered DNS, and lease pool all derived from it (§11.2). */
     ESP_ERROR_CHECK(esp_netif_dhcps_stop(s_ap_netif));
 
-    /* IP4_ADDR + cast aliases esp_ip4_addr_t as lwIP's ip4_addr_t. The two
-     * are layout-compatible (single uint32_t addr field), but -Os promotes
-     * the strict-aliasing warning to a hard error. Build the value via a
-     * local lwIP type and copy across. */
+    /* esp_netif_str_to_ip4 writes the parsed value straight into the
+     * esp_ip4_addr_t field — no lwIP-type aliasing. The netmask still needs the
+     * local-lwIP-type copy dance: IP4_ADDR + cast aliases esp_ip4_addr_t as
+     * lwIP's ip4_addr_t, and -Os promotes that strict-aliasing warning to a
+     * hard error, so build it via a local ip4_addr_t and copy .addr across. */
     esp_netif_ip_info_t ip_info = {};
+    if (esp_netif_str_to_ip4(CONFIG_WIFI_AP_IP_ADDR, &ip_info.ip) != ESP_OK) {
+        ESP_LOGW(TAG, "CONFIG_WIFI_AP_IP_ADDR \"%s\" is not a valid IPv4 address"
+                      " — falling back to 10.71.79.1", CONFIG_WIFI_AP_IP_ADDR);
+        ESP_ERROR_CHECK(esp_netif_str_to_ip4("10.71.79.1", &ip_info.ip));
+    }
+    ip_info.gw.addr = ip_info.ip.addr;          /* gateway = the AP itself */
     ip4_addr_t tmp;
-    IP4_ADDR(&tmp, 10, 71, 79,   1); ip_info.ip.addr      = tmp.addr;
-    IP4_ADDR(&tmp, 10, 71, 79,   1); ip_info.gw.addr      = tmp.addr;
     IP4_ADDR(&tmp, 255, 255, 255, 0); ip_info.netmask.addr = tmp.addr;
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
 
+    /* Lease pool: .2–.50 of the AP's /24. esp_ip4_addr_t stores the address in
+     * network byte order, so octet[0] is the first dotted octet and octet[3]
+     * the last; reuse the first three to stay in the configured subnet. */
+    const uint8_t *octet = (const uint8_t *)&ip_info.ip.addr;
     dhcps_lease_t lease = { .enable = true };
-    IP4_ADDR(&lease.start_ip, 10, 71, 79,  2);
-    IP4_ADDR(&lease.end_ip,   10, 71, 79, 50);
+    IP4_ADDR(&lease.start_ip, octet[0], octet[1], octet[2],  2);
+    IP4_ADDR(&lease.end_ip,   octet[0], octet[1], octet[2], 50);
     ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
                                             ESP_NETIF_REQUESTED_IP_ADDRESS,
                                             &lease, sizeof(lease)));
 
-    /* Hand out our own IP (10.71.79.1) as the DNS server so connected clients
-     * send name lookups here. local_dns resolves "control.gp" to this
-     * address (working on both iPhone and Android) and returns NXDOMAIN for
-     * everything else, so the phone treats the AP as having no internet and
-     * keeps using cellular for outside traffic. Must be set while the DHCP
-     * server is stopped. */
+    /* Hand out our own IP as the DNS server so connected clients send name
+     * lookups here. local_dns resolves CONFIG_WIFI_LOCAL_DOMAIN to this address
+     * (working on both iPhone and Android) and returns NXDOMAIN for everything
+     * else, so the phone treats the AP as having no internet and keeps using
+     * cellular for outside traffic. Must be set while the DHCP server is
+     * stopped. */
     esp_netif_dns_info_t dns_info = {};
     dns_info.ip.type             = ESP_IPADDR_TYPE_V4;
-    dns_info.ip.u_addr.ip4.addr  = ip_info.ip.addr;   /* 10.71.79.1 */
+    dns_info.ip.u_addr.ip4.addr  = ip_info.ip.addr;   /* = the AP IP */
     ESP_ERROR_CHECK(esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_info));
 
     dhcps_offer_t dhcps_dns = OFFER_DNS;
@@ -265,8 +276,8 @@ void wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "init complete: SSID=\"%s\" IP=10.71.79.1 ch=%d",
-             (char *)ap_config.ap.ssid, AP_CHANNEL);
+    ESP_LOGI(TAG, "init complete: SSID=\"%s\" IP=" IPSTR " ch=%d",
+             (char *)ap_config.ap.ssid, IP2STR(&ip_info.ip), AP_CHANNEL);
 }
 
 void wifi_manager_wait_for_ap_ready(void)

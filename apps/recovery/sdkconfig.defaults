@@ -71,3 +71,10 @@ CONFIG_HTTPD_WS_SUPPORT=n
 # recovery-only — the main app's equivalent flag stays off so dev never
 # appears in its settings dropdown (see apps/main/Kconfig.projbuild).
 CONFIG_OTA_ALLOW_DEV_CHANNEL=y
+
+## SOFTAP / LOCAL NETWORK
+# Must match apps/main/sdkconfig.defaults so a browser left on the local domain
+# resolves identically whether the main app or recovery is running. Uncomment to
+# override the Kconfig defaults shown.
+#CONFIG_WIFI_AP_IP_ADDR="10.71.79.1"
+#CONFIG_WIFI_LOCAL_DOMAIN="control.gp"

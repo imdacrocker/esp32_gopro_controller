@@ -2,17 +2,20 @@
  * local_dns.c — selective local DNS responder (see local_dns.h).
  *
  * A single UDP socket on port 53 that resolves only our friendly local name
- * ("control.gp") to the SoftAP IP and answers NXDOMAIN for everything else.
- * Returning NXDOMAIN for foreign names — including the OS captive-portal
- * probe domains (captive.apple.com, connectivitycheck.gstatic.com, …) — is
- * deliberate: it lets the phone correctly conclude the AP has no internet and
- * fall back to cellular for outside traffic, instead of treating us as a
- * captive portal that hijacks every lookup. The AP IP is read once at start
- * from the "WIFI_AP_DEF" netif, so this stays in sync with whatever
- * wifi_manager configures (currently 10.71.79.1) without a hardcoded copy.
+ * (CONFIG_WIFI_LOCAL_DOMAIN, default "control.gp") to the SoftAP IP and answers
+ * NXDOMAIN for everything else. Returning NXDOMAIN for foreign names —
+ * including the OS captive-portal probe domains (captive.apple.com,
+ * connectivitycheck.gstatic.com, …) — is deliberate: it lets the phone
+ * correctly conclude the AP has no internet and fall back to cellular for
+ * outside traffic, instead of treating us as a captive portal that hijacks
+ * every lookup. The AP IP is read once at start from the "WIFI_AP_DEF" netif,
+ * so this tracks whatever wifi_manager configures (CONFIG_WIFI_AP_IP_ADDR)
+ * without a hardcoded copy.
  */
 
 #include "local_dns.h"
+
+#include "sdkconfig.h"
 
 #include <string.h>
 #include <strings.h>
@@ -39,8 +42,8 @@ static const char *TAG = "local_dns";
 #define RCODE_NXDOMAIN  0x03       /* "no such name", low nibble of flags octet 1 */
 #define QD_TYPE_A       0x0001
 
-/* The only name we resolve. Everything else gets NXDOMAIN. */
-#define LOCAL_NAME      "control.gp"
+/* The only name we resolve (from Kconfig). Everything else gets NXDOMAIN. */
+#define LOCAL_NAME      CONFIG_WIFI_LOCAL_DOMAIN
 
 /* DNS wire-format structs. ptr_offset uses the 0xC0xx compression pointer
  * back to the question's name, so we never re-emit the name. */

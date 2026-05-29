@@ -6,7 +6,7 @@ Manages an ESP32 SoftAP that presents the device as a GoPro WiFi Remote to up to
 
 ## Responsibilities
 
-- Create and start the SoftAP with a fixed SSID (`HERO-RC-XXXXXX`), fixed IP (`10.71.79.1`), and DHCP pool (`10.71.79.2–50`).
+- Create and start the SoftAP with a fixed SSID (`HERO-RC-XXXXXX`), a configurable IP (`CONFIG_WIFI_AP_IP_ADDR`, default `10.71.79.1`), and a DHCP pool derived from its /24 subnet (`.2–.50`).
 - Spoof the WiFi MAC OUI to `d8:96:85` (GoPro WiFi Remote) so GoPro cameras recognise the device as a known remote type.
 - Track connected stations and notify callers via callbacks when a station associates, disconnects, or receives a DHCP lease.
 - Apply HT20 bandwidth and disable power save on AP start to minimise BLE interference.
@@ -149,9 +149,10 @@ wifi_manager_wait_for_ap_ready();
 
 | Item | Value |
 |------|-------|
-| AP IP | `10.71.79.1` |
-| Netmask | `255.255.255.0` |
-| DHCP pool | `10.71.79.2` – `10.71.79.50` |
+| AP IP | `CONFIG_WIFI_AP_IP_ADDR` (default `10.71.79.1`) |
+| Netmask | `255.255.255.0` (fixed /24) |
+| DHCP pool | `.2` – `.50` of the AP subnet |
+| Local domain | `CONFIG_WIFI_LOCAL_DOMAIN` (default `control.gp`) |
 | SSID | `HERO-RC-XXXXXX` (last 3 bytes of factory MAC) |
 | Auth | Open (no password) |
 | Channel | 11 (2462 MHz) |
