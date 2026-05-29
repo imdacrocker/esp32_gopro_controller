@@ -11,6 +11,7 @@
 #include "gopro_wifi_rc.h"
 #include "can_manager.h"
 #include "http_server.h"
+#include "local_dns.h"
 #include "log_ring.h"
 #include "shutdown_manager.h"
 
@@ -137,6 +138,12 @@ void app_main(void)
     /* Mount LittleFS, start esp_httpd, register all /api/ handlers.
      * TCP-only — does not touch the radio, safe to do before BLE. */
     http_server_init();
+
+    /* Selective DNS responder: resolves the friendly local domain
+     * (CONFIG_WIFI_LOCAL_DOMAIN) to the SoftAP so users reach the UI by a
+     * memorable name on any phone, and returns NXDOMAIN for everything else.
+     * Safe here — AP is up and TCP/UDP stack is ready. */
+    local_dns_start();
 
     /* Disarm OTA rollback (§11). httpd up = "healthy enough." */
     mark_ota_valid();

@@ -8,11 +8,13 @@
  * See docs/design/ota.md §9 (Phase 1 — Recovery app).
  */
 
+#include "sdkconfig.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "wifi_manager.h"
+#include "local_dns.h"
 #include "recovery_http.h"
 
 static const char *TAG = "recovery_main";
@@ -37,13 +39,20 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* Same SoftAP as main app — the user doesn't need to switch networks
-     * to reach the recovery UI. SSID is HERO-RC-<MAC suffix>, IP 10.71.79.1. */
+    /* Same SoftAP as main app — the user doesn't need to switch networks to
+     * reach the recovery UI. SSID is HERO-RC-<MAC suffix>, IP from Kconfig. */
     wifi_manager_init();
     wifi_manager_wait_for_ap_ready();
 
     size_t html_len = (size_t)(recovery_html_end - recovery_html_start) - 1;
     ESP_ERROR_CHECK(recovery_http_init(recovery_html_start, html_len));
 
-    ESP_LOGI(TAG, "ready — browse to http://10.71.79.1/");
+    /* Selective DNS responder so the friendly local domain resolves here too.
+     * Without it, a browser left on that name from the main app (e.g. after an
+     * OTA commit reboots us into recovery) would fail to reload — wifi_manager
+     * hands out this device as the DNS server, so something must answer. */
+    local_dns_start();
+
+    ESP_LOGI(TAG, "ready — browse to http://%s/ (or http://%s/)",
+             CONFIG_WIFI_LOCAL_DOMAIN, CONFIG_WIFI_AP_IP_ADDR);
 }
