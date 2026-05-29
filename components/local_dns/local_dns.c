@@ -101,11 +101,18 @@ static char *parse_dns_name(char *raw, char *out, size_t out_max)
 }
 
 /*
- * Build a reply in-place from the request. We look at the first question:
+ * Build a reply in-place from the request. We look at the single question:
  *   - an A query for LOCAL_NAME      -> NOERROR with one A answer = s_ap_ip
  *   - any other type for LOCAL_NAME  -> NOERROR with no answers (e.g. AAAA,
  *                                       so the client falls back to the A query)
  *   - any other name                 -> NXDOMAIN
+ *
+ * The response is rebuilt as just [header][question](+[answer]); any records
+ * the client appended after the question — notably an EDNS0 OPT in the
+ * Additional section, which iOS/Android attach — are dropped, and ns_count /
+ * ar_count are zeroed. Otherwise our answer would sit after the OPT, out of
+ * DNS section order, and the client would reject the whole reply and retry.
+ *
  * Setting the QR bit (and, for foreign names, RCODE=NXDOMAIN) is done by
  * indexing the flags octets directly, which is endianness-independent.
  * Returns reply length, or <=0 if the packet should be dropped.
@@ -122,11 +129,8 @@ static int build_reply(const char *req, size_t req_len, char *reply, size_t repl
     if (flags[0] & QR_BIT) {
         return 0;   /* already a response — ignore */
     }
-    flags[0] |= QR_BIT;
-    hdr->an_count = 0;          /* default: no answers; overridden on a match */
-
-    if (ntohs(hdr->qd_count) == 0) {
-        return 0;
+    if (ntohs(hdr->qd_count) != 1) {
+        return 0;   /* only the standard single-question query is handled */
     }
 
     char  name[128];
@@ -135,26 +139,32 @@ static int build_reply(const char *req, size_t req_len, char *reply, size_t repl
     if (after_name == NULL || after_name + sizeof(dns_question_t) > reply + req_len) {
         return -1;
     }
-    uint16_t qtype = ntohs(((dns_question_t *)after_name)->type);
+    uint16_t qtype  = ntohs(((dns_question_t *)after_name)->type);
+    char    *qd_end = after_name + sizeof(dns_question_t);   /* end of question section */
+
+    /* Clean response: question only, no leftover OPT/extra records. */
+    flags[0] |= QR_BIT;             /* QR = response */
+    hdr->an_count = 0;
+    hdr->ns_count = 0;
+    hdr->ar_count = 0;
 
     if (strcasecmp(name, LOCAL_NAME) != 0) {
         flags[1] = (flags[1] & 0xF0) | RCODE_NXDOMAIN;
         ESP_LOGD(TAG, "NXDOMAIN \"%s\"", name);
-        return (int)req_len;    /* header + question, no answer */
+        return (int)(qd_end - reply);
     }
     if (qtype != QD_TYPE_A) {
         /* LOCAL_NAME exists but has no record of this type (e.g. AAAA). */
         ESP_LOGD(TAG, "\"%s\" type 0x%04x -> NOERROR/empty", name, qtype);
-        return (int)req_len;
+        return (int)(qd_end - reply);
     }
 
-    int reply_len = (int)req_len + (int)sizeof(dns_answer_t);
-    if (reply_len > (int)reply_max) {
+    if ((qd_end - reply) + (int)sizeof(dns_answer_t) > (int)reply_max) {
         return -1;
     }
     hdr->an_count = htons(1);
 
-    dns_answer_t *ans = (dns_answer_t *)(reply + req_len);
+    dns_answer_t *ans = (dns_answer_t *)qd_end;
     ans->ptr_offset = htons(0xC000 | (uint16_t)(qd_ptr - reply));
     ans->type       = htons(QD_TYPE_A);
     ans->klass      = htons(1);   /* IN */
@@ -163,7 +173,7 @@ static int build_reply(const char *req, size_t req_len, char *reply, size_t repl
     ans->ip_addr    = s_ap_ip;
 
     ESP_LOGD(TAG, "resolved \"%s\" -> AP", name);
-    return reply_len;
+    return (int)(qd_end - reply) + (int)sizeof(dns_answer_t);
 }
 
 static void dns_server_task(void *arg)
