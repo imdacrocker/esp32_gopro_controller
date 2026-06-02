@@ -121,12 +121,16 @@ Remaining Phase 0 follow-ups (productionizing the proven PoC):
       control, issue one start + one stop. (This is the seed of the
       `gopro_usb` driver, §6.3.)
 
-### 2.2 — RISK: powering the camera
+### 2.2 — Powering the camera
 
-- [ ] Confirm the board/host port can **source 5 V VBUS** at the GoPro's draw
-      (recording + charging can pull >1 A; spec the worst case). Hardware
-      gate — may need an external 5 V supply / power path, not just the S3's
-      USB. Capture findings + any BOM/hardware change here.
+- [x] **Prototyping: resolved.** The PoC powers the GoPro from an **external
+      powered USB hub** (hub supplies VBUS; the ESP32-S3 is host for data).
+      Keeps the board's power budget out of the loop while the firmware is
+      built.
+- [ ] **Production power path — open.** Decide the shipping design: source 5 V
+      VBUS on-board at the GoPro's worst-case draw (recording + charging can
+      pull >1 A) vs an integrated powered-hub / external supply. Capture the
+      BOM/hardware decision here when the prototype matures.
 
 > **Phase 0 exit criterion:** a Hero10+ recording is started and stopped from
 > an ESP32-S3 over USB (CherryUSB link proven), powered by the intended supply.
@@ -178,12 +182,12 @@ camera transport they init.
 | `shutdown_manager` | **move to `components/`** | Drives the per-camera sleep/teardown; wired version iterates 1 target. Depends on `cam_core` vtable, not BLE. |
 | `cam_core` (NEW) | **shared** | Recording intent + `mismatch_step` + grace timers + driver vtable + recording-status cache + CAN-state mapping + time-sync fan-out. **BLE-free** (see §5). |
 | `http_server` | **split** → `http_server_core` (shared) + per-app handlers | Shared: `/api/version`, `/api/ota/*`, `/api/settings/*` (CAN/UTC/channel), `/api/logs`, `/api/system`. Wireless-only: `/api/pair/*`, `/api/cameras`, `/api/rc/*`, `/api/reorder-cameras`, `/api/repair-camera`. Wired: single-camera status + a couple of controls. |
-| `web_ui` | **per-app, shared base** | Common shell (settings, OTA, logs); wireless keeps the multi-camera pairing UI; wired ships a single-camera panel. Factor common JS/CSS into a shared staged set later. |
+| `web_ui` | **one shared UI** | Single codebase for both products; the multi-camera list + pairing/add-camera/reorder affordances are gated off in the wired build (via the product variant). Everything else (settings, OTA, logs, status) is identical. |
 | `camera_manager` | **decompose** (see §5) | Splits into `cam_core` (shared) + `camera_manager_wireless` (multi-slot, pairing, BLE/RC glue). |
 | `ble_core`, `open_gopro_ble`, `gopro_wifi_rc` | **wireless-only** | Stay under `apps/wireless/components/`. |
 | `usb_host_net` (NEW) | **wired-only** | **CherryUSB** host + CDC-ECM/NCM/RNDIS class → lwIP netif + DHCP client (proven, §2.1). |
 | `gopro/gopro_usb` (NEW) | **wired-only** | Open GoPro HTTP commands over the USB netif. Reuses the HTTP-command shapes from `gopro_wifi_rc`/Open-GoPro where possible. |
-| `gopro/gopro_model.h` | **shared header** | Already ESP-IDF-free. Add a `gopro_model_supports_usb_control()` predicate (Hero10+). |
+| `gopro/gopro_model.h` | **shared header** | Already ESP-IDF-free. Add a `gopro_model_supports_usb_control()` predicate — **Hero10+ only**. Hero9 is explicitly excluded (confirmed broken: a camera firmware bug breaks USB shutter-start). |
 | `recovery` | **one tree, per-product build** | See §8. |
 
 ---
@@ -259,10 +263,15 @@ Decomposition steps:
 - [ ] "Discovery" = USB attach + camera-control-enable handshake → mark the
       single target ready (`*_on_camera_ready`). Unplug → not-ready.
 
-### 6.4 Wired web UI
-- [ ] Trim to: single-camera status (plugged / ready / recording), manual
-      start/stop, and the shared settings (CAN IDs, UTC, OTA channel, logs).
-      Drop pairing/add-camera/reorder entirely.
+### 6.4 Wired web UI (shared UI, variant-gated)
+- [ ] Keep **one shared web UI**. In the wired build, gate off the
+      multi-camera list + pairing/add-camera/reorder; surface a single-camera
+      panel (plugged / ready / recording + manual start/stop). All shared
+      settings (CAN IDs, UTC, OTA channel, logs) stay common. Drive the
+      difference off the product variant (a `/api/version`-style capability
+      flag the UI reads, so the same `storage.bin` could in principle serve
+      both — confirm whether to ship one UI image or build-time-trim per
+      product).
 
 ---
 
@@ -279,8 +288,10 @@ Decomposition steps:
 
 ## 8. Recovery: one tree, per-product OTA source
 
-The recovery app is tiny and product-agnostic in code. "Functionally the same,
-different OTA source" maps cleanly to a **compile-time product selector**:
+The recovery app is tiny and product-agnostic in code. **Decided:** a
+**compile-time product selector** (`CONFIG_PRODUCT_VARIANT`) — users won't
+normally switch a device between products, so there's no need for a runtime/NVS
+field. "Functionally the same, different OTA source" maps cleanly to this:
 
 - [ ] Add `CONFIG_PRODUCT_VARIANT` (`wireless` | `wired`) to recovery (and the
       main apps), defaulting per app. Recovery uses it only to choose the OTA
@@ -323,10 +334,10 @@ Recommendation up top, then the trade-offs so you can confirm before Phase 8.
   More machinery than is justified today; revisit only if cadences truly
   diverge.
 
-**Proposed:** start with **Option A** (lockstep, one `VERSION`), because shared
-code dominates and lockstep is the safest default while the two products are
-young. Re-evaluate toward B only once their release cadences clearly diverge.
-> ⮕ **Decision to confirm before Phase 8.**
+**Decided: Option A** (lockstep, one `VERSION`, product dimension in the OTA
+route + per-product floating tags). Shared code dominates and lockstep is the
+safest default while the two products are young. Revisit toward B only if their
+release cadences clearly diverge.
 
 Release-pipeline work once decided:
 - [ ] Parameterize `release-beta.yml` / `release-promote.yml` over a product
@@ -373,20 +384,31 @@ user-visible change; the wired product only appears from Phase 4.
 
 ---
 
-## 11. Open decisions to confirm
+## 11. Decisions
 
-1. **Versioning model** — Option A (recommended) vs B vs C (§9).
-2. **USB networking class** — which class the target Hero presents over
-   CherryUSB (ECM vs NCM vs RNDIS), and how CherryUSB is vendored into the IDF
-   build (§2.1). *Stack chosen (CherryUSB); class to be recorded from the PoC.*
-3. **Power path** — does the board source VBUS or do we need an external 5 V
-   supply / hardware revision? (§2.2)
-4. **Wired camera scope** — strictly single camera, Hero10+ only? (Confirms
-   `cam_core N=1` and a `gopro_model_supports_usb_control()` allowlist.)
-5. **Web UI sharing** — one shared UI with build-time feature flags, or two UIs
-   with a shared base? (Affects §6.4 / `web_ui` staging.)
-6. **Recovery selector** — compile-time `CONFIG_PRODUCT_VARIANT` (recommended,
-   §8) vs a runtime/NVS product field.
+Resolved:
+- [x] **Versioning model** — **Option A**: one `VERSION`, both products built
+      per release, product dimension in the OTA route + per-product floating
+      tags (§9).
+- [x] **Wired camera scope** — **strictly single camera, Hero10+ only**. Hero9
+      excluded (confirmed broken: firmware bug on USB shutter-start). Drives
+      `cam_core N=1` and a Hero10+ `gopro_model_supports_usb_control()`
+      allowlist (§4, §6.3).
+- [x] **Web UI sharing** — **one shared UI**; only the multi-camera list +
+      pairing differ, gated off the product variant (§6.4).
+- [x] **Recovery selector** — **compile-time `CONFIG_PRODUCT_VARIANT`**; users
+      won't normally switch a device between products, so no runtime/NVS field
+      (§8).
+- [x] **Power path (prototyping)** — **external powered USB hub** (§2.2).
+
+Open:
+- [ ] **USB networking class** — record which class the target Hero presents
+      over CherryUSB (ECM vs NCM vs RNDIS) and how CherryUSB is vendored into
+      the IDF build, from the PoC (§2.1).
+- [ ] **Production power path** — on-board VBUS vs integrated/external supply,
+      once the prototype matures (§2.2).
+- [ ] **Wired UI delivery** — one shared `storage.bin` with a runtime
+      capability flag, or build-time-trimmed per product (§6.4).
 
 ---
 
