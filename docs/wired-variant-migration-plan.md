@@ -80,40 +80,46 @@ illustration of how much is shared.
 
 ---
 
-## 2. The big technical unknowns (do these FIRST — Phase 0 spikes)
+## 2. Technical foundations & remaining unknowns (Phase 0)
 
-These gate the whole effort. **None of the refactor is worth doing if the USB
-path doesn't pan out**, so prove them before the large code moves.
+The hardest unknown — can the ESP32-S3 act as USB host and talk to a GoPro over
+USB at all — has been **proven** (see §2.1). What remains is productionizing
+that path and confirming the power story (§2.2).
 
-### 2.1 — RISK: USB-host networking to the GoPro
+### 2.1 — USB-host networking to the GoPro — PROVEN via CherryUSB
 
 Open GoPro **wired control** is, under the hood, *IP networking over USB*:
 - A Hero10+ connected over USB-C enumerates as a **USB network gadget**
-  (CDC-NCM / RNDIS / ECM class). The camera runs a DHCP server and exposes the
+  (CDC-ECM / NCM / RNDIS class). The camera runs a DHCP server and exposes the
   **same Open GoPro HTTP API** (port 8080) at a fixed per-serial IP
   (`172.2X.1XX.51`). You enable it with a control request
   (`GET /gopro/camera/control/wired_usb?p=1`) then issue the same
   `/gopro/...` start/stop/keep-alive/datetime calls.
 - **Implication (good news):** the *command layer* is essentially the existing
-  Open GoPro HTTP path. The genuinely new part is **bringing up a network
-  interface over USB on the ESP32-S3 acting as USB Host.**
+  Open GoPro HTTP path. The new part is bringing up a network interface over
+  USB on the ESP32-S3 acting as USB Host.
 
-Spike tasks:
-- [ ] Confirm the ESP32-S3 USB-OTG can run **USB Host** on the ESP32-CAN-X2
-      board (D+/D- routed, not just the native USB-Serial-JTAG). Verify the
-      board exposes a usable host port and that VBUS can be sourced (see 2.2).
-- [ ] Prove an ESP-IDF **USB Host network-class** path exists or is buildable:
-      evaluate `usb_host` lib + a CDC-NCM/ECM host class driver feeding lwIP a
-      custom netif. ESP-IDF ships CDC-**ACM** host first-class; NCM/ECM **host**
-      is not first-class — assess Espressif's `usb_host_*` / `iot_usbh_*`
-      components and community NCM hosts. **This is the single highest-risk
-      item.**
-- [ ] PoC: ESP32-S3 → Hero10+, bring up the USB netif, DHCP a lease, `GET`
-      the camera info JSON, issue one start + one stop over HTTP. Capture
-      timings (enumerate → first command). This PoC can live on a throwaway
-      branch against today's `apps/main` tree — no refactor needed to prove it.
-- [ ] Decide fallback if NCM host is impractical: (a) RNDIS host, (b) a small
-      USB-host co-processor, (c) defer. Record the decision here.
+**Status: proven.** USB host → GoPro has been demonstrated on the ESP32-S3
+using the **[CherryUSB](https://github.com/cherry-embedded/CherryUSB)** stack —
+a portable USB host/device stack with CDC-ECM/NCM/RNDIS host classes and an
+ESP32-S3 port, used **instead of** ESP-IDF's native `usb_host` lib (whose
+NCM/ECM *host* support is not first-class). This removes the single biggest
+risk that previously gated the whole effort: `usb_host_net` (§6.2) is built on
+CherryUSB rather than invented from scratch.
+
+Remaining Phase 0 follow-ups (productionizing the proven PoC):
+- [x] **Proven:** ESP32-S3 USB Host enumerates a GoPro and brings up the USB
+      link via CherryUSB.
+- [ ] Record the specifics here so the build is reproducible: **which network
+      class** the target Hero presents (ECM vs NCM vs RNDIS), CherryUSB
+      version/commit, the ESP32-S3 board used for the PoC, and how CherryUSB is
+      vendored into the IDF build (managed component vs in-tree).
+- [ ] Confirm the integration with **lwIP** (CherryUSB host netif → DHCP client
+      lease → TCP) and capture timings (enumerate → link up → first HTTP
+      command), plus attach/detach (unplug/replug) behavior.
+- [ ] End-to-end over the proven link: `GET` the camera info JSON, enable wired
+      control, issue one start + one stop. (This is the seed of the
+      `gopro_usb` driver, §6.3.)
 
 ### 2.2 — RISK: powering the camera
 
@@ -123,8 +129,9 @@ Spike tasks:
       USB. Capture findings + any BOM/hardware change here.
 
 > **Phase 0 exit criterion:** a Hero10+ recording is started and stopped from
-> an ESP32-S3 over USB, powered by the intended supply. Only then do the
-> refactor phases below pay off.
+> an ESP32-S3 over USB (CherryUSB link proven), powered by the intended supply.
+> The link half is already demonstrated; remaining gates are the HTTP
+> start/stop over it and the power story (§2.2).
 
 ---
 
@@ -174,7 +181,7 @@ camera transport they init.
 | `web_ui` | **per-app, shared base** | Common shell (settings, OTA, logs); wireless keeps the multi-camera pairing UI; wired ships a single-camera panel. Factor common JS/CSS into a shared staged set later. |
 | `camera_manager` | **decompose** (see §5) | Splits into `cam_core` (shared) + `camera_manager_wireless` (multi-slot, pairing, BLE/RC glue). |
 | `ble_core`, `open_gopro_ble`, `gopro_wifi_rc` | **wireless-only** | Stay under `apps/wireless/components/`. |
-| `usb_host_net` (NEW) | **wired-only** | USB host + NCM/ECM → lwIP netif + DHCP client. |
+| `usb_host_net` (NEW) | **wired-only** | **CherryUSB** host + CDC-ECM/NCM/RNDIS class → lwIP netif + DHCP client (proven, §2.1). |
 | `gopro/gopro_usb` (NEW) | **wired-only** | Open GoPro HTTP commands over the USB netif. Reuses the HTTP-command shapes from `gopro_wifi_rc`/Open-GoPro where possible. |
 | `gopro/gopro_model.h` | **shared header** | Already ESP-IDF-free. Add a `gopro_model_supports_usb_control()` predicate (Hero10+). |
 | `recovery` | **one tree, per-product build** | See §8. |
@@ -238,10 +245,11 @@ Decomposition steps:
 - [ ] Boots to the SoftAP web UI + OTA with a stub/no camera. **Shippable
       milestone** — proves the shared spine works in the second product.
 
-### 6.2 `usb_host_net` (NEW, gated on the Phase 0 spike)
-- [ ] USB Host init, device-attach detection, NCM/ECM class bring-up, lwIP
-      netif + DHCP client, link up/down events surfaced like
-      `wifi_manager`'s station callbacks.
+### 6.2 `usb_host_net` (NEW — productionize the proven CherryUSB PoC)
+- [ ] Vendor CherryUSB into the wired app (managed component or in-tree, per
+      §2.1 decision). USB Host init, device-attach detection, CDC-ECM/NCM/RNDIS
+      class bring-up, lwIP netif + DHCP client, link up/down events surfaced
+      like `wifi_manager`'s station callbacks. Built on the Phase 0 PoC code.
 
 ### 6.3 `gopro/gopro_usb` driver (NEW)
 - [ ] Implement `camera_driver_t` over the USB netif: enable wired control,
@@ -338,8 +346,9 @@ Release-pipeline work once decided:
 Each phase is a reviewable PR-sized chunk. Phases 1–3 ship with **zero**
 user-visible change; the wired product only appears from Phase 4.
 
-- [ ] **Phase 0 — Spikes & hardware gate** (§2). USB-NCM host PoC + VBUS
-      power. *Hard gate.*
+- [~] **Phase 0 — Foundations & hardware gate** (§2). USB host link **proven
+      via CherryUSB**; remaining: HTTP start/stop over the link + VBUS power
+      (§2.2). *Hard gate — power half still open.*
 - [ ] **Phase 1 — Rename** `apps/main` → `apps/wireless` (`git mv` to preserve
       history). Update `project()` name, `sdkconfig.defaults`,
       `idf_component.yml`, CI `matrix.app`, `release-*.yml` paths, the
@@ -353,7 +362,8 @@ user-visible change; the wired product only appears from Phase 4.
       wireless behavior-identical. *Largest phase.*
 - [ ] **Phase 4 — `apps/wired` skeleton** (§6.1): SoftAP + web UI + OTA + CAN,
       stub camera. Shippable.
-- [ ] **Phase 5 — `usb_host_net`** (§6.2), backed by the Phase 0 PoC.
+- [ ] **Phase 5 — `usb_host_net`** (§6.2): productionize the proven CherryUSB
+      PoC into a reusable component.
 - [ ] **Phase 6 — `gopro_usb` driver** (§6.3) on the `cam_core` vtable; end to
       end: CAN logging → USB start/stop on a Hero10+.
 - [ ] **Phase 7 — Wired web UI trim** (§6.4) + per-product recovery build &
@@ -366,8 +376,9 @@ user-visible change; the wired product only appears from Phase 4.
 ## 11. Open decisions to confirm
 
 1. **Versioning model** — Option A (recommended) vs B vs C (§9).
-2. **USB networking class** — NCM vs ECM vs RNDIS host; pending the Phase 0
-   spike (§2.1).
+2. **USB networking class** — which class the target Hero presents over
+   CherryUSB (ECM vs NCM vs RNDIS), and how CherryUSB is vendored into the IDF
+   build (§2.1). *Stack chosen (CherryUSB); class to be recorded from the PoC.*
 3. **Power path** — does the board source VBUS or do we need an external 5 V
    supply / hardware revision? (§2.2)
 4. **Wired camera scope** — strictly single camera, Hero10+ only? (Confirms
