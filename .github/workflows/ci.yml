@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [main, recovery]
+        app: [wireless, recovery]
     steps:
       - uses: actions/checkout@v5
 

@@ -22,7 +22,7 @@ Source the IDF environment once per shell:
 `dev.ps1` lives at the repo root and wraps build + OTA-flash + monitor. Run from the repo root:
 
 ```powershell
-.\dev.ps1                          # build + OTA-flash + monitor (main app)
+.\dev.ps1                          # build + OTA-flash + monitor (wireless app)
 .\dev.ps1 build                    # build only
 .\dev.ps1 flash                    # build + OTA-flash (no monitor)
 .\dev.ps1 flash-usb                # build + USB-flash to running slot
@@ -35,7 +35,7 @@ Source the IDF environment once per shell:
 .\dev.ps1 -port COM7 ...           # override serial port (default COM3)
 ```
 
-The OTA path posts to `http://10.71.79.1/api/ota/{upload-app,upload-ui,commit}` — your laptop must be associated to the `HERO-RC-XXXX` SoftAP first. OTA is main-app only (recovery has no `storage.bin`).
+The OTA path posts to `http://10.71.79.1/api/ota/{upload-app,upload-ui,commit}` — your laptop must be associated to the `HERO-RC-XXXX` SoftAP first. OTA is wireless-app only (recovery has no `storage.bin`).
 
 ---
 
@@ -47,7 +47,7 @@ For a brand-new board, or after `python -m esptool erase_flash`, use the full pr
 .\tools\flash_factory.ps1
 ```
 
-This builds both apps and writes everything over USB at correct offsets: bootloader, partition table, a stamped `ota_data_initial` that selects `ota_0` (so the bootloader lands in the main app on first boot, not recovery — IDF emits the file blank by default and a blank otadata makes the bootloader default to factory), recovery into `factory`, main app into `ota_0`, and the LittleFS web UI into `storage`. `ota_1` is left blank for the first OTA to populate.
+This builds both apps and writes everything over USB at correct offsets: bootloader, partition table, a stamped `ota_data_initial` that selects `ota_0` (so the bootloader lands in the wireless app on first boot, not recovery — IDF emits the file blank by default and a blank otadata makes the bootloader default to factory), recovery into `factory`, wireless app into `ota_0`, and the LittleFS web UI into `storage`. `ota_1` is left blank for the first OTA to populate.
 
 ---
 
@@ -56,7 +56,7 @@ This builds both apps and writes everything over USB at correct offsets: bootloa
 Each app builds with `idf.py` like a normal ESP-IDF project:
 
 ```powershell
-cd apps\main
+cd apps\wireless
 idf.py build
 
 cd ..\recovery
@@ -89,10 +89,10 @@ CI (`.github/workflows/ci.yml`) runs these on every push/PR alongside an
 
 Two separate UIs, one per app:
 
-- **Main app:** [`apps/main/web_ui/`](../apps/main/web_ui/) — `index.html`, `style.css`, `app.js`, `updates.js`. Compressed by `compress.py` at build time and packed into the `storage` LittleFS partition. Served from `http://10.71.79.1/`.
+- **Main app:** [`apps/wireless/web_ui/`](../apps/wireless/web_ui/) — `index.html`, `style.css`, `app.js`, `updates.js`. Compressed by `compress.py` at build time and packed into the `storage` LittleFS partition. Served from `http://10.71.79.1/`.
 - **Recovery app:** [`apps/recovery/main/recovery.html`](../apps/recovery/main/recovery.html) — single embedded HTML page (no LittleFS dependency), served from the same address when recovery is the running app.
 
-After editing main-app web files:
+After editing wireless-app web files:
 
 ```powershell
 .\dev.ps1 flash    # picks up storage.bin changes via OTA

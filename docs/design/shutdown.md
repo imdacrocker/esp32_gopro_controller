@@ -322,7 +322,7 @@ loop from immediately redialing them.
 
 ## 8. HTTP endpoints
 
-New file: `apps/main/components/http_server/api_shutdown.c`. Registered from
+New file: `apps/wireless/components/http_server/api_shutdown.c`. Registered from
 `driver.c` like other `api_*_register()` calls. `http_server` CMakeLists
 gains `shutdown_manager` in REQUIRES. `max_uri_handlers` grows by 2.
 
@@ -519,7 +519,7 @@ bounded and only occurs during the operator-triggered shutdown.
 ## 13. Implementation order
 
 1. **shutdown_manager component.** Create
-   `apps/main/components/shutdown_manager/` with `include/shutdown_manager.h`,
+   `apps/wireless/components/shutdown_manager/` with `include/shutdown_manager.h`,
    `shutdown_manager.c`, `CMakeLists.txt`. State machine, per-slot task
    spawner, public gate accessor.
 2. **Driver vtable.** Add nullable `sleep` entry to `camera_driver_t` in

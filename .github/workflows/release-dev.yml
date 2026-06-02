@@ -8,8 +8,8 @@ name: release-dev
 #   - No VERSION bump required; the version stamp is dev-<shortsha>-<utc>.
 #   - No immutable v<X.Y.Z> tag; only the floating latest-dev release exists.
 #   - No promotion path; dev never becomes beta or stable.
-#   - Recovery-only consumption — the main app's settings dropdown does not
-#     list "dev" (CONFIG_OTA_ALLOW_DEV_CHANNEL stays off in apps/main).
+#   - Recovery-only consumption — the wireless app's settings dropdown does not
+#     list "dev" (CONFIG_OTA_ALLOW_DEV_CHANNEL stays off in apps/wireless).
 #     Testers must boot into recovery to pick this channel.
 #   - No version check on the device side; recovery installs whatever the
 #     manifest at latest-dev points at.
@@ -44,14 +44,14 @@ jobs:
       - name: Stamp version into sdkconfig.defaults
         run: |
           sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.stamp }}\"/" \
-              apps/main/sdkconfig.defaults
+              apps/wireless/sdkconfig.defaults
 
-      - name: Build main app
+      - name: Build wireless app
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32s3
-          path: apps/main
+          path: apps/wireless
 
       - name: Build recovery app
         uses: espressif/esp-idf-ci-action@v1
@@ -63,8 +63,8 @@ jobs:
       - name: Stage assets and generate manifest
         run: |
           mkdir -p release
-          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
-          cp apps/main/build/storage.bin                          release/storage.bin
+          cp apps/wireless/build/esp32_gopro_canbus_wireless.bin release/app.bin
+          cp apps/wireless/build/storage.bin                          release/storage.bin
           cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
           python tools/release/make_manifest.py \
             --version "${{ steps.ver.outputs.stamp }}" \

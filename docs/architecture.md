@@ -12,7 +12,7 @@ For deeper detail on individual subsystems, see the design docs under [`design/`
 esp32_gopro_controller/
 ├── apps/
 │   ├── main/                       — primary firmware (Hero control, web UI, CAN, OTA)
-│   │   ├── components/             — main-app-only components
+│   │   ├── components/             — wireless-app-only components
 │   │   ├── web_ui/                 — index.html, app.js, style.css, updates.js, compress.py
 │   │   ├── main/                   — app_main + Kconfig.projbuild
 │   │   └── sdkconfig.defaults
@@ -87,10 +87,10 @@ The two apps are independent ESP-IDF projects with their own `CMakeLists.txt` an
 
 ## Recovery app
 
-A stripped-down ESP-IDF project that lives in the `factory` partition. Same `wifi_manager`-based SoftAP, embedded HTML page (no LittleFS dependency), accepts manual `.bin` uploads via web form, can also auto-update from the cloud using the same `latest-{channel}/manifest.json` flow as the main app. No camera control, no CAN, no BLE. Reachable by:
+A stripped-down ESP-IDF project that lives in the `factory` partition. Same `wifi_manager`-based SoftAP, embedded HTML page (no LittleFS dependency), accepts manual `.bin` uploads via web form, can also auto-update from the cloud using the same `latest-{channel}/manifest.json` flow as the wireless app. No camera control, no CAN, no BLE. Reachable by:
 
-- bootloader fallback (bad main app or rollback fire),
-- `POST /api/ota/reboot-recovery` from the main app,
+- bootloader fallback (bad wireless app or rollback fire),
+- `POST /api/ota/reboot-recovery` from the wireless app,
 - or USB reflash via `tools/flash_factory.ps1`.
 
 ## Core affinity
@@ -113,19 +113,19 @@ BLE and WiFi are pinned to opposite cores to reduce cache thrashing and radio co
 | [`wifi_manager`](../components/wifi_manager/README.md) | SoftAP, DHCP, MAC spoofing, station tracking. Both apps. |
 | `ota_io` | OTA partition writer, storage writer, SHA-skip NVS, channel get/set. Both apps. |
 
-### Main-app only (`apps/main/components/`)
+### Main-app only (`apps/wireless/components/`)
 
 | Component | Description |
 |-----------|-------------|
-| [`ble_core`](../apps/main/components/ble_core/README.md) | NimBLE scan/connect/encrypt/notify/bond management |
-| [`camera_manager`](../apps/main/components/camera_manager) | Slot lifecycle, NVS records, driver vtable, mismatch correction |
-| [`gopro/gopro_model.h`](../apps/main/components/gopro/gopro_model.h) | GoPro model capability helpers (`uses_rc_emulation`, `uses_ble_control`) |
-| [`open_gopro_ble`](../apps/main/components/gopro/open_gopro_ble/README.md) | Discovery, pairing, BLE control driver for Hero 9+ |
-| [`gopro_wifi_rc`](../apps/main/components/gopro/gopro_wifi_rc/README.md) | RC-emulation driver over WiFi (Hero 4) |
-| [`can_manager`](../apps/main/components/can_manager/README.md) | TWAI node, four configurable channels (logging RX / camera-status TX / GPS UTC RX / shutdown RX — defaults 0x600/0x601/0x602/0x603), GPS UTC, NVS persistence (bitrate + channel IDs + tz + last UTC) |
-| [`http_server`](../apps/main/components/http_server) | esp_httpd, LittleFS web UI, all `/api/` handlers, soft recovery fallback when LittleFS is empty |
-| [`log_ring`](../apps/main/components/log_ring) | In-RAM diagnostic log ring buffer for user reports; vprintf hook, NVS-persisted enable toggle (default OFF). See [`design/log-capture.md`](design/log-capture.md) |
-| [`shutdown_manager`](../apps/main/components/shutdown_manager) | Operator + CAN-0x603 triggered system shutdown. Owns the `IDLE → SHUTTING_DOWN → COMPLETE` state machine, spawns one per-slot task that issues stop-recording + sleep + BLE-terminate + teardown (5 s deadline per slot, slow cameras don't block completion). Exposes `shutdown_manager_is_active()` as the gate consulted by `can_manager` (drop 0x600, stop 0x601 TX), `ble_core` (suppress reconnects), and every action HTTP POST (503). See [`design/shutdown.md`](design/shutdown.md). |
+| [`ble_core`](../apps/wireless/components/ble_core/README.md) | NimBLE scan/connect/encrypt/notify/bond management |
+| [`camera_manager`](../apps/wireless/components/camera_manager) | Slot lifecycle, NVS records, driver vtable, mismatch correction |
+| [`gopro/gopro_model.h`](../apps/wireless/components/gopro/gopro_model.h) | GoPro model capability helpers (`uses_rc_emulation`, `uses_ble_control`) |
+| [`open_gopro_ble`](../apps/wireless/components/gopro/open_gopro_ble/README.md) | Discovery, pairing, BLE control driver for Hero 9+ |
+| [`gopro_wifi_rc`](../apps/wireless/components/gopro/gopro_wifi_rc/README.md) | RC-emulation driver over WiFi (Hero 4) |
+| [`can_manager`](../apps/wireless/components/can_manager/README.md) | TWAI node, four configurable channels (logging RX / camera-status TX / GPS UTC RX / shutdown RX — defaults 0x600/0x601/0x602/0x603), GPS UTC, NVS persistence (bitrate + channel IDs + tz + last UTC) |
+| [`http_server`](../apps/wireless/components/http_server) | esp_httpd, LittleFS web UI, all `/api/` handlers, soft recovery fallback when LittleFS is empty |
+| [`log_ring`](../apps/wireless/components/log_ring) | In-RAM diagnostic log ring buffer for user reports; vprintf hook, NVS-persisted enable toggle (default OFF). See [`design/log-capture.md`](design/log-capture.md) |
+| [`shutdown_manager`](../apps/wireless/components/shutdown_manager) | Operator + CAN-0x603 triggered system shutdown. Owns the `IDLE → SHUTTING_DOWN → COMPLETE` state machine, spawns one per-slot task that issues stop-recording + sleep + BLE-terminate + teardown (5 s deadline per slot, slow cameras don't block completion). Exposes `shutdown_manager_is_active()` as the gate consulted by `can_manager` (drop 0x600, stop 0x601 TX), `ble_core` (suppress reconnects), and every action HTTP POST (503). See [`design/shutdown.md`](design/shutdown.md). |
 
 ### Recovery-app only (`apps/recovery/components/`)
 
@@ -135,7 +135,7 @@ BLE and WiFi are pinned to opposite cores to reduce cache thrashing and radio co
 
 ---
 
-## Boot Sequence (main app)
+## Boot Sequence (wireless app)
 
 ```c
 app_main()

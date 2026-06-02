@@ -39,14 +39,14 @@ jobs:
       - name: Stamp version into sdkconfig.defaults
         run: |
           sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.version }}\"/" \
-              apps/main/sdkconfig.defaults
+              apps/wireless/sdkconfig.defaults
 
-      - name: Build main app
+      - name: Build wireless app
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32s3
-          path: apps/main
+          path: apps/wireless
 
       - name: Build recovery app
         uses: espressif/esp-idf-ci-action@v1
@@ -58,8 +58,8 @@ jobs:
       - name: Stage assets and generate manifest
         run: |
           mkdir -p release
-          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
-          cp apps/main/build/storage.bin                          release/storage.bin
+          cp apps/wireless/build/esp32_gopro_canbus_wireless.bin release/app.bin
+          cp apps/wireless/build/storage.bin                          release/storage.bin
           cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
           python tools/release/make_manifest.py \
             --version "${{ steps.ver.outputs.tag }}" \
@@ -69,10 +69,10 @@ jobs:
             --output release/manifest.json
 
       - name: Stamp ota_data_initial to select ota_0
-        # IDF emits apps/main/build/ota_data_initial.bin as all-0xFF, which
+        # IDF emits apps/wireless/build/ota_data_initial.bin as all-0xFF, which
         # the bootloader interprets as "boot factory" when a factory
         # partition exists. We emit a valid seq=1 entry into release/ —
-        # writing into apps/main/build/ would fail with EACCES because the
+        # writing into apps/wireless/build/ would fail with EACCES because the
         # esp-idf-ci-action runs the build inside Docker and files there
         # are owned by the container UID, not the runner user.
         run: |
@@ -82,19 +82,19 @@ jobs:
         # One-shot image flashable at 0x0 — what ESP Launchpad and
         # flash_factory.ps1 consume for fresh-board provisioning. Layout
         # mirrors partitions.csv; the stamped ota_data_initial.bin above
-        # makes the device land in the main app on first boot (factory
+        # makes the device land in the wireless app on first boot (factory
         # recovery still serves as the bootloader's failsafe).
         run: |
           python -m pip install --quiet esptool
           python -m esptool --chip esp32s3 merge-bin \
             -o release/factory.bin \
             --flash_mode dio --flash_size 8MB --flash_freq 80m \
-            0x000000 apps/main/build/bootloader/bootloader.bin \
-            0x008000 apps/main/build/partition_table/partition-table.bin \
+            0x000000 apps/wireless/build/bootloader/bootloader.bin \
+            0x008000 apps/wireless/build/partition_table/partition-table.bin \
             0x00F000 release/ota_data_initial.bin \
             0x020000 apps/recovery/build/esp32_gopro_canbus_recovery.bin \
-            0x0E0000 apps/main/build/esp32_gopro_canbus_controller_v2.bin \
-            0x290000 apps/main/build/storage.bin
+            0x0E0000 apps/wireless/build/esp32_gopro_canbus_wireless.bin \
+            0x290000 apps/wireless/build/storage.bin
 
       - name: Create immutable release
         # Prerelease=true until release-promote.yml flips it to stable.

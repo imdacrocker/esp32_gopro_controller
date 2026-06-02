@@ -37,8 +37,8 @@ static const char *TAG = "http_api_system";
  *                      version rather than reading it from a file
  *   recovery:          factory partition's app desc; "unknown" if missing
  *   channel:           shared NVS ota/channel via ota_io
- *   running_partition: label (typically ota_0 or ota_1 in main mode)
- *   mode:              "main"
+ *   running_partition: label (typically ota_0 or ota_1 in wireless mode)
+ *   mode:              "wireless"
  *   ota_base_url:      compile-time CONFIG_OTA_BASE_URL — the browser uses
  *                      this to compose the manifest URL (no /manifest.json
  *                      file needed on LittleFS)
@@ -73,7 +73,7 @@ static esp_err_t handler_version(httpd_req_t *req)
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"%s\",\"recovery\":\"%s\","
              "\"channel\":\"%s\",\"running_partition\":\"%s\","
-             "\"mode\":\"main\","
+             "\"mode\":\"wireless\","
              "\"build_date\":\"%s\",\"build_time\":\"%s\","
              "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
              app->version, app->version, recovery, channel,

@@ -43,7 +43,7 @@ report flow. Companion to [`camera-manager.md`](camera-manager.md),
 | Compile-time max level | `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` (VERBOSE excluded) |
 | Default runtime level | `CONFIG_LOG_DEFAULT_LEVEL_INFO=y` (clean boot before hook installs) |
 | Runtime level after hook install | `esp_log_level_set("*", ESP_LOG_DEBUG)` |
-| Component layout | New `apps/main/components/log_ring/`. HTTP endpoints live in `http_server/api_logs.c`. |
+| Component layout | New `apps/wireless/components/log_ring/`. HTTP endpoints live in `http_server/api_logs.c`. |
 | Endpoints | `GET /api/logs/download`, `POST /api/logs/clear`, `GET /api/logs/stats` |
 | Web UI | New **Diagnostics** section: three buttons (Download log, Email log, Clear log) plus a "lines dropped: N" indicator |
 | Email recipient | Hard-coded `imdacrocker@gmail.com` for v1 (Kconfig'd for later override) |
@@ -89,7 +89,7 @@ on it (via `api_logs.c`).
 
 ## 4. New component: `log_ring`
 
-Lives at `apps/main/components/log_ring/`. Recovery does **not** depend on it
+Lives at `apps/wireless/components/log_ring/`. Recovery does **not** depend on it
 — recovery stays minimal per `ota.md`.
 
 ### Public API (`include/log_ring.h`)
@@ -219,7 +219,7 @@ Notes:
 
 ### Kconfig
 
-`apps/main/components/log_ring/Kconfig`:
+`apps/wireless/components/log_ring/Kconfig`:
 
 ```
 menu "Log Ring"
@@ -268,7 +268,7 @@ owns timezone and CAN-bitrate NVS). `api_settings.c` just calls
 
 ## 5. sdkconfig changes
 
-Add to `apps/main/sdkconfig.defaults`:
+Add to `apps/wireless/sdkconfig.defaults`:
 
 ```
 # Diagnostic log ring
@@ -283,7 +283,7 @@ boot path stays quiet on UART until `log_ring_init()` runs.
 
 ## 6. Boot integration
 
-`apps/main/main/main.c` — `log_ring_init()` becomes the **first** call in
+`apps/wireless/main/main.c` — `log_ring_init()` becomes the **first** call in
 `app_main`, before NVS init. This guarantees we capture errors from every
 subsequent subsystem.
 
@@ -312,7 +312,7 @@ sequence stays unchanged; `log_ring_init` is simply prepended.
 
 ## 7. HTTP endpoints
 
-New file: `apps/main/components/http_server/api_logs.c`. Registered from
+New file: `apps/wireless/components/http_server/api_logs.c`. Registered from
 `driver.c` like the other `api_*_register()` calls. The component's
 `CMakeLists.txt` gains `log_ring` in `REQUIRES`. The `max_uri_handlers` ceiling
 in `driver.c` grows by 3.
@@ -567,7 +567,7 @@ console).
 | CPU | One memcpy + mutex pair per log line. Negligible relative to existing serial output. |
 
 The static array is visible to `idf.py size` so RAM regressions show up at
-build time. If `apps/main` ever runs tight on internal SRAM, options in order
+build time. If `apps/wireless` ever runs tight on internal SRAM, options in order
 of preference: lower `LOG_RING_SIZE_KB` to 32; switch the ring to PSRAM if a
 hardware module with PSRAM gets adopted; gzip the download to allow a smaller
 ring without sacrificing capture history.
@@ -616,7 +616,7 @@ ring without sacrificing capture history.
    its own NVS persistence** (namespace `logring`, key `enabled`).
 2. Wire `log_ring_init()` as the first call in `app_main`, and
    `log_ring_load_persisted_enabled()` immediately after `nvs_flash_init()`.
-   Add `log_ring` to `apps/main/main/CMakeLists.txt` REQUIRES.
+   Add `log_ring` to `apps/wireless/main/CMakeLists.txt` REQUIRES.
 3. **sdkconfig:** existing defaults already pair `LOG_DEFAULT_LEVEL_INFO=y`
    with `LOG_MAXIMUM_LEVEL_VERBOSE=y` — no change needed.
 4. Add `api_logs.c` (three endpoints), register from `driver.c`, bump

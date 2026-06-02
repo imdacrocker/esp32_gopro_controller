@@ -5,10 +5,10 @@
 # Partition table: 0x008000 – 0x008FFF  (4 KB, IDF default)
 #
 # `factory` is the recovery app (sibling project esp32_gopro_canbus_recovery).
-# `ota_0` and `ota_1` are the A/B slots for the main app — `esp_ota_begin`
+# `ota_0` and `ota_1` are the A/B slots for the wireless app — `esp_ota_begin`
 #   refuses to write to the running partition, so two slots are needed for
-#   in-place upgrades from the main app's web UI (docs/design/ota.md §6 / §13).
-# `storage` is the LittleFS web UI for the main app.
+#   in-place upgrades from the wireless app's web UI (docs/design/ota.md §6 / §13).
+# `storage` is the LittleFS web UI for the wireless app.
 # Free 0x740000 .. 0x800000 (~768 KB) reserved for future use.
 #
 # Deviations from docs/design/ota.md §3:

@@ -8,7 +8,7 @@ The full system design is in [`design/ota.md`](design/ota.md). This page is the 
 - **One binary per version.** Beta and stable use the byte-identical binary for the same `vX.Y.Z` tag — promotion is a pure pointer-move on the `latest-stable` floating tag, not a rebuild.
 - **App + UI ship as a pair.** Each release publishes 5 assets:
   - `manifest.json` — declares both SHA-256 hashes
-  - `app.bin` — the main app
+  - `app.bin` — the wireless app
   - `storage.bin` — LittleFS UI image
   - `recovery.bin` — raw recovery binary; kept for niche reflash scenarios, not browser OTA
   - `factory.bin` — single-shot fresh-board image (bootloader + partition table + recovery + main + UI). Consumed by ESP Launchpad and `flash_factory.ps1`

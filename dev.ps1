@@ -1,7 +1,7 @@
 # dev.ps1 - daily dev wrapper for the monorepo.
 #
 # Usage:
-#   .\dev.ps1                                # build + OTA-flash + monitor (main app, default)
+#   .\dev.ps1                                # build + OTA-flash + monitor (wireless app, default)
 #   .\dev.ps1 build                          # build only
 #   .\dev.ps1 flash                          # build + OTA-flash (no monitor)
 #   .\dev.ps1 flash-usb                      # build + USB-flash to running slot
@@ -11,15 +11,15 @@
 #   .\dev.ps1 -ip 10.71.79.1 ...             # override target IP (default = SoftAP IP)
 #   .\dev.ps1 -port COM7 ...                 # override serial port (default: auto-detect)
 #
-# OTA flow (`flash`, `all`) is main-app only — recovery has no storage.bin and is
-# only reflashed over USB. See tools\flash_factory.ps1 for full board provisioning.
+# OTA flow (`flash`, `all`) is wireless-app only — recovery has no storage.bin and
+# is only reflashed over USB. See tools\flash_factory.ps1 for full board provisioning.
 #
 # Requires the IDF environment to be sourced first:
 #   & 'C:\esp\v6.0.1\esp-idf\export.ps1'
 
 param(
     [Parameter(Position=0)] [string]$cmd = "all",
-    [ValidateSet("main","recovery")] [string]$App = "main",
+    [ValidateSet("wireless","recovery")] [string]$App = "wireless",
     [string]$ip   = "10.71.79.1",
     [string]$port
 )
@@ -55,12 +55,12 @@ $repo = $PSScriptRoot
 $proj = Join-Path $repo "apps\$App"
 
 # Build artifact names come from the project() call in each app's CMakeLists.
-$binName = if ($App -eq "main") { "esp32_gopro_canbus_controller_v2.bin" } else { "esp32_gopro_canbus_recovery.bin" }
+$binName = if ($App -eq "wireless") { "esp32_gopro_canbus_wireless.bin" } else { "esp32_gopro_canbus_recovery.bin" }
 $bin     = Join-Path $proj "build\$binName"
-$ui      = Join-Path $proj "build\storage.bin"   # main-only
+$ui      = Join-Path $proj "build\storage.bin"   # wireless-only
 
-# USB-flash offset: main goes to ota_0, recovery to factory.
-$usbOffset = if ($App -eq "main") { "0xE0000" } else { "0x20000" }
+# USB-flash offset: wireless goes to ota_0, recovery to factory.
+$usbOffset = if ($App -eq "wireless") { "0xE0000" } else { "0x20000" }
 
 function Build {
     # Force __DATE__/__TIME__ in esp_app_desc to refresh every build.
@@ -91,7 +91,7 @@ function Curl-Post($url, $headers, $bodyPath) {
 }
 
 function FlashOta {
-    if ($App -ne "main") { throw "OTA flow is main-app only. Use -App main or flash-usb." }
+    if ($App -ne "wireless") { throw "OTA flow is wireless-app only. Use -App wireless or flash-usb." }
     if (-not (Test-Path $bin)) { throw "$bin missing - run build first" }
 
     $appSha  = Sha256OfFile $bin
@@ -128,5 +128,5 @@ switch ($cmd) {
     "flash-usb" { FlashUsb }
     "monitor"   { Monitor }
     "all"       { Build; FlashOta; Monitor }
-    default     { Write-Host "usage: .\dev.ps1 [build|flash|flash-usb|monitor|all] [-App main|recovery] [-ip IP] [-port COMn]" }
+    default     { Write-Host "usage: .\dev.ps1 [build|flash|flash-usb|monitor|all] [-App wireless|recovery] [-ip IP] [-port COMn]" }
 }

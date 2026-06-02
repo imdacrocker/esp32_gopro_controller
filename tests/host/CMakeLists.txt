@@ -23,8 +23,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(unity)
 
 set(REPO_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-set(CAM_INC    "${REPO_ROOT}/apps/main/components/camera_manager/include")
-set(GOPRO_DIR  "${REPO_ROOT}/apps/main/components/gopro")
+set(CAM_INC    "${REPO_ROOT}/apps/wireless/components/camera_manager/include")
+set(GOPRO_DIR  "${REPO_ROOT}/apps/wireless/components/gopro")
 set(OTA_IO_INC "${REPO_ROOT}/components/ota_io/include")
 
 enable_testing()
@@ -45,11 +45,11 @@ add_host_test(test_gopro_model
 
 add_host_test(test_mismatch
     "${CMAKE_CURRENT_SOURCE_DIR}/test_mismatch.c"
-    "${REPO_ROOT}/apps/main/components/camera_manager/mismatch.c")
+    "${REPO_ROOT}/apps/wireless/components/camera_manager/mismatch.c")
 
 add_host_test(test_reorder_validate
     "${CMAKE_CURRENT_SOURCE_DIR}/test_reorder_validate.c"
-    "${REPO_ROOT}/apps/main/components/camera_manager/reorder_validate.c")
+    "${REPO_ROOT}/apps/wireless/components/camera_manager/reorder_validate.c")
 
 add_host_test(test_app_date_compare
     "${CMAKE_CURRENT_SOURCE_DIR}/test_app_date_compare.c"

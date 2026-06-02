@@ -34,7 +34,7 @@ single mismatch underlay the paired-cameras JSON bug.
 
 ## Phase 0 — Test & CI foundation (do first; protects every later change)
 
-- [x] **CI build gate**: `.github/workflows/ci.yml` builds `apps/main` and
+- [x] **CI build gate**: `.github/workflows/ci.yml` builds `apps/wireless` and
       `apps/recovery` (ESP-IDF v6.0.1 / esp32s3) on every push and PR.
 - [x] **Host unit-test harness** (`tests/host/`, CMake + CTest + Unity via
       FetchContent, runs on plain gcc — no ESP-IDF). Initial coverage:
@@ -264,7 +264,7 @@ single mismatch underlay the paired-cameras JSON bug.
 - [x] **http_server socket timeouts** (driver.c:232) — flagged as "no
       `recv_wait_timeout`/`send_wait_timeout`", but **verified that ESP-IDF
       v6.0.1's `HTTPD_DEFAULT_CONFIG()` already sets both to 5 s by default**
-      and the main app retains that default. The "no timeout" framing in the
+      and the wireless app retains that default. The "no timeout" framing in the
       plan entry was wrong. The real gap was **slow-trickle slowloris**: a
       malicious client sending one byte every 4 s keeps each `httpd_req_recv`
       under the 5 s timeout and holds the socket for ~30+ minutes per

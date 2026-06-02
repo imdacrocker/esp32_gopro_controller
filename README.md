@@ -18,10 +18,10 @@ For a brand-new board (one-time provisioning):
    </a>
 
 3. Click **Connect** and pick the serial port the board enumerated on.
-4. Click **Flash** — the merged factory image (bootloader + partition table + recovery + main app + UI) is written in one pass.
+4. Click **Flash** — the merged factory image (bootloader + partition table + recovery + wireless app + UI) is written in one pass.
 5. When flashing finishes, power-cycle the board.
 
-That's it for USB. The board boots straight into the main app.
+That's it for USB. The board boots straight into the wireless app.
 
 Then on your phone or laptop:
 
@@ -150,10 +150,10 @@ For a brand-new board (one-time provisioning):
    </a>
 
 3. Click **Connect** and pick the serial port the board enumerated on.
-4. Click **Flash** — the merged factory image (bootloader + partition table + recovery + main app + UI) is written in one pass.
+4. Click **Flash** — the merged factory image (bootloader + partition table + recovery + wireless app + UI) is written in one pass.
 5. When flashing finishes, power-cycle the board.
 
-That's it for USB. The board boots straight into the main app.
+That's it for USB. The board boots straight into the wireless app.
 
 Then on your phone or laptop:
 
@@ -251,7 +251,7 @@ esp32_gopro_controller/
 └── partitions.csv    — shared 8 MB layout
 ```
 
-Component-level READMEs live alongside their source: [`wifi_manager`](components/wifi_manager/README.md), [`ble_core`](apps/main/components/ble_core/README.md), [`open_gopro_ble`](apps/main/components/gopro/open_gopro_ble/README.md), [`gopro_wifi_rc`](apps/main/components/gopro/gopro_wifi_rc/README.md), [`can_manager`](apps/main/components/can_manager/README.md), [`camera_manager`](apps/main/components/camera_manager/README.md).
+Component-level READMEs live alongside their source: [`wifi_manager`](components/wifi_manager/README.md), [`ble_core`](apps/wireless/components/ble_core/README.md), [`open_gopro_ble`](apps/wireless/components/gopro/open_gopro_ble/README.md), [`gopro_wifi_rc`](apps/wireless/components/gopro/gopro_wifi_rc/README.md), [`can_manager`](apps/wireless/components/can_manager/README.md), [`camera_manager`](apps/wireless/components/camera_manager/README.md).
 
 ---
 

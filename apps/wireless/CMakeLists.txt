@@ -13,7 +13,7 @@ list(APPEND EXTRA_COMPONENT_DIRS "../../components")
 list(APPEND EXTRA_COMPONENT_DIRS "components/gopro")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(esp32_gopro_canbus_controller_v2)
+project(esp32_gopro_canbus_wireless)
 
 # ---- Web UI LittleFS image -------------------------------------------------
 # compress.py copies index.html and writes plain + gzipped CSS/JS into the

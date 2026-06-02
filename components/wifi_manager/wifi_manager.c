@@ -53,8 +53,8 @@ static target_mode_t                       s_target_mode;
  * MUST become atomic.  The minimal change is atomic_compare_exchange_strong
  * on an atomic_bool, plus matching atomic_store on the false-writes at
  * lines 333/341/359/367/375/413/427.  Same pattern as
- * apps/main/components/gopro/open_gopro_ble/pair_complete.c:s_busy and
- * apps/main/components/gopro/open_gopro_ble/status.c:s_band_busy.
+ * apps/wireless/components/gopro/open_gopro_ble/pair_complete.c:s_busy and
+ * apps/wireless/components/gopro/open_gopro_ble/status.c:s_band_busy.
  */
 static bool                                s_sta_busy;
 static uint32_t                            s_sta_gw_ip;     /* last STA gateway IP */
