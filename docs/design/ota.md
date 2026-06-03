@@ -368,13 +368,13 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 **Goal:** main app can be updated in place via OTA, can switch channels, can reboot to recovery.
 
 **Deliverables:**
-- New `components/http_server/api_ota.c` with the endpoints from §6 (excluding recovery-only).
+- New `components/http_server_core/api_ota.c` with the endpoints from §6 (excluding recovery-only).
 - Bump `config.max_uri_handlers` from 28 → 35 in `components/http_server/driver.c`.
 - Extend `GET /api/version` to read `/www/manifest.json` and report `ui` field. Add `mode: "main"`.
 - New NVS namespace `ota`, key `channel` (default `"stable"`).
 - SHA-skip optimization: store last-written SHA per partition in NVS keys `app_sha`, `ui_sha`. Compare before each upload's first byte.
 
-**Files touched:** new `components/http_server/api_ota.c`, edits to `components/http_server/driver.c`, `components/http_server/api_system.c` (for extended `/api/version`).
+**Files touched:** new `components/http_server_core/api_ota.c`, edits to `components/http_server_core/driver.c`, `components/http_server_core/api_system.c` (for extended `/api/version`).
 
 **Done when:** all endpoints from §6 respond correctly. Channel switch persists across reboots. SHA-skip avoids rewriting unchanged partitions. "Reboot to recovery" puts the device into recovery mode.
 
@@ -495,7 +495,7 @@ No "you're up to date" or "older version" copy — if the user clicks Install on
 
 ### Files touched
 
-- **Main:** `apps/wireless/web_ui/index.html`, `apps/wireless/web_ui/style.css`, new `apps/wireless/web_ui/updates.js`, `apps/wireless/web_ui/compress.py` (picks up updates.js), `apps/wireless/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/wireless/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` + `build_date` + `build_time` from `esp_app_desc_t`), `apps/wireless/components/http_server/api_ota.c` (channel handlers use `ota_io`), `apps/wireless/components/http_server/driver.c` (new `/updates.js` URI handler — `compress.py` writes the file to LittleFS but driver.c needs an explicit handler since there's no wildcard asset route; `max_uri_handlers` bumped from 4 → 5 assets).
+- **Main:** `apps/wireless/web_ui/index.html`, `apps/wireless/web_ui/style.css`, new `apps/wireless/web_ui/updates.js`, `apps/wireless/web_ui/compress.py` (picks up updates.js), `apps/wireless/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/wireless/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` + `build_date` + `build_time` from `esp_app_desc_t`), `apps/wireless/components/http_server_core/api_ota.c` (channel handlers use `ota_io`), `apps/wireless/components/http_server/driver.c` (new `/updates.js` URI handler — `compress.py` writes the file to LittleFS but driver.c needs an explicit handler since there's no wildcard asset route; `max_uri_handlers` bumped from 4 → 5 assets).
 - **Recovery:** new `apps/recovery/Kconfig.projbuild`, `apps/recovery/main/recovery.html` (auto-update section), `apps/recovery/components/recovery_http/recovery_http.c` (channel handlers + `ota_base_url`/`ota_repo_path` in `/api/version`), `apps/recovery/components/recovery_http/CMakeLists.txt` (`espressif__cjson` requires).
 - **Shared:** `components/ota_io/include/ota_io.h` (channel helper declarations), new `components/ota_io/ota_settings.c`, `components/ota_io/CMakeLists.txt`.
 

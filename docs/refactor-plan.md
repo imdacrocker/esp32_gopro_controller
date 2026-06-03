@@ -233,7 +233,7 @@ single mismatch underlay the paired-cameras JSON bug.
       site gets a clear "move the write under the lock" note.
     - **No code change** beyond the two documentation blocks. Original plan
       entry was an over-eager scan that didn't trace callers.
-- [x] **http_server `read_body`** (http_server_internal.h:29) — single `recv`
+- [x] **http_server `read_body`** (http_server_helpers.h:29) — single `recv`
       assumed the whole body arrived in one chunk; under TCP segmentation any
       POST body could truncate. **Resolved** by looping `httpd_req_recv` until
       `content_len` bytes have been accumulated, matching the established

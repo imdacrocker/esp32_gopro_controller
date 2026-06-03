@@ -23,7 +23,7 @@
 #include "camera_types.h"
 #include "open_gopro_ble.h"
 #include "gopro_model.h"
-#include "http_server_internal.h"
+#include "http_server_helpers.h"
 
 static const char *TAG = "http_api_cameras";
 

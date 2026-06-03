@@ -24,7 +24,7 @@
 #include "cJSON.h"
 
 #include "ota_io.h"
-#include "http_server_internal.h"
+#include "http_server_helpers.h"
 
 static const char *TAG = "api_ota";
 

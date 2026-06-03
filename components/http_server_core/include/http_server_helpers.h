@@ -1,5 +1,14 @@
 /*
- * http_server_internal.h — Shared declarations for http_server source files.
+ * http_server_helpers.h — Shared utility helpers for HTTP handler source
+ * files, both inside http_server_core and in variant-specific HTTP server
+ * components (e.g. http_server_wireless).
+ *
+ * Public from the http_server_core component so any other component that
+ * REQUIRES http_server_core can pull these helpers in.
+ *
+ * Endpoint registration prototypes are deliberately NOT declared here —
+ * each side (core / wireless) forward-declares its own api_*_register()
+ * functions in its driver. Keeps cross-component coupling honest.
  */
 #pragma once
 
@@ -7,20 +16,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "esp_http_server.h"
-#include "cJSON.h"
 #include "shutdown_manager.h"
-
-/* ---- Handler registration (called from driver.c) ------------------------- */
-
-void api_cameras_register(httpd_handle_t server);
-void api_rc_register(httpd_handle_t server);
-void api_settings_register(httpd_handle_t server);
-void api_system_register(httpd_handle_t server);
-void api_ota_register(httpd_handle_t server);
-void api_logs_register(httpd_handle_t server);
-void api_shutdown_register(httpd_handle_t server);
-
-/* ---- Shared helpers ------------------------------------------------------ */
 
 /*
  * Read the entire POST body into buf.  buf_size must include room for '\0'.

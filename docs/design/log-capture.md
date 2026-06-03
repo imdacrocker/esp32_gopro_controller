@@ -43,7 +43,7 @@ report flow. Companion to [`camera-manager.md`](camera-manager.md),
 | Compile-time max level | `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` (VERBOSE excluded) |
 | Default runtime level | `CONFIG_LOG_DEFAULT_LEVEL_INFO=y` (clean boot before hook installs) |
 | Runtime level after hook install | `esp_log_level_set("*", ESP_LOG_DEBUG)` |
-| Component layout | New `apps/wireless/components/log_ring/`. HTTP endpoints live in `http_server/api_logs.c`. |
+| Component layout | New `components/log_ring/`. HTTP endpoints live in `http_server_core/api_logs.c`. |
 | Endpoints | `GET /api/logs/download`, `POST /api/logs/clear`, `GET /api/logs/stats` |
 | Web UI | New **Diagnostics** section: three buttons (Download log, Email log, Clear log) plus a "lines dropped: N" indicator |
 | Email recipient | Hard-coded `imdacrocker@gmail.com` for v1 (Kconfig'd for later override) |
@@ -89,7 +89,7 @@ on it (via `api_logs.c`).
 
 ## 4. New component: `log_ring`
 
-Lives at `apps/wireless/components/log_ring/`. Recovery does **not** depend on it
+Lives at `components/log_ring/`. Recovery does **not** depend on it
 — recovery stays minimal per `ota.md`.
 
 ### Public API (`include/log_ring.h`)
@@ -219,7 +219,7 @@ Notes:
 
 ### Kconfig
 
-`apps/wireless/components/log_ring/Kconfig`:
+`components/log_ring/Kconfig`:
 
 ```
 menu "Log Ring"
@@ -312,7 +312,7 @@ sequence stays unchanged; `log_ring_init` is simply prepended.
 
 ## 7. HTTP endpoints
 
-New file: `apps/wireless/components/http_server/api_logs.c`. Registered from
+New file: `components/http_server_core/api_logs.c`. Registered from
 `driver.c` like the other `api_*_register()` calls. The component's
 `CMakeLists.txt` gains `log_ring` in `REQUIRES`. The `max_uri_handlers` ceiling
 in `driver.c` grows by 3.

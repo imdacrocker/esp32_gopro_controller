@@ -1,5 +1,9 @@
 /*
- * driver.c — http_server init, LittleFS mount, and static asset handlers.
+ * driver.c — http_server_core: LittleFS mount, httpd start, static asset
+ * handlers, and registration of the variant-agnostic /api/... endpoints.
+ *
+ * Returns the httpd handle so the variant-specific HTTP server (e.g.
+ * http_server_wireless) can register its own endpoints on top.
  *
  * §20 of docs/design/camera-manager.md.
  */
@@ -19,10 +23,17 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "http_server.h"
-#include "http_server_internal.h"
+#include "http_server_core.h"
 
-static const char *TAG = "http_server";
+/* Variant-agnostic /api/... registration entry points, defined in this
+ * component's api_*.c files. */
+void api_system_register(httpd_handle_t server);
+void api_settings_register(httpd_handle_t server);
+void api_ota_register(httpd_handle_t server);
+void api_logs_register(httpd_handle_t server);
+void api_shutdown_register(httpd_handle_t server);
+
+static const char *TAG = "http_server_core";
 
 /* ---- Asset serving ------------------------------------------------------- */
 
@@ -166,7 +177,7 @@ static esp_err_t handler_updates_js(httpd_req_t *req)
 }
 
 /* ---- Health-check fallback ----------------------------------------------- *
- * If the web UI is missing from LittleFS the main app is functionally dead
+ * If the web UI is missing from LittleFS the running app is functionally dead
  * to the user — no UI means no way to upload a new UI, no way to trigger
  * recovery from the gear menu. Reboot into factory (recovery) so the user
  * can re-flash via recovery's embedded HTML upload form.
@@ -184,13 +195,13 @@ static void reboot_to_factory(const char *reason)
     const esp_partition_t *factory = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
     if (!factory) {
-        ESP_LOGE(TAG, "factory partition not found; staying on main app");
+        ESP_LOGE(TAG, "factory partition not found; staying in current app");
         return;
     }
 
     esp_err_t e = esp_ota_set_boot_partition(factory);
     if (e != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_set_boot_partition: %s — staying on main app",
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition: %s — staying in current app",
                  esp_err_to_name(e));
         return;
     }
@@ -202,7 +213,7 @@ static void reboot_to_factory(const char *reason)
 
 /* ---- Component init ------------------------------------------------------ */
 
-void http_server_init(void)
+httpd_handle_t http_server_core_start(void)
 {
     /* Mount LittleFS at /www (§19.2). */
     esp_vfs_littlefs_conf_t lfs_conf = {
@@ -242,7 +253,12 @@ void http_server_init(void)
     httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
     config.stack_size        = 12288;
     config.max_open_sockets  = 8;
-    config.max_uri_handlers  = 44;   /* 5 assets + 7 system + 10 cameras + 2 rc + 7 settings + 6 ota + 3 logs + 2 shutdown = 42, +2 margin */
+    /* Ceiling shared with variant-specific handlers registered on top of
+     * the returned handle. Core uses ~30 (5 assets + 7 system + 7 settings
+     * + 6 ota + 3 logs + 2 shutdown); wireless adds ~12 (10 cameras + 2 rc).
+     * 44 gives a small margin for future variant additions without busting
+     * the cap. */
+    config.max_uri_handlers  = 44;
     config.uri_match_fn      = httpd_uri_match_wildcard;
     config.lru_purge_enable  = true;
 
@@ -281,14 +297,15 @@ void http_server_init(void)
     httpd_register_uri_handler(server, &uri_style_css);
     httpd_register_uri_handler(server, &uri_updates_js);
 
-    /* API handler registration. */
+    /* Variant-agnostic API handler registration.
+     * Variant-specific handlers (cameras, RC, pairing, …) are registered by
+     * the variant's HTTP server component on top of this handle. */
     api_system_register(server);
-    api_cameras_register(server);
-    api_rc_register(server);
     api_settings_register(server);
     api_ota_register(server);
     api_logs_register(server);
     api_shutdown_register(server);
 
-    ESP_LOGI(TAG, "HTTP server started");
+    ESP_LOGI(TAG, "HTTP server core started");
+    return server;
 }

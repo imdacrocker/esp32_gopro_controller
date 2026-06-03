@@ -224,7 +224,7 @@ each.
       YAML and `dev.ps1` touch-ups here are only what's needed to keep CI
       green post-rename; full variant-matrix parameterization waits for
       Phase 4. Build + smoke test. *No behavior change.*
-- [ ] **Phase 2 — Lift shared components.** Move `can_manager`, `log_ring`,
+- [x] **Phase 2 — Lift shared components.** Move `can_manager`, `log_ring`,
       `shutdown_manager` to top-level `components/`. Split `http_server` →
       `http_server_core` (shared) + `http_server_wireless` (per-app
       handlers). Wireless keeps building.

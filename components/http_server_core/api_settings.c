@@ -20,7 +20,7 @@
 #include "cJSON.h"
 #include "can_manager.h"
 #include "log_ring.h"
-#include "http_server_internal.h"
+#include "http_server_helpers.h"
 
 static const char *TAG = "http_api_settings";
 

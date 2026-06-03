@@ -10,7 +10,7 @@
 #include "open_gopro_ble.h"
 #include "gopro_wifi_rc.h"
 #include "can_manager.h"
-#include "http_server.h"
+#include "http_server_wireless.h"
 #include "log_ring.h"
 #include "shutdown_manager.h"
 
@@ -20,7 +20,7 @@ static const char *TAG = "main";
  * After an OTA commit, the bootloader marks the new app PENDING_VERIFY. If
  * the app never calls mark_valid_cancel_rollback before the next reset,
  * the bootloader auto-reverts to the previous slot. We disarm rollback as
- * soon as http_server_init() returns — httpd serving = "healthy enough"
+ * soon as http_server_wireless_init() returns — httpd serving = "healthy enough"
  * given the closed CAN-bus threat model. A timer-based soak was overkill
  * and lost the dev-loop race against the USB-UART reset triggered when
  * idf.py monitor attaches post-OTA.
@@ -136,7 +136,7 @@ void app_main(void)
 
     /* Mount LittleFS, start esp_httpd, register all /api/ handlers.
      * TCP-only — does not touch the radio, safe to do before BLE. */
-    http_server_init();
+    http_server_wireless_init();
 
     /* Disarm OTA rollback (§11). httpd up = "healthy enough." */
     mark_ota_valid();

@@ -322,7 +322,7 @@ loop from immediately redialing them.
 
 ## 8. HTTP endpoints
 
-New file: `apps/wireless/components/http_server/api_shutdown.c`. Registered from
+New file: `components/http_server_core/api_shutdown.c`. Registered from
 `driver.c` like other `api_*_register()` calls. `http_server` CMakeLists
 gains `shutdown_manager` in REQUIRES. `max_uri_handlers` grows by 2.
 
@@ -350,7 +350,7 @@ UI polls this every 500 ms while the shutdown screen is visible.
 
 ### Other endpoints during shutdown
 
-A small helper in `http_server_internal.h`:
+A small helper in `http_server_helpers.h`:
 
 ```c
 static inline esp_err_t reject_if_shutting_down(httpd_req_t *req) {
@@ -536,7 +536,7 @@ bounded and only occurs during the operator-triggered shutdown.
 6. **ble_core gate.** Add `shutdown_manager_is_active()` check in the
    reconnect-decision function and in `open_gopro_ble`'s on-connect callback.
 7. **HTTP endpoints.** New `api_shutdown.c` with POST + GET. Add
-   `reject_if_shutting_down` helper in `http_server_internal.h` and wire it
+   `reject_if_shutting_down` helper in `http_server_helpers.h` and wire it
    into POST handlers in `api_cameras.c`, `api_rc.c`, `api_settings.c`.
    Bump `max_uri_handlers` by 2. Add `shutdown_state` field to
    `/api/paired-cameras` response for stale-tab detection.
