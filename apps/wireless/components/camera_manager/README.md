@@ -34,10 +34,10 @@ REQUIRES: cam_core, bt (ble_addr_t type), nvs_flash, esp_timer, freertos
 |------|---------------|
 | `include/camera_manager.h` | Wireless-specific API: slot info, BLE/WiFi status enums, pair-attempt types, all wireless `camera_manager_*` functions. Pulls in `cam_core.h` for the shared types/vtable. Stays NimBLE-free. |
 | `include/camera_manager_ble.h` | BLE-typed extensions (currently `camera_manager_is_known_ble_addr`). Include only from sites that need NimBLE types. |
-| `camera_manager.c` | Init, NVS load/save, driver registration, slot lifecycle, mismatch timer |
+| `camera_manager.c` | Init, NVS load/save, driver registration table, BLE/WiFi state transitions, slot lifecycle (`register_new`, `remove_slot`, `reorder_slots`), and thin delegations of the recording-intent / can-state / sleep / teardown surface to cam_core. |
 | `pair_attempt.c` | Single in-flight pair-attempt state machine + watchdog (wireless-only) |
 
-The shared, BLE-free pieces (`camera_types.h`, `mismatch.c`, `reorder_validate.c`, the `camera_driver_t` vtable, `camera_can_state_t`, the per-slot `cam_core_slot_t` record) now live in `components/cam_core/` — see [`components/cam_core/include/cam_core.h`](../../../components/cam_core/include/cam_core.h). The recording-intent engine that still lives in `camera_manager.c` will move into `cam_core` in Phase 3.3 of the multi-variant restructure (`docs/multi-variant-restructure-plan.md` §4).
+The shared, BLE-free pieces — `camera_types.h`, `mismatch.c`, `reorder_validate.c`, the `camera_driver_t` vtable, `camera_can_state_t`, the per-slot `cam_core_slot_t` record, **the recording-intent engine, mismatch poll, broadcast dispatch, CAN-state translation, and the global auto-control flag** — now live in `components/cam_core/` (see [`components/cam_core/include/cam_core.h`](../../../components/cam_core/include/cam_core.h)). See `docs/multi-variant-restructure-plan.md` §4 for the migration plan.
 
 ---
 
@@ -75,35 +75,11 @@ The `requires_ble` flag controls `has_disconnected_cameras()`: RC-emulation came
 
 ## Recording State Machine (§13)
 
-Each slot carries two independent pieces of state:
+**The recording engine now lives in `components/cam_core/`** (see `cam_core.c`). The wireless `camera_manager_set_desired_recording_*`, `_get_auto_control`, `_get_slot_can_state`, `_invoke_sleep`, and `_teardown_slot` entry points are thin wrappers around the corresponding `cam_core_*` APIs. Two dispatch paths (immediate dispatch on intent transition + 2 s mismatch poll while READY), broadcast-driver dedup, the 10 s post-shutter grace window, and `mismatch_step()` all keep their pre-split semantics.
 
-| Field | Source | Meaning |
-|-------|--------|---------|
-| `desired_recording` | CAN `0x600` frames or web UI | What the operator wants |
-| `get_recording_status()` | Driver cache (non-blocking) | What the camera is actually doing |
+Per-slot state owned by cam_core: `driver`, `driver_ctx`, `desired`, `grace_until_us`, `poll_timer`, `ready`, `requires_ble`. The wireless slot struct embeds a `cam_core_slot_t` and never reads or writes those fields directly — every access goes through cam_core (which holds its own mutex). The wireless mutex covers only the wireless-specific fields (`name`, `mac`, `model`, `ble_status`, `wifi_status`, `ip_addr`, `last_ip`, `wifi_associated`, `is_configured`, `first_pair_complete`, `ble_handle`).
 
-**Two dispatch paths** keep the camera aligned with intent:
-
-1. **Immediate dispatch** — `set_desired_recording_all()` / `_slot()` send `start_recording()` / `stop_recording()` directly when the new intent differs from the previous value, the slot is `WIFI_CAM_READY`, and the intent is not `UNKNOWN`. This is the happy path for shutter latency: the BLE/UDP write goes out as soon as the API call returns rather than waiting for the next poll tick. Idempotent calls (same intent as before) are a no-op so `can_manager`'s per-frame `0x600` updates don't hammer the cameras. `set_desired_recording_all` also dedups *broadcast* drivers — see "Broadcast drivers" below.
-2. **Mismatch-correction poll** — fires every **2 s** while a slot is `WIFI_CAM_READY`. Catches slots that weren't ready when the API was called, slots whose real status diverges from the commanded state, and any case where the immediate dispatch was suppressed. On each tick:
-
-```
-desired == UNKNOWN                → no-op (boot state, no intent yet)
-actual  == UNKNOWN                → no-op (camera state not yet known)
-now < grace_until_us              → no-op (recent command still settling)
-desired == START, actual == IDLE   → start_recording(); arm grace deadline
-desired == STOP, actual == ACTIVE  → stop_recording(); arm grace deadline
-```
-
-Both paths arm `grace_until_us = now + RECORDING_STATUS_GRACE_MS` (10 s) after issuing a command. The deadline expires on its own — the poll does not reset it per tick. This is long enough that both BLE status notifications and the WiFi RC `st` poll have caught up before the next mismatch comparison runs, so we don't re-issue a Start to a camera that's already recording but hasn't yet told us. The per-cycle reset behaviour was replaced after observing late status updates from Hero4-class cameras under load.
-
-`mismatch_step()` is a pure function in `mismatch.c` — no side effects, no ESP-IDF headers — and can be unit-tested on the host (§23.2). It still takes the grace-period state as a `bool`; the deadline-vs-now comparison happens at the call site. The immediate-dispatch path keys off the intent transition itself and does not consult cached status.
-
-### Broadcast drivers
-
-If a `camera_driver_t` sets `broadcasts_to_all = true`, `set_desired_recording_all()` calls the driver's `start_recording_all()` / `stop_recording_all()` **once per dispatch wave** (at the slot index of the first match it encounters), rather than calling the per-slot vtable entries for every slot owned by that driver. Other slots using the same driver still have their `desired_recording` and grace deadline updated — they just don't trigger another driver call, since the broadcast already covered them. Slot order in the dispatch list is preserved, so any non-broadcast (e.g. BLE) slots interleaved with broadcast (e.g. RC) slots fire in their natural order.
-
-The mismatch poll and `set_desired_recording_slot` always go through the per-slot vtable entries (`start_recording` / `stop_recording`) regardless of `broadcasts_to_all`, so single-camera commands stay targeted and don't disturb peers.
+Wireless `on_camera_ready` / `on_wifi_disconnected` / `on_camera_unresponsive` / `on_ble_disconnected_by_handle` mirror the universal "fully ready" flag into cam_core via `cam_core_slot_set_ready(idx, bool)`, which manages the mismatch poll timer.
 
 ---
 
@@ -360,9 +336,14 @@ Values map directly to RaceCapture direct-CAN channel bytes and must not be reor
 
 ## Threading
 
-A single FreeRTOS mutex (`s_mutex`) guards the slot array. Both the mismatch timer callback and the immediate-dispatch path in `set_desired_recording_*` acquire the mutex briefly to read/update state and arm the grace deadline, then release the mutex before issuing `start_recording()` / `stop_recording()` (or `start_recording_all()` / `stop_recording_all()`) to avoid holding the lock during a potentially slow driver call.
+Two mutexes, never held in opposite order:
 
-`stop_poll_timer()` is always called **before** acquiring the mutex (in `on_wifi_disconnected` and `remove_slot`) because the timer callback itself acquires the mutex — holding it while stopping the timer would deadlock if a callback fired concurrently.
+- **Wireless `s_mutex`** (this file): recursive FreeRTOS mutex guarding the wireless-only slot fields — `name`, `mac`, `model`, `ble_status`, `wifi_status`, `ip_addr`, `last_ip`, `wifi_associated`, `is_configured`, `first_pair_complete`, `ble_handle`. Also held while iterating the driver-registration table.
+- **cam_core mutex** (in `components/cam_core/cam_core.c`): recursive FreeRTOS mutex guarding the slot registry and every `cam_core_slot_t` field — `driver`, `driver_ctx`, `desired`, `grace_until_us`, `poll_timer`, `ready`, `requires_ble`. Driver vtable methods (`start_recording`, `stop_recording`, `get_recording_status`, `teardown`, `on_wifi_disconnected`, `update_slot_index`, `sleep`) are invoked with the cam_core mutex held — they must be non-blocking and must NOT call back into wireless code while holding any other lock.
+
+**Lock ordering**: wireless → cam_core (one-way). Wireless code may hold `s_mutex` while calling cam_core APIs; cam_core never calls wireless functions, so there's no BA path. Driver methods (called from cam_core) post work to their own task queues and return quickly.
+
+**Timer lifecycle**: `cam_core_slot_set_ready(idx, false)` and `cam_core_teardown_slot(idx)` delete the per-slot mismatch poll timer **outside** the cam_core mutex — `esp_timer_delete` blocks until any in-flight callback returns, and the callback itself takes the cam_core mutex. Holding the mutex during delete would deadlock. Wireless code that calls these helpers must therefore not hold `s_mutex` either, or it would block the cam_core teardown path indirectly.
 
 ---
 

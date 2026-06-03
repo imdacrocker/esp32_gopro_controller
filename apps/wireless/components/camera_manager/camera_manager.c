@@ -1,7 +1,7 @@
 #include "camera_manager.h"
 #include "camera_manager_ble.h"   /* ble_addr_t, BLE_HS_CONN_HANDLE_NONE */
+#include "cam_core.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "esp_netif_ip_addr.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
@@ -27,17 +27,6 @@ static const char *TAG = "camera_manager";
 #define CAMERA_NV_SCHEMA_VERSION  3
 #define NVS_KEY_CAMERA            "camera"
 
-/* Mismatch poll interval (§13.3 default; per-model tuning deferred) */
-#define STATUS_POLL_INTERVAL_MS   2000
-
-/* Grace window after a shutter command during which the mismatch poll will
- * NOT compare desired vs. cached recording status.  Both Hero4 (UDP `st`
- * polling) and Hero 9+ (BLE status notifications) take several seconds to
- * report a state change after a SetShutter; 10 s comfortably covers both
- * and the worst-case status-poll scheduling, so we never re-issue a Start
- * to a camera that's already recording but hasn't yet told us. */
-#define RECORDING_STATUS_GRACE_MS 10000
-
 #define MAX_DRIVER_REGS  4
 
 /*
@@ -57,7 +46,14 @@ typedef struct {
     bool           first_pair_complete;
 } camera_nv_record_t;
 
-/* Internal per-slot state */
+/* Internal per-slot state.
+ *
+ * The variant-agnostic slice (driver vtable + ctx, recording intent,
+ * grace deadline, poll timer, ready flag, requires_ble) lives in the
+ * embedded `core` field, owned by cam_core.  This file MUST NOT read or
+ * write `core.*` fields directly — all access goes through the cam_core
+ * APIs which serialize them under cam_core's mutex.
+ */
 typedef struct {
     /* Persisted (mirrored from NVS on load) */
     char              name[32];
@@ -79,19 +75,8 @@ typedef struct {
                                            and disassociation events; RC
                                            cameras only */
 
-    /* Control */
-    desired_recording_t    desired_recording;
-    const camera_driver_t *driver;
-    void                  *driver_ctx;
-    bool                   requires_ble;    /* mirrors the driver registration flag */
-
-    /* Mismatch correction (§13.4) */
-    esp_timer_handle_t poll_timer;
-    /* Monotonic deadline (esp_timer_get_time() µs) until which the mismatch
-     * poll suppresses dispatch for this slot — set to now + RECORDING_STATUS_
-     * GRACE_MS after every issued Start/Stop so the camera has time to reflect
-     * the new state in its status report.  0 means "no grace active". */
-    int64_t            grace_until_us;
+    /* Variant-agnostic recording / driver state — owned by cam_core. */
+    cam_core_slot_t   core;
 } camera_slot_t;
 
 typedef struct {
@@ -104,15 +89,11 @@ typedef struct {
 /* ---- Module state ---- */
 static camera_slot_t     s_slots[CAMERA_MAX_SLOTS];
 static int               s_slot_count;
-static bool              s_auto_control = true;
 static SemaphoreHandle_t s_mutex;
 static driver_reg_t      s_drivers[MAX_DRIVER_REGS];
 static int               s_driver_count;
 
 /* ---- Forward declarations ---- */
-static void     poll_timer_cb(void *arg);
-static void     start_poll_timer(int slot);
-static void     stop_poll_timer(int slot);
 static esp_err_t load_slot_from_nvs(int slot);
 static esp_err_t save_slot_to_nvs(int slot);
 
@@ -129,13 +110,6 @@ static void nvs_namespace(int slot, char *buf, size_t len)
     snprintf(buf, len, "cam_%d", slot);
 }
 
-/* Returns the absolute esp_timer deadline at which a freshly-armed
- * post-shutter grace window expires. */
-static inline int64_t grace_deadline(void)
-{
-    return esp_timer_get_time() + (int64_t)RECORDING_STATUS_GRACE_MS * 1000;
-}
-
 /* ================================================================
  * Init
  * ================================================================ */
@@ -146,20 +120,24 @@ void camera_manager_init(void)
     s_mutex = xSemaphoreCreateRecursiveMutex();
     assert(s_mutex != NULL);
 
+    cam_core_init();
+
     memset(s_slots, 0, sizeof(s_slots));
     s_slot_count   = 0;
     s_driver_count = 0;
-    s_auto_control = true;
 
     for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
         s_slots[i].ble_handle = BLE_HS_CONN_HANDLE_NONE;
     }
 
-    /* Load persisted slots; gaps are left as unconfigured */
+    /* Load persisted slots; gaps are left as unconfigured.  Each loaded
+     * slot registers its embedded cam_core_slot_t with cam_core so the
+     * shared engine can dispatch/poll on it. */
     for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
         esp_err_t err = load_slot_from_nvs(i);
         if (err == ESP_OK) {
             if (s_slot_count <= i) s_slot_count = i + 1;
+            cam_core_register_slot(i, &s_slots[i].core);
             ESP_LOGI(TAG, "slot %d: loaded '%s' model=%d", i,
                      s_slots[i].name, (int)s_slots[i].model);
         } else if (err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_INVALID_VERSION) {
@@ -201,15 +179,10 @@ esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
         return ESP_ERR_NO_MEM;
     }
 
-    /* Enforce the "Always non-NULL" vtable contract documented at
-     * camera_manager.h:14.  Several call sites (e.g. get_slot_info at
-     * camera_manager.c:663, poll_timer_cb at camera_manager.c:1037)
-     * dereference these function pointers under only an `sl->driver != NULL`
-     * guard, on the premise that a registered driver has them populated.
-     * Catch contract violations at boot rather than crashing on first poll. */
-    assert(driver->start_recording);
-    assert(driver->stop_recording);
-    assert(driver->get_recording_status);
+    /* cam_core_slot_attach_driver asserts the vtable's non-NULL contract
+     * (start_recording / stop_recording / get_recording_status) at attach
+     * time below, so contract violations crash at boot rather than at the
+     * first poll. */
 
     s_drivers[s_driver_count++] = (driver_reg_t){
         .driver      = driver,
@@ -218,21 +191,26 @@ esp_err_t camera_manager_register_driver(const camera_driver_t *driver,
         .requires_ble = requires_ble,
     };
 
-    /* Assign to already-loaded matching slots */
+    /* Assign to already-loaded matching slots (first-attach-wins; later
+     * drivers don't overwrite earlier matches). */
     lock();
     for (int i = 0; i < s_slot_count; i++) {
         camera_slot_t *sl = &s_slots[i];
-        if (sl->is_configured && !sl->driver && matches(sl->model)) {
-            sl->driver      = driver;
-            sl->driver_ctx  = create_ctx(i);
-            sl->requires_ble = requires_ble;
-            ESP_LOGI(TAG, "slot %d: driver assigned on register", i);
+        if (sl->is_configured && !cam_core_slot_has_driver(i) && matches(sl->model)) {
+            void *ctx = create_ctx(i);
+            esp_err_t err = cam_core_slot_attach_driver(i, driver, ctx, requires_ble);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "slot %d: driver assigned on register", i);
+            } else {
+                ESP_LOGW(TAG, "slot %d: cam_core attach failed: %s",
+                         i, esp_err_to_name(err));
+            }
         }
     }
 
     /* Warn for any configured slots still without a driver */
     for (int i = 0; i < s_slot_count; i++) {
-        if (s_slots[i].is_configured && !s_slots[i].driver) {
+        if (s_slots[i].is_configured && !cam_core_slot_has_driver(i)) {
             ESP_LOGW(TAG, "slot %d: no driver for model %d",
                      i, (int)s_slots[i].model);
         }
@@ -278,8 +256,10 @@ int camera_manager_register_new(const uint8_t mac[6])
     sl->ble_handle        = BLE_HS_CONN_HANDLE_NONE;
     sl->is_configured     = true;
     sl->model             = CAMERA_MODEL_UNKNOWN;
-    sl->desired_recording = DESIRED_RECORDING_UNKNOWN;
     memcpy(sl->mac, mac, 6);
+    /* Embedded core was zeroed by the memset above; register its address
+     * with cam_core so this slot participates in dispatch/poll. */
+    cam_core_register_slot(slot, &sl->core);
     unlock();
 
     ESP_LOGI(TAG, "slot %d: registered new camera (model TBD)", slot);
@@ -311,23 +291,24 @@ void camera_manager_on_ble_ready(int slot)
 
 void camera_manager_on_ble_disconnected_by_handle(uint16_t conn_handle)
 {
-    int found = -1;
-    bool was_ready = false;
+    int  found      = -1;
+    bool was_ready  = false;
+    bool requires_ble = false;
 
     lock();
     for (int i = 0; i < s_slot_count; i++) {
         if (s_slots[i].ble_handle == conn_handle) {
             s_slots[i].ble_handle = BLE_HS_CONN_HANDLE_NONE;
             s_slots[i].ble_status = CAM_BLE_NONE;
+            requires_ble = cam_core_slot_requires_ble(i);
 
             /* For BLE-control cameras, wifi_status is overloaded as the
              * universal "fully ready" flag (set by the driver's readiness
              * sequence).  Clear it on disconnect so is_recording derivation
              * and the UI status mapping see the camera as no-longer-ready. */
-            if (s_slots[i].requires_ble) {
+            if (requires_ble) {
                 was_ready = (s_slots[i].wifi_status == WIFI_CAM_READY);
-                s_slots[i].wifi_status     = WIFI_CAM_NONE;
-                s_slots[i].grace_until_us  = 0;
+                s_slots[i].wifi_status = WIFI_CAM_NONE;
             }
             found = i;
             break;
@@ -337,10 +318,11 @@ void camera_manager_on_ble_disconnected_by_handle(uint16_t conn_handle)
 
     if (found < 0) return;
 
-    /* Stop the mismatch poll timer if it was armed (it's started inside
-     * on_camera_ready, which is what set wifi_status=READY for BLE slots). */
+    /* For BLE slots, mirror the universal ready=false into cam_core so the
+     * mismatch poll timer is stopped (it was started by on_camera_ready
+     * for both transports). */
     if (was_ready) {
-        stop_poll_timer(found);
+        cam_core_slot_set_ready(found, false);
     }
 
     ESP_LOGI(TAG, "slot %d: BLE disconnected", found);
@@ -356,18 +338,22 @@ void camera_manager_set_model(int slot, camera_model_t model)
     lock();
     s_slots[slot].model = model;
 
-    /* Assign driver now if not already assigned */
-    if (!s_slots[slot].driver) {
+    /* Assign driver now if not already assigned (first-match-wins) */
+    if (!cam_core_slot_has_driver(slot)) {
+        bool assigned = false;
         for (int d = 0; d < s_driver_count; d++) {
             if (s_drivers[d].matches(model)) {
-                s_slots[slot].driver      = s_drivers[d].driver;
-                s_slots[slot].driver_ctx  = s_drivers[d].create_ctx(slot);
-                s_slots[slot].requires_ble = s_drivers[d].requires_ble;
-                ESP_LOGI(TAG, "slot %d: driver assigned after model set", slot);
+                void *ctx = s_drivers[d].create_ctx(slot);
+                if (cam_core_slot_attach_driver(slot, s_drivers[d].driver,
+                                                 ctx, s_drivers[d].requires_ble)
+                    == ESP_OK) {
+                    ESP_LOGI(TAG, "slot %d: driver assigned after model set", slot);
+                    assigned = true;
+                }
                 break;
             }
         }
-        if (!s_slots[slot].driver) {
+        if (!assigned) {
             ESP_LOGW(TAG, "slot %d: no driver for model %d", slot, (int)model);
         }
     }
@@ -394,8 +380,8 @@ void camera_manager_on_camera_ready(int slot)
     s_slots[slot].wifi_status = WIFI_CAM_READY;
     unlock();
 
-    /* Start mismatch poll timer — must not hold mutex while creating timer */
-    start_poll_timer(slot);
+    /* Mirror into cam_core; this also starts the mismatch poll timer. */
+    cam_core_slot_set_ready(slot, true);
 
     ESP_LOGI(TAG, "slot %d: camera ready", slot);
 }
@@ -404,20 +390,18 @@ void camera_manager_on_wifi_disconnected(int slot)
 {
     if (!slot_valid(slot)) return;
 
-    /* Stop timer before acquiring mutex — timer callback acquires mutex */
-    stop_poll_timer(slot);
+    /* Stop mismatch poll + clear ready first (must not be done under our
+     * own mutex — see cam_core_slot_set_ready threading notes). */
+    cam_core_slot_set_ready(slot, false);
 
     lock();
-    const camera_driver_t *drv     = s_slots[slot].driver;
-    void                  *drv_ctx = s_slots[slot].driver_ctx;
-    s_slots[slot].wifi_status      = WIFI_CAM_NONE;
-    s_slots[slot].ip_addr          = 0;
-    s_slots[slot].grace_until_us   = 0;
+    s_slots[slot].wifi_status = WIFI_CAM_NONE;
+    s_slots[slot].ip_addr     = 0;
     unlock();
 
-    if (drv && drv->on_wifi_disconnected) {
-        drv->on_wifi_disconnected(drv_ctx);
-    }
+    /* Fire the driver's on_wifi_disconnected hook (RC-emulation cameras
+     * use it to stop in-flight network work). */
+    cam_core_notify_wifi_disconnected(slot);
 
     ESP_LOGI(TAG, "slot %d: wifi disconnected", slot);
 }
@@ -430,17 +414,17 @@ void camera_manager_on_camera_unresponsive(int slot)
     lock();
     was_ready = (s_slots[slot].wifi_status == WIFI_CAM_READY);
     if (was_ready) {
-        s_slots[slot].wifi_status    = WIFI_CAM_PROBING;
-        s_slots[slot].grace_until_us = 0;
+        s_slots[slot].wifi_status = WIFI_CAM_PROBING;
     }
     unlock();
 
     if (!was_ready) return;
 
-    /* Mismatch poll timer is only armed once on_camera_ready has fired, so a
-     * paired stop is safe and required — leaving it running would dispatch
+    /* Mirror into cam_core: clears ready + stops mismatch poll.  The
+     * timer was only armed once on_camera_ready fired, so a paired stop
+     * is safe and required — leaving it running would dispatch
      * start/stop commands to a camera we already know is not answering. */
-    stop_poll_timer(slot);
+    cam_core_slot_set_ready(slot, false);
 
     ESP_LOGI(TAG, "slot %d: camera unresponsive — demoted to PROBING", slot);
 }
@@ -514,7 +498,9 @@ static esp_err_t load_slot_from_nvs(int slot)
     sl->is_configured       = rec.is_configured;
     sl->first_pair_complete = rec.first_pair_complete;
     sl->ble_handle          = BLE_HS_CONN_HANDLE_NONE;
-    sl->desired_recording   = DESIRED_RECORDING_UNKNOWN;
+    /* Recording intent isn't persisted — cam_core's slot record is
+     * zero-initialized at struct allocation, which leaves desired at
+     * DESIRED_RECORDING_UNKNOWN.  No explicit assignment needed. */
 
     return ESP_OK;
 }
@@ -661,167 +647,54 @@ esp_err_t camera_manager_get_slot_info(int slot, camera_slot_info_t *out)
     out->ble_status          = sl->ble_status;
     out->wifi_status         = sl->wifi_status;
     out->ip_addr             = sl->ip_addr;
-    out->desired_recording   = sl->desired_recording;
     out->first_pair_complete = sl->first_pair_complete;
     out->wifi_associated     = sl->wifi_associated;
     memcpy(out->mac, sl->mac, 6);
     strncpy(out->name, sl->name, sizeof(out->name) - 1);
     out->name[sizeof(out->name) - 1] = '\0';
-
-    /* Derive is_recording from driver's cached status (non-blocking §8) */
-    out->is_recording = (sl->wifi_status == WIFI_CAM_READY &&
-                         sl->driver != NULL &&
-                         sl->driver->get_recording_status(sl->driver_ctx) ==
-                             CAMERA_RECORDING_ACTIVE);
     unlock();
+
+    /* cam_core-owned fields fetched outside our mutex — they take cam_core's
+     * lock independently. */
+    out->desired_recording = cam_core_get_desired(slot);
+    out->is_recording      = cam_core_is_recording(slot);
     return ESP_OK;
 }
 
 camera_can_state_t camera_manager_get_slot_can_state(int slot)
 {
     if (!slot_valid(slot)) return CAMERA_CAN_STATE_UNDEFINED;
-
     lock();
-    camera_slot_t *sl = &s_slots[slot];
-    if (!sl->is_configured) {
-        unlock();
-        return CAMERA_CAN_STATE_UNDEFINED;
-    }
-    wifi_cam_status_t ws = sl->wifi_status;
-    camera_recording_status_t rs = CAMERA_RECORDING_UNKNOWN;
-    if (ws == WIFI_CAM_READY && sl->driver) {
-        rs = sl->driver->get_recording_status(sl->driver_ctx);
-    }
+    bool configured = s_slots[slot].is_configured;
     unlock();
-
-    if (ws != WIFI_CAM_READY)            return CAMERA_CAN_STATE_DISCONNECTED;
-    if (rs == CAMERA_RECORDING_ACTIVE)   return CAMERA_CAN_STATE_RECORDING;
-    return CAMERA_CAN_STATE_IDLE;
+    if (!configured) return CAMERA_CAN_STATE_UNDEFINED;
+    return cam_core_get_can_state(slot);
 }
 
 /* ================================================================
  * Recording intent (§13)
  * ================================================================ */
 
-/*
- * Immediate-dispatch path: when the desired state actually transitions and the
- * slot is ready, send the start/stop command now instead of waiting up to one
- * STATUS_POLL_INTERVAL_MS for the mismatch poll to fire.  The poll remains the
- * safety net for slots that weren't ready and for state divergence.
- *
- * Idempotency: callers (notably can_manager on every 0x600 frame) may invoke
- * with the same intent repeatedly — we only dispatch on a real transition.
- *
- * grace_until_us is armed after dispatch so the mismatch poll defers status
- * comparison for RECORDING_STATUS_GRACE_MS, mirroring poll_timer_cb's own
- * behaviour after it issues a command.  10 s is long enough that both BLE
- * status notifications and the WiFi RC `st` poll have caught up before the
- * next mismatch comparison runs.
- */
+/* Recording intent + auto-control + dispatch all live in cam_core; these
+ * wireless wrappers are thin shims that preserve the existing public API.
+ * The engine semantics (immediate dispatch on transition, idempotent
+ * repeats, broadcast dedup, grace-deadline arming) are documented in
+ * components/cam_core/cam_core.c and unchanged from the pre-split
+ * implementation. */
+
 void camera_manager_set_desired_recording_all(desired_recording_t intent)
 {
-    const camera_driver_t *drvs[CAMERA_MAX_SLOTS];
-    void                  *ctxs[CAMERA_MAX_SLOTS];   /* NULL for broadcast entries */
-    int                    slots[CAMERA_MAX_SLOTS];
-    bool                   is_broadcast[CAMERA_MAX_SLOTS];
-    int                    n = 0;
-
-    /* Tracks broadcast-style drivers already enrolled in this dispatch wave.
-     * For these drivers, only the FIRST slot encountered triggers a call;
-     * subsequent slots have intent + grace updated but no per-slot dispatch
-     * (the broadcast already covered them). */
-    const camera_driver_t *seen_broadcast[CAMERA_MAX_SLOTS];
-    int                    seen_count = 0;
-
-    lock();
-    for (int i = 0; i < s_slot_count; i++) {
-        camera_slot_t *sl = &s_slots[i];
-        if (sl->desired_recording == intent) continue;
-        sl->desired_recording = intent;
-        if (intent == DESIRED_RECORDING_UNKNOWN) continue;
-        if (!sl->driver || sl->wifi_status != WIFI_CAM_READY) continue;
-
-        if (sl->driver->broadcasts_to_all) {
-            bool already_seen = false;
-            for (int k = 0; k < seen_count; k++) {
-                if (seen_broadcast[k] == sl->driver) { already_seen = true; break; }
-            }
-            if (already_seen) {
-                /* Earlier slot's broadcast already covered this camera. */
-                sl->grace_until_us = grace_deadline();
-                continue;
-            }
-            seen_broadcast[seen_count++] = sl->driver;
-            drvs[n]         = sl->driver;
-            ctxs[n]         = NULL;
-            slots[n]        = i;
-            is_broadcast[n] = true;
-        } else {
-            drvs[n]         = sl->driver;
-            ctxs[n]         = sl->driver_ctx;
-            slots[n]        = i;
-            is_broadcast[n] = false;
-        }
-        sl->grace_until_us = grace_deadline();
-        n++;
-    }
-    unlock();
-
-    for (int j = 0; j < n; j++) {
-        if (is_broadcast[j]) {
-            if (intent == DESIRED_RECORDING_START) {
-                ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording_all (broadcast)",
-                         slots[j]);
-                drvs[j]->start_recording_all();
-            } else { /* DESIRED_RECORDING_STOP */
-                ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording_all (broadcast)",
-                         slots[j]);
-                drvs[j]->stop_recording_all();
-            }
-        } else {
-            if (intent == DESIRED_RECORDING_START) {
-                ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording", slots[j]);
-                drvs[j]->start_recording(ctxs[j]);
-            } else { /* DESIRED_RECORDING_STOP */
-                ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording", slots[j]);
-                drvs[j]->stop_recording(ctxs[j]);
-            }
-        }
-    }
+    cam_core_set_desired_all(intent);
 }
 
 void camera_manager_set_desired_recording_slot(int slot, desired_recording_t intent)
 {
     if (!slot_valid(slot)) return;
-
-    const camera_driver_t *drv = NULL;
-    void                  *ctx = NULL;
-
-    lock();
-    camera_slot_t *sl = &s_slots[slot];
-    bool transitioned = (sl->desired_recording != intent);
-    sl->desired_recording = intent;
-    if (transitioned && intent != DESIRED_RECORDING_UNKNOWN
-        && sl->driver && sl->wifi_status == WIFI_CAM_READY) {
-        drv = sl->driver;
-        ctx = sl->driver_ctx;
-        sl->grace_until_us = grace_deadline();
-    }
-    unlock();
-
-    if (drv) {
-        if (intent == DESIRED_RECORDING_START) {
-            ESP_LOGI(TAG, "slot %d: immediate dispatch — start_recording", slot);
-            drv->start_recording(ctx);
-        } else { /* DESIRED_RECORDING_STOP */
-            ESP_LOGI(TAG, "slot %d: immediate dispatch — stop_recording", slot);
-            drv->stop_recording(ctx);
-        }
-    }
+    cam_core_set_desired_slot(slot, intent);
 }
 
-bool camera_manager_get_auto_control(void) { return s_auto_control; }
-void camera_manager_set_auto_control(bool enabled) { s_auto_control = enabled; }
+bool camera_manager_get_auto_control(void)         { return cam_core_get_auto_control(); }
+void camera_manager_set_auto_control(bool enabled) { cam_core_set_auto_control(enabled); }
 
 /* ================================================================
  * Shutdown helpers (docs/design/shutdown.md)
@@ -830,47 +703,23 @@ void camera_manager_set_auto_control(bool enabled) { s_auto_control = enabled; }
 esp_err_t camera_manager_invoke_sleep(int slot)
 {
     if (!slot_valid(slot)) return ESP_ERR_INVALID_ARG;
-
-    const camera_driver_t *drv = NULL;
-    void                  *ctx = NULL;
-
-    lock();
-    if (s_slots[slot].driver) {
-        drv = s_slots[slot].driver;
-        ctx = s_slots[slot].driver_ctx;
-    }
-    unlock();
-
-    if (!drv || !drv->sleep) return ESP_ERR_NOT_SUPPORTED;
-    return drv->sleep(ctx);
+    return cam_core_invoke_sleep(slot);
 }
 
 void camera_manager_teardown_slot(int slot)
 {
     if (!slot_valid(slot)) return;
 
-    /* Stop the mismatch poll timer first — it acquires the mutex on tick. */
-    stop_poll_timer(slot);
-
-    const camera_driver_t *drv = NULL;
-    void                  *ctx = NULL;
+    /* cam_core stops the poll timer, clears ready, and invokes the
+     * driver's teardown.  Mirror the universal "no longer ready" into
+     * the wireless-only status fields so derived state (UI status, CAN
+     * 0x601) reflects the disconnect immediately. */
+    cam_core_teardown_slot(slot);
 
     lock();
-    camera_slot_t *sl = &s_slots[slot];
-    drv = sl->driver;
-    ctx = sl->driver_ctx;
-
-    /* Mark the slot as no longer ready so derived state (is_recording,
-     * CAN 0x601 state) reflects the disconnect immediately, without waiting
-     * for the BLE disconnect callback. */
-    sl->wifi_status     = WIFI_CAM_NONE;
-    sl->ip_addr         = 0;
-    sl->grace_until_us  = 0;
+    s_slots[slot].wifi_status = WIFI_CAM_NONE;
+    s_slots[slot].ip_addr     = 0;
     unlock();
-
-    if (drv && drv->teardown) {
-        drv->teardown(ctx);
-    }
 
     ESP_LOGI(TAG, "slot %d: teardown (shutdown path)", slot);
 }
@@ -883,23 +732,13 @@ esp_err_t camera_manager_remove_slot(int slot)
 {
     if (!slot_valid(slot)) return ESP_ERR_INVALID_ARG;
 
-    /*
-     * Stop the poll timer before acquiring the mutex.
-     * poll_timer_cb acquires the mutex, so we must not hold it here while
-     * calling stop_poll_timer — that would deadlock if the timer fires
-     * concurrently.  esp_timer_delete() blocks until any in-progress
-     * callback has returned, guaranteeing no further firings.
-     */
-    stop_poll_timer(slot);
+    /* cam_core stops the poll timer, clears ready, and invokes the
+     * driver's teardown — must run unlocked because the timer callback
+     * itself takes cam_core's lock and esp_timer_delete blocks for
+     * in-flight callbacks. */
+    cam_core_teardown_slot(slot);
 
     lock();
-
-    camera_slot_t *sl = &s_slots[slot];
-
-    /* Tear down driver resources */
-    if (sl->driver && sl->driver->teardown) {
-        sl->driver->teardown(sl->driver_ctx);
-    }
 
     /* Erase NVS at the removed slot's original index */
     char ns[16];
@@ -911,12 +750,15 @@ esp_err_t camera_manager_remove_slot(int slot)
         nvs_close(h);
     }
 
-    /* Compact: shift higher slots down by one */
+    /* Compact: shift higher slots down by one.  The struct copy moves
+     * the embedded cam_core_slot_t along with the wireless fields, so
+     * cam_core's registry pointer (&s_slots[i].core, stable) keeps
+     * pointing at the right memory. */
     for (int i = slot; i < s_slot_count - 1; i++) {
         s_slots[i] = s_slots[i + 1];
-        if (s_slots[i].driver && s_slots[i].driver->update_slot_index) {
-            s_slots[i].driver->update_slot_index(s_slots[i].driver_ctx, i);
-        }
+        /* Tell the driver its slot index changed (for any internal
+         * accounting it keeps). */
+        cam_core_notify_slot_index_changed(i);
         /* Rewrite NVS at the new (lower) index — best-effort */
         if (s_slots[i].model != CAMERA_MODEL_UNKNOWN) {
             save_slot_to_nvs(i);
@@ -936,6 +778,11 @@ esp_err_t camera_manager_remove_slot(int slot)
     }
 
     unlock();
+
+    /* Unregister the now-empty top slot from cam_core (drops the pointer
+     * from its registry so iteration/queries skip it). */
+    cam_core_unregister_slot(s_slot_count);
+
     ESP_LOGI(TAG, "slot %d: removed; %d slot(s) remain", slot, s_slot_count);
     return ESP_OK;
 }
@@ -980,9 +827,12 @@ esp_err_t camera_manager_reorder_slots(const int *new_order, int count)
     }
     unlock();
 
-    /* Stop all poll timers for affected slots before touching RAM. */
+    /* Tear down poll timers for affected slots before touching RAM
+     * (cam_core_teardown_slot also runs the driver teardown — but no slot
+     * is READY here, so it's a no-op for an idle slot).  Pre-reorder
+     * cleanup mirrors the pre-split semantics. */
     for (int i = 0; i < count; i++) {
-        stop_poll_timer(new_order[i]);
+        cam_core_teardown_slot(new_order[i]);
     }
 
     /* Build the permuted RAM snapshot. */
@@ -992,12 +842,13 @@ esp_err_t camera_manager_reorder_slots(const int *new_order, int count)
         tmp[i] = s_slots[new_order[i]];
     }
 
-    /* Copy permutation back into the live slot array. */
+    /* Copy permutation back into the live slot array.  Embedded cam_core
+     * state moves with the struct copy; cam_core's registry pointers are
+     * stable (always &s_slots[i].core), so iteration sees the new data
+     * automatically. */
     for (int i = 0; i < count; i++) {
         s_slots[i] = tmp[i];
-        if (s_slots[i].driver && s_slots[i].driver->update_slot_index) {
-            s_slots[i].driver->update_slot_index(s_slots[i].driver_ctx, i);
-        }
+        cam_core_notify_slot_index_changed(i);
     }
     unlock();
 
@@ -1029,92 +880,25 @@ bool camera_manager_is_known_ble_addr(ble_addr_t addr)
 
 bool camera_manager_has_disconnected_cameras(void)
 {
+    /* `requires_ble` lives in cam_core; everything else (`is_configured`,
+     * `ble_status`) is wireless.  Snapshot the wireless side under our
+     * mutex, then consult cam_core per-slot.  cam_core_slot_requires_ble
+     * returns false when no driver is attached, so newly-paired slots
+     * (model UNKNOWN, awaiting driver attach) don't falsely count as
+     * "disconnected BLE cameras" here. */
+    bool any = false;
     lock();
     for (int i = 0; i < s_slot_count; i++) {
         camera_slot_t *sl = &s_slots[i];
-        if (sl->is_configured && sl->requires_ble &&
+        if (sl->is_configured &&
             sl->ble_status != CAM_BLE_CONNECTED &&
-            sl->ble_status != CAM_BLE_READY) {
-            unlock();
-            return true;
+            sl->ble_status != CAM_BLE_READY &&
+            cam_core_slot_requires_ble(i)) {
+            any = true;
+            break;
         }
     }
     unlock();
-    return false;
+    return any;
 }
 
-/* ================================================================
- * Mismatch poll timer (§13.3 / §13.4)
- * ================================================================ */
-
-static void poll_timer_cb(void *arg)
-{
-    int slot = (int)(intptr_t)arg;
-
-    lock();
-    camera_slot_t *sl = &s_slots[slot];
-
-    if (!sl->driver || sl->wifi_status != WIFI_CAM_READY) {
-        unlock();
-        return;
-    }
-
-    camera_recording_status_t status =
-        sl->driver->get_recording_status(sl->driver_ctx);
-
-    /* Grace expires naturally when the deadline passes — no per-tick reset. */
-    bool grace_active = (esp_timer_get_time() < sl->grace_until_us);
-
-    mismatch_action_t action =
-        mismatch_step(sl->desired_recording, status, grace_active);
-
-    /* Dispatch the driver call WHILE the lock is still held.  An earlier
-     * version snapshotted the driver pointer + ctx, unlocked, and then
-     * called through — that opened a TOCTOU window in which
-     * camera_manager_remove_slot could null sl->driver / free driver_ctx
-     * between the snapshot and the call, producing a NULL deref or
-     * use-after-free.  The driver methods (start_recording / stop_recording
-     * on both BLE and WiFi-RC drivers) queue work to their respective task
-     * queues and return quickly, so the global lock is held only briefly.
-     * The mutex is recursive (lock()/unlock() wrap xSemaphoreTakeRecursive)
-     * so any incidental re-entry from the driver is safe. */
-    if (action == MISMATCH_ACTION_START) {
-        ESP_LOGI(TAG, "slot %d: mismatch — issuing start_recording", slot);
-        sl->driver->start_recording(sl->driver_ctx);
-        sl->grace_until_us = grace_deadline();
-    } else if (action == MISMATCH_ACTION_STOP) {
-        ESP_LOGI(TAG, "slot %d: mismatch — issuing stop_recording", slot);
-        sl->driver->stop_recording(sl->driver_ctx);
-        sl->grace_until_us = grace_deadline();
-    }
-    unlock();
-}
-
-static void start_poll_timer(int slot)
-{
-    camera_slot_t *sl = &s_slots[slot];
-    if (sl->poll_timer) return;
-
-    esp_timer_create_args_t args = {
-        .callback        = poll_timer_cb,
-        .arg             = (void *)(intptr_t)slot,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name            = "cam_poll",
-    };
-    esp_timer_handle_t h;
-    if (esp_timer_create(&args, &h) == ESP_OK) {
-        sl->poll_timer = h;
-        esp_timer_start_periodic(h, (uint64_t)STATUS_POLL_INTERVAL_MS * 1000ULL);
-    } else {
-        ESP_LOGE(TAG, "slot %d: failed to create poll timer", slot);
-    }
-}
-
-static void stop_poll_timer(int slot)
-{
-    camera_slot_t *sl = &s_slots[slot];
-    if (!sl->poll_timer) return;
-    esp_timer_stop(sl->poll_timer);
-    esp_timer_delete(sl->poll_timer);
-    sl->poll_timer = NULL;
-}
