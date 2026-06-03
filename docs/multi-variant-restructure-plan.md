@@ -241,8 +241,10 @@ each.
         `camera_manager_*` wrappers
       - 3.5 — rename `apps/wireless/components/camera_manager` →
         `camera_manager_wireless` (history preserved via `git mv`)
-      Host-test re-run blocked on local MSVC availability — flagged for
-      3.6 follow-up; hardware smoke (pair / record / stop) still owed.
+      Hardware smoke (basic pair / record / stop on real hardware)
+      verified post-3.5.  Host-test re-run still owed — blocked on local
+      MSVC availability, worth a one-shot CI / MinGW pass since the
+      sources moved.
 - [ ] **Phase 4 — Variant-aware release pipeline** (§5, §6). Add
       `CONFIG_PRODUCT_VARIANT`. Parameterize `release-*.yml` over a variant
       matrix (today `[wireless]`). Per-variant `factory.bin` +
