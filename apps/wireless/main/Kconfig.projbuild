@@ -12,6 +12,29 @@ menu "GoPro Controller — Identity"
 
 endmenu
 
+menu "GoPro Controller — Product"
+
+    config PRODUCT_VARIANT
+        string "Product variant slug"
+        default "wireless"
+        help
+            Build-time identifier for the product variant this firmware
+            belongs to (see docs/multi-variant-restructure-plan.md). Today
+            the only shipping variant is "wireless"; future siblings
+            (e.g. a wired/USB controller) drop their own Kconfig default
+            into their app tree.
+
+            Threaded through:
+              - /api/version's `product` field (read by the web UI to
+                compose the variant-aware OTA route)
+              - per-variant OTA floating tags
+                (latest-<channel>-<PRODUCT_VARIANT>)
+              - launchpad firmware-images URL
+
+            Keep it short ASCII, no slashes — it ends up in URLs.
+
+endmenu
+
 menu "GoPro Controller — OTA"
 
     config OTA_BASE_URL

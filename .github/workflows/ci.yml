@@ -1,9 +1,11 @@
 name: ci
 
 # Build gate + host-side unit tests. Runs on every push and pull request so
-# refactoring work is caught early. The two apps build under the same pinned
-# ESP-IDF the release workflows use; the host tests compile the pure-logic
-# sources against Unity and run on the native runner (no ESP-IDF needed).
+# refactoring work is caught early. Each variant in the matrix builds its
+# own app and a recovery image stamped with the matching CONFIG_PRODUCT_VARIANT,
+# under the same pinned ESP-IDF the release workflows use. Host tests
+# compile the pure-logic sources against Unity and run on the native runner
+# (no ESP-IDF needed).
 
 on:
   push:
@@ -19,16 +21,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [wireless, recovery]
+        variant: [wireless]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build ${{ matrix.app }} app
+      - name: Stamp product variant into sdkconfig.defaults
+        # CI doesn't bump CONFIG_APP_PROJECT_VER (left as the in-tree dev
+        # stamp), only CONFIG_PRODUCT_VARIANT so /api/version reports the
+        # right slug and any variant-conditional code paths exercise here.
+        run: |
+          for SDKCFG in apps/${{ matrix.variant }}/sdkconfig.defaults \
+                        apps/recovery/sdkconfig.defaults; do
+            if grep -q '^CONFIG_PRODUCT_VARIANT=' "$SDKCFG"; then
+              sed -i "s/^CONFIG_PRODUCT_VARIANT=.*/CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"/" "$SDKCFG"
+            else
+              echo "CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"" >> "$SDKCFG"
+            fi
+          done
+
+      - name: Build ${{ matrix.variant }} app
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32s3
-          path: apps/${{ matrix.app }}
+          path: apps/${{ matrix.variant }}
+
+      - name: Build recovery app (variant-stamped)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: apps/recovery
 
   host-tests:
     runs-on: ubuntu-latest

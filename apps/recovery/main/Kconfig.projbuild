@@ -1,3 +1,22 @@
+menu "GoPro Controller — Product (recovery)"
+
+    config PRODUCT_VARIANT
+        string "Product variant slug"
+        default "wireless"
+        help
+            Build-time identifier for the product variant this recovery
+            image belongs to (see docs/multi-variant-restructure-plan.md).
+            Must match the variant of the paired main app — they ship as a
+            unit per release. Threaded through:
+              - /api/version's `product` field (read by the recovery UI
+                to compose the variant-aware OTA route)
+              - per-variant OTA floating tags
+                (latest-<channel>-<PRODUCT_VARIANT>)
+
+            Keep it short ASCII, no slashes — it ends up in URLs.
+
+endmenu
+
 menu "GoPro Controller — OTA (recovery)"
 
     config OTA_BASE_URL

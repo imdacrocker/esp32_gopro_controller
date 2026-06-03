@@ -5,7 +5,7 @@ The full system design is in [`design/ota.md`](design/ota.md). This page is the 
 ## Model
 
 - **Channels.** `stable` and `beta` published online (separate Cloudflare Worker routes). `dev` is local-only via `dev.ps1`.
-- **One binary per version.** Beta and stable use the byte-identical binary for the same `vX.Y.Z` tag — promotion is a pure pointer-move on the `latest-stable` floating tag, not a rebuild.
+- **One binary per version-variant.** Beta and stable use byte-identical binaries for the same `vX.Y.Z-<variant>` tag — promotion is a pure pointer-move on the `latest-stable-<variant>` floating tag, not a rebuild. Today's matrix is `[wireless]` (Phase 4 — see `docs/multi-variant-restructure-plan.md`); the per-variant suffix is in place so future siblings drop in.
 - **App + UI ship as a pair.** Each release publishes 5 assets:
   - `manifest.json` — declares both SHA-256 hashes
   - `app.bin` — the wireless app
@@ -20,9 +20,9 @@ The full system design is in [`design/ota.md`](design/ota.md). This page is the 
 
 1. Bump the root `VERSION` file (e.g. `0.2.1` → `0.2.2`), commit, push.
 2. *(only if recovery code changed)* Bump `CONFIG_APP_PROJECT_VER` in `apps/recovery/sdkconfig.defaults` independently.
-3. **Actions → release-beta → Run workflow.** Builds both apps, publishes `v$VERSION` as prerelease, moves `latest-beta` floating tag.
+3. **Actions → release-beta → Run workflow.** Runs the variant matrix; for each variant publishes `v$VERSION-<variant>` as prerelease and moves the `latest-beta-<variant>` floating tag.
 4. Test on a device: channel = beta → Check for updates → Install. Validates the new bytes.
-5. **Actions → release-promote → Run workflow** with `tag = v$VERSION`. Flips the source release out of prerelease and moves `latest-stable` to the same bytes (no rebuild).
+5. **Actions → release-promote → Run workflow** with `tag = v$VERSION` (the unsuffixed base — the workflow appends `-<variant>` per matrix entry). Flips each variant's source release out of prerelease and moves `latest-stable-<variant>` to the same bytes (no rebuild).
 6. Bump `VERSION` to the next line (e.g. `0.2.3`) so subsequent betas don't collide with the released stable.
 
 ---

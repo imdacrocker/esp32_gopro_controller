@@ -39,6 +39,10 @@ static const char *TAG = "http_api_system";
  *   channel:           shared NVS ota/channel via ota_io
  *   running_partition: label (typically ota_0 or ota_1 in wireless mode)
  *   mode:              "wireless"
+ *   product:           compile-time CONFIG_PRODUCT_VARIANT — slug for the
+ *                      product variant (e.g. "wireless"). The browser uses
+ *                      it to compose the variant-aware OTA route
+ *                      (latest-<channel>-<product>/manifest.json).
  *   ota_base_url:      compile-time CONFIG_OTA_BASE_URL — the browser uses
  *                      this to compose the manifest URL (no /manifest.json
  *                      file needed on LittleFS)
@@ -69,15 +73,16 @@ static esp_err_t handler_version(httpd_req_t *req)
     read_recovery_version(recovery, sizeof(recovery));
     ota_io_get_channel(channel, sizeof(channel));
 
-    char buf[640];
+    char buf[704];
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"%s\",\"recovery\":\"%s\","
              "\"channel\":\"%s\",\"running_partition\":\"%s\","
-             "\"mode\":\"wireless\","
+             "\"mode\":\"wireless\",\"product\":\"%s\","
              "\"build_date\":\"%s\",\"build_time\":\"%s\","
              "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
              app->version, app->version, recovery, channel,
              running ? running->label : "unknown",
+             CONFIG_PRODUCT_VARIANT,
              app->date, app->time,
              CONFIG_OTA_BASE_URL, CONFIG_OTA_REPO_PATH);
     send_json(req, buf);

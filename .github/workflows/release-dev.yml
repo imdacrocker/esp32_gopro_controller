@@ -1,18 +1,19 @@
 name: release-dev
 
 # Manual trigger from the Actions tab. Builds the selected branch (or the
-# branch the workflow was launched from) and force-moves the latest-dev
-# floating release to it.
+# branch the workflow was launched from) and force-moves the
+# latest-dev-<variant> floating release to it, per variant in the matrix.
 #
 # Less formal than stable/beta:
 #   - No VERSION bump required; the version stamp is dev-<shortsha>-<utc>.
-#   - No immutable v<X.Y.Z> tag; only the floating latest-dev release exists.
+#   - No immutable v<X.Y.Z>-<variant> tag; only the floating
+#     latest-dev-<variant> release exists.
 #   - No promotion path; dev never becomes beta or stable.
-#   - Recovery-only consumption — the wireless app's settings dropdown does not
-#     list "dev" (CONFIG_OTA_ALLOW_DEV_CHANNEL stays off in apps/wireless).
-#     Testers must boot into recovery to pick this channel.
+#   - Recovery-only consumption — the variant app's settings dropdown does
+#     not list "dev" (CONFIG_OTA_ALLOW_DEV_CHANNEL stays off in
+#     apps/<variant>). Testers must boot into recovery to pick this channel.
 #   - No version check on the device side; recovery installs whatever the
-#     manifest at latest-dev points at.
+#     manifest at latest-dev-<variant> points at.
 
 on:
   workflow_dispatch:
@@ -28,6 +29,10 @@ permissions:
 jobs:
   dev:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [wireless]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,20 +45,30 @@ jobs:
           STAMP="dev-$SHORT-$(date -u +%Y%m%d%H%M)"
           echo "stamp=$STAMP"  >> "$GITHUB_OUTPUT"
           echo "short=$SHORT"  >> "$GITHUB_OUTPUT"
+          echo "floating=latest-dev-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
 
-      - name: Stamp version into sdkconfig.defaults
+      - name: Stamp version + product variant into sdkconfig.defaults
         run: |
-          sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.stamp }}\"/" \
-              apps/wireless/sdkconfig.defaults
+          for SDKCFG in apps/${{ matrix.variant }}/sdkconfig.defaults \
+                        apps/recovery/sdkconfig.defaults; do
+            if grep -q '^CONFIG_APP_PROJECT_VER=' "$SDKCFG"; then
+              sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.stamp }}\"/" "$SDKCFG"
+            fi
+            if grep -q '^CONFIG_PRODUCT_VARIANT=' "$SDKCFG"; then
+              sed -i "s/^CONFIG_PRODUCT_VARIANT=.*/CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"/" "$SDKCFG"
+            else
+              echo "CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"" >> "$SDKCFG"
+            fi
+          done
 
-      - name: Build wireless app
+      - name: Build ${{ matrix.variant }} app
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32s3
-          path: apps/wireless
+          path: apps/${{ matrix.variant }}
 
-      - name: Build recovery app
+      - name: Build recovery app (variant-stamped)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
@@ -63,27 +78,28 @@ jobs:
       - name: Stage assets and generate manifest
         run: |
           mkdir -p release
-          cp apps/wireless/build/esp32_gopro_canbus_wireless.bin release/app.bin
-          cp apps/wireless/build/storage.bin                          release/storage.bin
-          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
+          cp apps/${{ matrix.variant }}/build/esp32_gopro_canbus_${{ matrix.variant }}.bin release/app.bin
+          cp apps/${{ matrix.variant }}/build/storage.bin                                  release/storage.bin
+          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin                           release/recovery.bin
           python tools/release/make_manifest.py \
             --version "${{ steps.ver.outputs.stamp }}" \
             --channel dev \
+            --product "${{ matrix.variant }}" \
             --app-bin     release/app.bin \
             --storage-bin release/storage.bin \
             --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" \
             --output release/manifest.json
 
-      - name: Move latest-dev floating release
+      - name: Move latest-dev-${{ matrix.variant }} floating release
         # Force-moved on every run; there is no immutable per-build tag for dev.
         # Source branch is recorded in the release notes for forensic purposes.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-dev --yes --cleanup-tag || true
-          gh release create latest-dev \
-            --title "Latest dev (${{ steps.ver.outputs.stamp }})" \
-            --notes "Built from \`${GITHUB_SHA::7}\` on \`${{ github.event.inputs.ref || github.ref_name }}\`. Recovery-only channel; no promotion path." \
+          gh release delete "${{ steps.ver.outputs.floating }}" --yes --cleanup-tag || true
+          gh release create "${{ steps.ver.outputs.floating }}" \
+            --title "Latest dev — ${{ matrix.variant }} (${{ steps.ver.outputs.stamp }})" \
+            --notes "Built from \`${GITHUB_SHA::7}\` on \`${{ github.event.inputs.ref || github.ref_name }}\`. Variant: \`${{ matrix.variant }}\`. Recovery-only channel; no promotion path." \
             --target "$GITHUB_SHA" \
             --prerelease \
             release/manifest.json release/app.bin release/storage.bin release/recovery.bin

@@ -116,14 +116,15 @@ static esp_err_t handler_version(httpd_req_t *req)
     char channel[OTA_IO_CHANNEL_MAX];
     ota_io_get_channel(channel, sizeof(channel));
 
-    char buf[512];
+    char buf[576];
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"none\",\"recovery\":\"%s\","
              "\"channel\":\"%s\",\"running_partition\":\"%s\","
-             "\"mode\":\"recovery\","
+             "\"mode\":\"recovery\",\"product\":\"%s\","
              "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
              desc->version, desc->version, channel,
              running ? running->label : "unknown",
+             CONFIG_PRODUCT_VARIANT,
              CONFIG_OTA_BASE_URL, CONFIG_OTA_REPO_PATH);
     return send_json(req, buf);
 }

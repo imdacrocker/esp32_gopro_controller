@@ -172,15 +172,24 @@ Single JSON file per channel. Hosted as a release asset on GitHub Releases, fetc
 
 ### Channel routing
 
-Two channels, two floating tags on GitHub:
-- `stable` → `https://github.com/<owner>/<repo>/releases/download/latest-stable/manifest.json`
-- `beta` → `https://github.com/<owner>/<repo>/releases/download/latest-beta/manifest.json`
+Two channels × N product variants → per-variant floating tags on GitHub
+(Phase 4 — see `docs/multi-variant-restructure-plan.md` §6):
+- `stable` (wireless) → `https://github.com/<owner>/<repo>/releases/download/latest-stable-wireless/manifest.json`
+- `beta`   (wireless) → `https://github.com/<owner>/<repo>/releases/download/latest-beta-wireless/manifest.json`
 
-CI moves the floating tag on each release. Device picks the URL by reading NVS `ota/channel` (default `"stable"`).
+CI moves the matching floating tag on each release. Device picks the URL
+by reading NVS `ota/channel` (default `"stable"`) and the compile-time
+`CONFIG_PRODUCT_VARIANT` slug.
 
 Through the Worker, the browser fetches from:
 ```
-https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-<channel>/manifest.json
+https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-<channel>-<product>/manifest.json
+```
+
+The Worker also accepts a friendly per-variant route used by Launchpad
+and humans, which it rewrites to the suffixed GitHub path:
+```
+https://firmware-proxy.<account>.workers.dev/<product>/latest-<channel>/manifest.json
 ```
 
 ---
@@ -202,16 +211,19 @@ Returns the running firmware's identity.
   "channel": "stable",
   "running_partition": "ota_0",
   "mode": "wireless",
+  "product": "wireless",
   "ota_base_url": "https://firmware-proxy.imdacrocker.workers.dev",
   "ota_repo_path": "imdacrocker/esp32_gopro_controller"
 }
 ```
 
-Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent wireless app's version).
+Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent variant-app's version).
 
 Per the locked equality invariant (§1), `app == ui` always. Both fields derive from `CONFIG_APP_PROJECT_VER` at compile time. No file read needed.
 
-`ota_base_url` and `ota_repo_path` come from compile-time `CONFIG_OTA_BASE_URL` / `CONFIG_OTA_REPO_PATH` (set per-app in each `Kconfig.projbuild`). The browser composes the manifest URL as `<base>/<repo>/releases/download/latest-<channel>/manifest.json`. Both apps return the same fields so the auto-update flow works identically in wireless and recovery without a separate config file in LittleFS.
+`product` comes from compile-time `CONFIG_PRODUCT_VARIANT` (Phase 4 — `multi-variant-restructure-plan.md` §6). Both apps in a release ship with the same slug. The browser feeds it into the variant-aware OTA route below.
+
+`ota_base_url` and `ota_repo_path` come from compile-time `CONFIG_OTA_BASE_URL` / `CONFIG_OTA_REPO_PATH` (set per-app in each `Kconfig.projbuild`). The browser composes the manifest URL as `<base>/<repo>/releases/download/latest-<channel>-<product>/manifest.json`. Both apps return the same fields so the auto-update flow works identically in variant-app and recovery without a separate config file in LittleFS.
 
 ---
 

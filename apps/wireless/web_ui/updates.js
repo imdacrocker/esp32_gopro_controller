@@ -21,6 +21,7 @@ const CHANNEL_LABELS = { stable: 'Stable', beta: 'Beta', dev: 'Dev' };
 const els = {};
 let baseUrl = null;          // cached after first load (manifest.ota_base_url)
 let repoPath = null;         // cached after first load (manifest.ota_repo_path)
+let product = 'wireless';    // /api/version.product; threads into manifest URL
 let lastChannel = null;      // tracked so we can revert on POST failure
 let lastManifest = null;     // most recent successful manifest fetch
 let currentAppVersion = null; // installed app version, for up-to-date comparison
@@ -72,6 +73,10 @@ async function loadPanel() {
         if (version.ota_base_url && version.ota_repo_path) {
             baseUrl  = version.ota_base_url;
             repoPath = version.ota_repo_path;
+            // /api/version is the source of truth for the variant slug;
+            // a missing field falls back to "wireless" so pre-Phase-4
+            // firmware (which doesn't emit the field) still updates.
+            if (version.product) product = version.product;
             panelInited = true;
         }
     }
@@ -142,7 +147,9 @@ async function onCheckClick() {
     showResult('info', 'Checking for updates…');
 
     const channel = els.channelSelect.value;
-    const url = `${baseUrl}/${repoPath}/releases/download/latest-${channel}/manifest.json`;
+    // Variant-aware route: latest-<channel>-<product>. The unsuffixed
+    // form (latest-<channel>) is no longer published past Phase 4.
+    const url = `${baseUrl}/${repoPath}/releases/download/latest-${channel}-${product}/manifest.json`;
 
     try {
         const manifest = await fetchManifest(url);

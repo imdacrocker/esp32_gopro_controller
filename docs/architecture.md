@@ -27,8 +27,8 @@ esp32_gopro_controller/
 │   ├── firmware-proxy/             — Cloudflare Worker (deployed via wrangler)
 │   └── release/make_manifest.py    — hashes built binaries into a release manifest
 ├── .github/workflows/
-│   ├── release-beta.yml            — cuts v$VERSION, moves latest-beta pointer
-│   └── release-promote.yml         — pointer-move promote: latest-stable → existing tag
+│   ├── release-beta.yml            — variant matrix; cuts v$VERSION-<variant>, moves latest-beta-<variant>
+│   └── release-promote.yml         — variant matrix; pointer-move promote: latest-stable-<variant> → existing tag
 ├── partitions.csv                  — shared between both apps (`../../partitions.csv`)
 ├── VERSION                         — next planned release version line
 ├── dev.ps1                         — daily-dev wrapper: build + OTA-flash + monitor
@@ -87,7 +87,7 @@ The two apps are independent ESP-IDF projects with their own `CMakeLists.txt` an
 
 ## Recovery app
 
-A stripped-down ESP-IDF project that lives in the `factory` partition. Same `wifi_manager`-based SoftAP, embedded HTML page (no LittleFS dependency), accepts manual `.bin` uploads via web form, can also auto-update from the cloud using the same `latest-{channel}/manifest.json` flow as the wireless app. No camera control, no CAN, no BLE. Reachable by:
+A stripped-down ESP-IDF project that lives in the `factory` partition. Same `wifi_manager`-based SoftAP, embedded HTML page (no LittleFS dependency), accepts manual `.bin` uploads via web form, can also auto-update from the cloud using the same `latest-{channel}-{product}/manifest.json` flow as the variant app (one tree, variant-stamped at build time per Phase 4 — see `multi-variant-restructure-plan.md` §5). No camera control, no CAN, no BLE. Reachable by:
 
 - bootloader fallback (bad wireless app or rollback fire),
 - `POST /api/ota/reboot-recovery` from the wireless app,

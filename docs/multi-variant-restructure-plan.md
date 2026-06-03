@@ -245,12 +245,34 @@ each.
       verified post-3.5.  Host-test re-run still owed — blocked on local
       MSVC availability, worth a one-shot CI / MinGW pass since the
       sources moved.
-- [ ] **Phase 4 — Variant-aware release pipeline** (§5, §6). Add
-      `CONFIG_PRODUCT_VARIANT`. Parameterize `release-*.yml` over a variant
-      matrix (today `[wireless]`). Per-variant `factory.bin` +
-      `manifest.json` + floating tags. Cloudflare Worker + `launchpad.toml`
-      per-variant routes. `dev.ps1 -Product` switch. `make_manifest.py
-      --product`. Per-variant recovery build.
+- [x] **Phase 4 — Variant-aware release pipeline** (§5, §6). Landed:
+      - `CONFIG_PRODUCT_VARIANT` Kconfig option (default `"wireless"`) in
+        both `apps/wireless/main/Kconfig.projbuild` and
+        `apps/recovery/main/Kconfig.projbuild`; surfaced via the new
+        `product` field on `/api/version` (both apps) and consumed by the
+        wireless + recovery update UIs to compose the variant-aware OTA
+        route.
+      - `release-beta.yml`, `release-promote.yml`, `release-dev.yml`,
+        `ci.yml` parameterized over a `variant: [wireless]` matrix.
+        Stamps `CONFIG_PRODUCT_VARIANT` into the variant app and the
+        recovery app before each build so the same recovery source tree
+        produces per-variant images. Immutable per-variant tag
+        `v$VERSION-<variant>`; floating per-variant tags
+        `latest-{beta,stable,dev}-<variant>`. Promote takes the unsuffixed
+        base `v$VERSION` and the matrix appends the variant suffix.
+      - `tools/firmware-proxy/src/index.js` accepts the friendly
+        `/<variant>/latest-<channel>/manifest.json` route and rewrites it
+        to the suffixed GitHub release path; `launchpad.toml` carries one
+        `[app]` section per variant (generated from a single
+        `SUPPORTED_VARIANTS` list in the Worker so adding a variant is a
+        one-line append).
+      - `dev.ps1 -Product <variant>` selects the variant; `-App` still
+        toggles main-vs-recovery. Build stamps `CONFIG_PRODUCT_VARIANT`
+        into both `apps/<variant>` and `apps/recovery` `sdkconfig.defaults`
+        before invoking `idf.py`.
+      - `tools/release/make_manifest.py --product <slug>` threads the
+        variant into the emitted `product` field of `manifest.json`.
+      - Docs touched: `docs/releases.md`, `docs/design/ota.md` §5/§6.
 
 ---
 
