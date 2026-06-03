@@ -228,9 +228,21 @@ each.
       `shutdown_manager` to top-level `components/`. Split `http_server` →
       `http_server_core` (shared) + `http_server_wireless` (per-app
       handlers). Wireless keeps building.
-- [ ] **Phase 3 — Decompose `camera_manager`** into `cam_core` (shared,
+- [x] **Phase 3 — Decompose `camera_manager`** into `cam_core` (shared,
       BLE-free) + `camera_manager_wireless` (§4). Extend host tests.
       Re-verify wireless behavior-identical. *Largest phase.*
+      Landed across five sub-commits:
+      - 3.1 — split `camera_manager_ble.h` out of `camera_manager.h`
+      - 3.2 — scaffold `components/cam_core/` (pure types + vtable)
+      - 3.3 — move the recording engine, mismatch poll, broadcast
+        dispatch, CAN-state translation, sleep/teardown into cam_core.c
+      - 3.4 — repoint shared callers (`can_manager`, `shutdown_manager`,
+        `http_server_core`) at `cam_core_*` directly; drop unused
+        `camera_manager_*` wrappers
+      - 3.5 — rename `apps/wireless/components/camera_manager` →
+        `camera_manager_wireless` (history preserved via `git mv`)
+      Host-test re-run blocked on local MSVC availability — flagged for
+      3.6 follow-up; hardware smoke (pair / record / stop) still owed.
 - [ ] **Phase 4 — Variant-aware release pipeline** (§5, §6). Add
       `CONFIG_PRODUCT_VARIANT`. Parameterize `release-*.yml` over a variant
       matrix (today `[wireless]`). Per-variant `factory.bin` +

@@ -251,7 +251,7 @@ esp32_gopro_controller/
 └── partitions.csv    — shared 8 MB layout
 ```
 
-Component-level READMEs live alongside their source: [`wifi_manager`](components/wifi_manager/README.md), [`ble_core`](apps/wireless/components/ble_core/README.md), [`open_gopro_ble`](apps/wireless/components/gopro/open_gopro_ble/README.md), [`gopro_wifi_rc`](apps/wireless/components/gopro/gopro_wifi_rc/README.md), [`can_manager`](apps/wireless/components/can_manager/README.md), [`camera_manager`](apps/wireless/components/camera_manager/README.md).
+Component-level READMEs live alongside their source: [`wifi_manager`](components/wifi_manager/README.md), [`ble_core`](apps/wireless/components/ble_core/README.md), [`open_gopro_ble`](apps/wireless/components/gopro/open_gopro_ble/README.md), [`gopro_wifi_rc`](apps/wireless/components/gopro/gopro_wifi_rc/README.md), [`can_manager`](components/can_manager/README.md), [`camera_manager_wireless`](apps/wireless/components/camera_manager_wireless/README.md), [`cam_core`](components/cam_core/).
 
 ---
 

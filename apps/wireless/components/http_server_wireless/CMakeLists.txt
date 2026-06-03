@@ -16,7 +16,7 @@ idf_component_register(
         # and pulls in http_server_helpers.h.
         http_server_core
     PRIV_REQUIRES
-        camera_manager
+        camera_manager_wireless
         open_gopro_ble
         gopro_wifi_rc
         wifi_manager

@@ -2,7 +2,7 @@
  * app_date_compare.h — Pure date/time string comparator for esp_app_desc_t.
  *
  * Extracted so the parsing logic is host-testable (§23.2, same pattern as
- * camera_manager/reorder_validate.c).  Used by ota_io/boot_helpers.c when
+ * cam_core/reorder_validate.c).  Used by ota_io/boot_helpers.c when
  * two OTA slots tie on secure_version and the function needs a tiebreaker.
  */
 #pragma once

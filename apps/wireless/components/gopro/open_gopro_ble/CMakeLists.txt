@@ -19,7 +19,7 @@ idf_component_register(
         nvs_flash
         esp_timer
         freertos
-        camera_manager
+        camera_manager_wireless
         can_manager
         ble_core
         wifi_manager

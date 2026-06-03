@@ -8,11 +8,13 @@ set(IDF_TARGET "esp32s3")
 # subset; the rest live there because the wireless app builds them.
 list(APPEND EXTRA_COMPONENT_DIRS "../../components")
 
-# Some top-level components still REQUIRE camera_manager (wireless-only,
-# pending the Phase-3 cam_core extraction — see
-# docs/multi-variant-restructure-plan.md §4). Recovery doesn't link them
-# anyway, so exclude them from its build to keep the dependency graph
-# resolvable.
+# shutdown_manager PRIV_REQUIRES open_gopro_ble (wireless-only — drops the
+# BLE link during shutdown).  can_manager and http_server_core in turn
+# REQUIRE shutdown_manager, so the whole chain has to be excluded from
+# recovery's build to keep the dependency graph resolvable.  Recovery
+# doesn't link any of these anyway.  A future cleanup that routes the BLE
+# terminate through a vtable entry on camera_driver_t would let
+# shutdown_manager (and the chain above it) become recovery-compatible.
 set(EXCLUDE_COMPONENTS
     can_manager
     shutdown_manager

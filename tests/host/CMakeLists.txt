@@ -25,7 +25,7 @@ FetchContent_MakeAvailable(unity)
 set(REPO_ROOT     "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(CAM_CORE_DIR  "${REPO_ROOT}/components/cam_core")
 set(CAM_CORE_INC  "${CAM_CORE_DIR}/include")
-set(CAM_MGR_INC   "${REPO_ROOT}/apps/wireless/components/camera_manager/include")
+set(CAM_MGR_INC   "${REPO_ROOT}/apps/wireless/components/camera_manager_wireless/include")
 set(GOPRO_DIR     "${REPO_ROOT}/apps/wireless/components/gopro")
 set(OTA_IO_INC    "${REPO_ROOT}/components/ota_io/include")
 

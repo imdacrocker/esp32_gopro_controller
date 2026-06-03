@@ -6,7 +6,7 @@
 # Phase 3.3 lands the runtime: cam_core.c owns the recording-intent
 # engine, mismatch poll, broadcast-driver dispatch dedup, CAN-state
 # translation, sleep/teardown helpers, and the global auto-control flag.
-# The wireless camera_manager component now embeds a cam_core_slot_t in
+# The wireless camera_manager_wireless component now embeds a cam_core_slot_t in
 # each of its slots and delegates here.
 idf_component_register(
     SRCS

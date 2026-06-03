@@ -14,7 +14,7 @@ idf_component_register(
         "."
         ".."
     REQUIRES
-        camera_manager
+        camera_manager_wireless
         can_manager
         wifi_manager
         esp_timer

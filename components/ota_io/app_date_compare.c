@@ -10,7 +10,7 @@
  *
  * Approach: parse each string into a sortable integer.  Pure logic, no
  * ESP-IDF dependencies; host-testable (§23.2, mirrors
- * camera_manager/reorder_validate.c).
+ * cam_core/reorder_validate.c).
  */
 #include "app_date_compare.h"
 
