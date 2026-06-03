@@ -1,50 +1,72 @@
 #pragma once
 
-#include "camera_types.h"
+#include "cam_core.h"        /* camera_types.h, camera_driver_t, camera_can_state_t, cam_core_slot_t */
 #include "esp_err.h"
-#include "host/ble_hs.h"   /* ble_addr_t, BLE_HS_CONN_HANDLE_NONE */
 
-/* CAMERA_MAX_SLOTS now lives in camera_types.h so it's reachable from
- * pure-logic compilation units (e.g. reorder_validate.c) that don't pull in
- * the ESP-IDF / NimBLE headers above.  Still visible to all consumers of
- * this header via the include above. */
+/* CAMERA_MAX_SLOTS, camera_model_t, the recording / mismatch enums, the
+ * driver vtable, and the CAN-state enum live in cam_core (the shared,
+ * BLE-free component) — pulled in via cam_core.h above.  This header
+ * keeps only the wireless-specific types and the wireless camera_manager
+ * API.
+ *
+ * BLE-typed entry points (currently `camera_manager_is_known_ble_addr`)
+ * live in the sibling camera_manager_ble.h so this header stays free of
+ * NimBLE includes — see docs/multi-variant-restructure-plan.md §4. */
 
-/* ---- Driver vtable (§8 / §13.5) ---- */
-typedef struct camera_driver camera_driver_t;
-struct camera_driver {
-    /* Per-slot recording control.  Always non-NULL.  Used by the mismatch
-     * poll, set_desired_recording_slot, and (for non-broadcast drivers)
-     * set_desired_recording_all. */
-    esp_err_t                  (*start_recording)(void *ctx);
-    esp_err_t                  (*stop_recording)(void *ctx);
-    /* Non-blocking cache read — safe from any context (§8) */
-    camera_recording_status_t  (*get_recording_status)(void *ctx);
-    /* nullable — called by camera_manager_remove_slot() (§20.5) */
-    void                       (*teardown)(void *ctx);
-    /* nullable — notifies driver of new slot index after compaction (§20.5) */
-    void                       (*update_slot_index)(void *ctx, int new_slot);
-    /*
-     * nullable — called from camera_manager_on_wifi_disconnected() when a
-     * SoftAP-using camera leaves the AP.  Driver should stop any in-flight
-     * network work.  Must not block.
-     */
-    void                       (*on_wifi_disconnected)(void *ctx);
+/* ---- BLE status (§7.2) — wireless-only ---- */
+typedef enum {
+    CAM_BLE_NONE = 0,   /* RC-emulation camera, or COHN camera not yet contacted   */
+    CAM_BLE_CONNECTING, /* Any in-progress BLE work: scan, connect, bond, provision */
+    CAM_BLE_CONNECTED,  /* L2 up, manufacturer-specific setup in progress           */
+    CAM_BLE_READY,      /* Setup complete; held open as WiFi re-provision fallback  */
+} cam_ble_status_t;
 
-    /* If true, set_desired_recording_all() calls *_recording_all() ONCE per
-     * wave instead of per-slot start/stop.  Subsequent slots using the same
-     * driver have their intent + grace period updated but skip dispatch.
-     * Per-slot calls (set_desired_recording_slot, mismatch poll) always go
-     * through start_recording/stop_recording regardless of this flag. */
-    bool                        broadcasts_to_all;
-    esp_err_t                  (*start_recording_all)(void);
-    esp_err_t                  (*stop_recording_all)(void);
+/* ---- WiFi / network status (§7.3) — wireless-only ---- */
+typedef enum {
+    WIFI_CAM_NONE = 0,  /* Not on network                                          */
+    WIFI_CAM_ASSOCIATING,
+    WIFI_CAM_ASSOCIATED,
+    WIFI_CAM_CONNECTED, /* IP assigned; driver probe pending                        */
+    WIFI_CAM_PROBING,
+    WIFI_CAM_READY,     /* Camera confirmed ready for recording commands            */
+} wifi_cam_status_t;
 
-    /* Nullable — send a model-appropriate sleep command and return ESP_OK on
-     * enqueue (not on camera ACK; the shutdown_manager budgets the overall
-     * timeout itself).  Return ESP_ERR_NOT_SUPPORTED if the model has no
-     * usable sleep path.  See docs/design/shutdown.md §5. */
-    esp_err_t                  (*sleep)(void *ctx);
-};
+/* ---- Pair-attempt transport (which add-camera flow is in flight) ---- *
+ *
+ * The pair_attempt state machine is shared between the BLE add-camera flow
+ * (handler_pair → open_gopro_ble) and the WiFi RC add-camera flow
+ * (handler_rc_add → gopro_wifi_rc_add_camera).  The state names map cleanly
+ * to both; the only transport-specific behavior is the cancel cleanup path
+ * (BLE: ble_gap_terminate; RC: remove the registered slot).
+ */
+typedef enum {
+    PAIR_TRANSPORT_BLE     = 0,   /* default — BLE add-camera flow */
+    PAIR_TRANSPORT_WIFI_RC = 1,   /* WiFi RC-emulation add-camera flow */
+} pair_attempt_transport_t;
+
+/* ---- Pair-attempt state machine (add-camera flow) ---- */
+typedef enum {
+    PAIR_ATTEMPT_IDLE = 0,        /* No attempt has been started */
+    PAIR_ATTEMPT_CONNECTING,      /* BLE L2 connect in flight, or RC probes sent */
+    PAIR_ATTEMPT_BONDING,         /* BLE only: L2 up, waiting for encrypted bond */
+    PAIR_ATTEMPT_PROVISIONING,    /* Slot registered, readiness sequence running */
+    PAIR_ATTEMPT_SUCCESS,         /* Slot persisted; camera ready */
+    PAIR_ATTEMPT_FAILED,          /* error_code + error_message valid */
+} pair_attempt_state_t;
+
+typedef enum {
+    PAIR_ERROR_NONE = 0,
+    PAIR_ERROR_SLOTS_FULL,         /* CAMERA_MAX_SLOTS reached */
+    PAIR_ERROR_BLE_CONNECT_FAILED, /* ble_gap_connect failed / timed out */
+    PAIR_ERROR_BOND_FAILED,        /* encryption / bond rejected */
+    PAIR_ERROR_HWINFO_TIMEOUT,     /* GetHardwareInfo retry budget exhausted */
+    PAIR_ERROR_MODEL_UNSUPPORTED,  /* Frozen / unsupported model */
+    PAIR_ERROR_HANDSHAKE_TIMEOUT,  /* SetThirdPartyClient/SetCameraControlStatus failed */
+    PAIR_ERROR_DISCONNECTED,       /* BLE dropped before reaching READY */
+    PAIR_ERROR_CANCELLED,          /* POST /api/pair/cancel */
+    PAIR_ERROR_PAIR_COMPLETE_FAIL, /* Legacy wireless/pair/complete handshake failed */
+    PAIR_ERROR_INTERNAL,           /* Catch-all */
+} pair_attempt_error_t;
 
 /* ---- Public slot info struct (§9) ---- */
 typedef struct {
@@ -85,18 +107,6 @@ typedef struct {
     pair_attempt_error_t      error_code;
     char                      error_message[64];
 } pair_attempt_info_t;
-
-/* ---- CAN camera state (§14.2) ---- */
-typedef enum {
-    CAMERA_CAN_STATE_UNDEFINED    = 0,
-    CAMERA_CAN_STATE_DISCONNECTED = 1,
-    CAMERA_CAN_STATE_IDLE         = 2,
-    CAMERA_CAN_STATE_RECORDING    = 3,
-} camera_can_state_t;
-
-/* ---- Driver registration types (§21.4) ---- */
-typedef bool   (*camera_model_match_fn)(camera_model_t model);
-typedef void  *(*camera_ctx_create_fn)(int slot);
 
 /* ==========================================================================
  * Public API
@@ -266,13 +276,16 @@ void      camera_manager_teardown_slot(int slot);
  */
 esp_err_t camera_manager_reorder_slots(const int *new_order, int count);
 
-/* ----- Callbacks for ble_core (§12.9) -----
+/* ----- Callback for ble_core (§12.9) -----
  *
- * Pass these as function pointers when constructing ble_core_callbacks_t
- * in open_gopro_ble_init().  Signatures must match ble_core_is_known_addr_cb_t
- * and ble_core_has_disconnected_cameras_cb_t respectively.
+ * Pass as a function pointer when constructing ble_core_callbacks_t in
+ * open_gopro_ble_init().  Signature must match
+ * ble_core_has_disconnected_cameras_cb_t.
+ *
+ * The companion `camera_manager_is_known_ble_addr` lives in the sibling
+ * camera_manager_ble.h header so this file stays free of NimBLE includes
+ * (docs/multi-variant-restructure-plan.md §4).
  */
-bool camera_manager_is_known_ble_addr(ble_addr_t addr);
 bool camera_manager_has_disconnected_cameras(void);
 
 /* ----- First-pair tracking ----------------------------------------------- *

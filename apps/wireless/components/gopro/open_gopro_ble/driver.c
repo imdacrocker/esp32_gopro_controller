@@ -18,6 +18,7 @@
 #include "freertos/semphr.h"
 #include "host/ble_gap.h"
 #include "open_gopro_ble_internal.h"
+#include "camera_manager_ble.h"   /* camera_manager_is_known_ble_addr */
 #include "ble_core.h"
 #include "gopro_model.h"
 #include "shutdown_manager.h"

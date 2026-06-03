@@ -21,7 +21,7 @@ Manages up to four camera slots: per-slot state (BLE and WiFi connection status,
 ## Dependencies
 
 ```
-REQUIRES: bt (ble_addr_t type), nvs_flash, esp_timer, freertos
+REQUIRES: cam_core, bt (ble_addr_t type), nvs_flash, esp_timer, freertos
 ```
 
 **Precondition:** `nvs_flash_init()` must be called before `camera_manager_init()`.
@@ -32,10 +32,12 @@ REQUIRES: bt (ble_addr_t type), nvs_flash, esp_timer, freertos
 
 | File | Responsibility |
 |------|---------------|
-| `include/camera_types.h` | Pure C enums and the `mismatch_step()` declaration — no ESP-IDF includes (host-testable) |
-| `include/camera_manager.h` | Full public API: driver vtable, slot info, all functions |
+| `include/camera_manager.h` | Wireless-specific API: slot info, BLE/WiFi status enums, pair-attempt types, all wireless `camera_manager_*` functions. Pulls in `cam_core.h` for the shared types/vtable. Stays NimBLE-free. |
+| `include/camera_manager_ble.h` | BLE-typed extensions (currently `camera_manager_is_known_ble_addr`). Include only from sites that need NimBLE types. |
 | `camera_manager.c` | Init, NVS load/save, driver registration, slot lifecycle, mismatch timer |
-| `mismatch.c` | Pure `mismatch_step()` function — no ESP-IDF includes (host-testable) |
+| `pair_attempt.c` | Single in-flight pair-attempt state machine + watchdog (wireless-only) |
+
+The shared, BLE-free pieces (`camera_types.h`, `mismatch.c`, `reorder_validate.c`, the `camera_driver_t` vtable, `camera_can_state_t`, the per-slot `cam_core_slot_t` record) now live in `components/cam_core/` — see [`components/cam_core/include/cam_core.h`](../../../components/cam_core/include/cam_core.h). The recording-intent engine that still lives in `camera_manager.c` will move into `cam_core` in Phase 3.3 of the multi-variant restructure (`docs/multi-variant-restructure-plan.md` §4).
 
 ---
 
@@ -138,8 +140,9 @@ The `WIFI_CAM_READY` enum name is retained for both transports — historical fr
 
 ## Public API
 
-Header: `include/camera_manager.h`  
-Pure types: `include/camera_types.h`
+Header: `include/camera_manager.h` (wireless-specific) — re-exports the cam_core types via `#include "cam_core.h"`.  
+Shared types: [`components/cam_core/include/camera_types.h`](../../../components/cam_core/include/camera_types.h) (model IDs, recording/intent/mismatch enums).  
+Shared vtable + per-slot state: [`components/cam_core/include/cam_core.h`](../../../components/cam_core/include/cam_core.h).
 
 ### Init
 
@@ -283,11 +286,16 @@ Stop the mismatch timer, call `driver->teardown()`, erase NVS for the slot, comp
 ### ble_core Callbacks
 
 ```c
-bool camera_manager_is_known_ble_addr(ble_addr_t addr);
+/* camera_manager.h */
 bool camera_manager_has_disconnected_cameras(void);
+
+/* camera_manager_ble.h (BLE-typed; include separately) */
+bool camera_manager_is_known_ble_addr(ble_addr_t addr);
 ```
 
 Pass these as function pointers when constructing `ble_core_callbacks_t` in `open_gopro_ble_init()`. `is_known_addr` gates auto-reconnect in the background scan handler. `has_disconnected_cameras` gates whether the background scan is started at all — it only counts slots registered with `requires_ble == true`, so RC-emulation cameras (which never use BLE) do not keep the scanner running permanently.
+
+`camera_manager_is_known_ble_addr` lives in the sibling `camera_manager_ble.h` header so that `camera_manager.h` itself stays free of NimBLE includes (step toward the BLE-free shared `cam_core` component — see `docs/multi-variant-restructure-plan.md` §4).
 
 ---
 

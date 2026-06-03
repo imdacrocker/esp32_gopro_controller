@@ -1,4 +1,5 @@
 #include "camera_manager.h"
+#include "camera_manager_ble.h"   /* ble_addr_t, BLE_HS_CONN_HANDLE_NONE */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_netif_ip_addr.h"

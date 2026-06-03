@@ -1,13 +1,12 @@
 idf_component_register(
     SRCS
         "camera_manager.c"
-        "mismatch.c"
         "pair_attempt.c"
-        "reorder_validate.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
-        bt
+        cam_core        # shared types, driver vtable, per-slot record (Phase 3.2)
+        bt              # NimBLE (host/ble_hs.h via camera_manager_ble.h)
         nvs_flash
         esp_timer
         freertos
