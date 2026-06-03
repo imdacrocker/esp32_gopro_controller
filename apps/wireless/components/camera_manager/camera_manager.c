@@ -661,68 +661,15 @@ esp_err_t camera_manager_get_slot_info(int slot, camera_slot_info_t *out)
     return ESP_OK;
 }
 
-camera_can_state_t camera_manager_get_slot_can_state(int slot)
-{
-    if (!slot_valid(slot)) return CAMERA_CAN_STATE_UNDEFINED;
-    lock();
-    bool configured = s_slots[slot].is_configured;
-    unlock();
-    if (!configured) return CAMERA_CAN_STATE_UNDEFINED;
-    return cam_core_get_can_state(slot);
-}
-
-/* ================================================================
- * Recording intent (§13)
- * ================================================================ */
-
-/* Recording intent + auto-control + dispatch all live in cam_core; these
- * wireless wrappers are thin shims that preserve the existing public API.
- * The engine semantics (immediate dispatch on transition, idempotent
- * repeats, broadcast dedup, grace-deadline arming) are documented in
- * components/cam_core/cam_core.c and unchanged from the pre-split
- * implementation. */
-
-void camera_manager_set_desired_recording_all(desired_recording_t intent)
-{
-    cam_core_set_desired_all(intent);
-}
-
-void camera_manager_set_desired_recording_slot(int slot, desired_recording_t intent)
-{
-    if (!slot_valid(slot)) return;
-    cam_core_set_desired_slot(slot, intent);
-}
-
-bool camera_manager_get_auto_control(void)         { return cam_core_get_auto_control(); }
-void camera_manager_set_auto_control(bool enabled) { cam_core_set_auto_control(enabled); }
-
-/* ================================================================
- * Shutdown helpers (docs/design/shutdown.md)
- * ================================================================ */
-
-esp_err_t camera_manager_invoke_sleep(int slot)
-{
-    if (!slot_valid(slot)) return ESP_ERR_INVALID_ARG;
-    return cam_core_invoke_sleep(slot);
-}
-
-void camera_manager_teardown_slot(int slot)
-{
-    if (!slot_valid(slot)) return;
-
-    /* cam_core stops the poll timer, clears ready, and invokes the
-     * driver's teardown.  Mirror the universal "no longer ready" into
-     * the wireless-only status fields so derived state (UI status, CAN
-     * 0x601) reflects the disconnect immediately. */
-    cam_core_teardown_slot(slot);
-
-    lock();
-    s_slots[slot].wifi_status = WIFI_CAM_NONE;
-    s_slots[slot].ip_addr     = 0;
-    unlock();
-
-    ESP_LOGI(TAG, "slot %d: teardown (shutdown path)", slot);
-}
+/* Recording intent + auto-control + can-state + sleep + teardown all
+ * live in cam_core; callers (wireless or shared) call cam_core_* APIs
+ * directly.  The wireless-only `wifi_status` / `ip_addr` clear that the
+ * old camera_manager_teardown_slot() wrapper performed has been dropped:
+ * teardown is only used on the shutdown path, where the small window of
+ * stale wifi_status is invisible (the system is going down anyway).
+ *
+ * Slot-removal compaction below still uses cam_core_teardown_slot for
+ * the per-slot timer + driver teardown before shifting slot data. */
 
 /* ================================================================
  * Slot removal with compaction (§20.5)

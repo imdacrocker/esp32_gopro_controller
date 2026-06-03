@@ -22,8 +22,10 @@ typedef enum {
 
 /*
  * Initialise state, mutex, and counters.  Must be called after
- * camera_manager_init() and before can_manager_register_callbacks() — the
- * CAN handlers consult shutdown_manager_is_active() to gate 0x600 frames.
+ * cam_core_init() and before can_manager_register_callbacks() — the CAN
+ * handlers consult shutdown_manager_is_active() to gate 0x600 frames.
+ * In the wireless app, `cam_core_init()` is invoked from
+ * `camera_manager_init()`.
  */
 void shutdown_manager_init(void);
 

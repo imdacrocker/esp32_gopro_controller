@@ -22,7 +22,7 @@
 #include "cJSON.h"
 #include "sdkconfig.h"
 #include "can_manager.h"
-#include "camera_manager.h"
+#include "cam_core.h"
 #include "ota_io.h"
 #include "http_server_helpers.h"
 
@@ -128,7 +128,7 @@ static esp_err_t handler_utc(httpd_req_t *req)
 
 static esp_err_t handler_get_auto_control(httpd_req_t *req)
 {
-    bool enabled = camera_manager_get_auto_control();
+    bool enabled = cam_core_get_auto_control();
     send_json(req, enabled ? "{\"enabled\":true}" : "{\"enabled\":false}");
     return ESP_OK;
 }
@@ -156,7 +156,7 @@ static esp_err_t handler_post_auto_control(httpd_req_t *req)
     bool enabled = cJSON_IsTrue(item);
     cJSON_Delete(root);
 
-    camera_manager_set_auto_control(enabled);
+    cam_core_set_auto_control(enabled);
     ESP_LOGI(TAG, "auto-control set to %s", enabled ? "on" : "off");
 
     send_json(req, enabled ? "{\"enabled\":true}" : "{\"enabled\":false}");

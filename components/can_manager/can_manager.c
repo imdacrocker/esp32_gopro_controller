@@ -10,7 +10,7 @@
  */
 
 #include "can_manager.h"
-#include "camera_manager.h"
+#include "cam_core.h"
 #include "shutdown_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -175,8 +175,8 @@ static void watchdog_cb(void *arg)
     /* When auto-control is off, leave each slot's desired_recording alone so
      * manual /api/shutter intent (and the mismatch-correction safety net that
      * goes with it) survive a CAN bus dropout. */
-    if (camera_manager_get_auto_control()) {
-        camera_manager_set_desired_recording_all(DESIRED_RECORDING_UNKNOWN);
+    if (cam_core_get_auto_control()) {
+        cam_core_set_desired_all(DESIRED_RECORDING_UNKNOWN);
     }
     /* Callback is NOT fired with UNKNOWN (§14.2). */
 }
@@ -211,8 +211,8 @@ static void handle_logging_cmd(const can_rx_item_t *item)
     /* When auto-control is off, the bus reports its state but must not drive
      * camera recording intent — otherwise a 0x600 frame arriving right after a
      * manual /api/shutter would flip desired_recording straight back. */
-    if (camera_manager_get_auto_control()) {
-        camera_manager_set_desired_recording_all(
+    if (cam_core_get_auto_control()) {
+        cam_core_set_desired_all(
             state == LOGGING_STATE_LOGGING
                 ? DESIRED_RECORDING_START
                 : DESIRED_RECORDING_STOP);
@@ -496,7 +496,7 @@ static void tx_timer_cb(void *arg)
 
     uint8_t data[CAMERA_MAX_SLOTS];
     for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
-        data[i] = (uint8_t)camera_manager_get_slot_can_state(i);
+        data[i] = (uint8_t)cam_core_get_can_state(i);
     }
 
     const can_channel_t status_ch = s_channels[CAN_CH_CAM_STATUS];

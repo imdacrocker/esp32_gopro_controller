@@ -16,9 +16,7 @@ idf_component_register(
         shutdown_manager
     PRIV_REQUIRES
         # Private dependencies needed only inside this component's .c files.
-        # camera_manager is here for api_shutdown's slot-count read — Phase 3
-        # redirects this to cam_core once it exists.
-        camera_manager
+        cam_core
         can_manager
         wifi_manager
         ota_io

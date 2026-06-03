@@ -65,7 +65,8 @@ void can_manager_register_callbacks(const can_manager_callbacks_t *cbs);
 /*
  * Start the TWAI driver, RX task, TX timer, and 5 s watchdog.
  * Load timezone offset from NVS.
- * Must be called after camera_manager_init().
+ * Must be called after cam_core_init() (and after camera_manager_init()
+ * in the wireless app, which is what invokes cam_core_init()).
  */
 void can_manager_init(void);
 

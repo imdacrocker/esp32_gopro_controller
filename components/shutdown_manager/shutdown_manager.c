@@ -5,11 +5,17 @@
  *   stop_recording (if recording, with 1.5 s confirm wait)
  *   sleep command  (via driver vtable, with 500 ms ACK settle)
  *   BLE terminate  (for BLE-control slots, via open_gopro_ble)
- *   teardown       (camera_manager_teardown_slot — stops driver timers)
+ *   teardown       (cam_core_teardown_slot — stops mismatch timer +
+ *                   invokes driver teardown)
  *
  * Per-slot deadline: 5 s end-to-end.  On expiry the slot is marked failed
  * but the sequence continues; the global state transitions to COMPLETE
  * once every slot has finished one way or the other.
+ *
+ * Layering note: the BLE-terminate step still calls into open_gopro_ble,
+ * a wireless-only component.  A clean fix would add a `terminate_link`
+ * vtable entry the BLE driver implements; that follow-up is out of scope
+ * for the multi-variant restructure (docs/multi-variant-restructure-plan.md).
  */
 
 #include "shutdown_manager.h"
@@ -17,10 +23,8 @@
 #include <stdatomic.h>
 #include <string.h>
 
-#include "camera_manager.h"
-#include "camera_types.h"
+#include "cam_core.h"
 #include "open_gopro_ble.h"
-#include "gopro_model.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -53,34 +57,26 @@ static void shutdown_slot_task(void *arg)
     int64_t deadline_us = esp_timer_get_time() + (int64_t)PER_SLOT_DEADLINE_MS * 1000;
     bool failed = false;
 
-    camera_slot_info_t info;
-    if (camera_manager_get_slot_info(slot, &info) != ESP_OK || !info.is_configured) {
+    if (!cam_core_slot_active(slot)) {
         ESP_LOGW(TAG, "slot %d: not configured at task start — skipping", slot);
         goto done;
     }
 
-    ESP_LOGI(TAG, "slot %d: shutdown sequence starting (model=%d)",
-             slot, (int)info.model);
+    ESP_LOGI(TAG, "slot %d: shutdown sequence starting", slot);
 
     /* ---- Step 1: stop recording if active. ------------------------------- */
-    if (info.is_recording) {
+    if (cam_core_is_recording(slot)) {
         ESP_LOGI(TAG, "slot %d: stopping recording", slot);
-        camera_manager_set_desired_recording_slot(slot, DESIRED_RECORDING_STOP);
+        cam_core_set_desired_slot(slot, DESIRED_RECORDING_STOP);
 
         int64_t step_deadline_us = esp_timer_get_time() +
                                    (int64_t)STOP_RECORDING_TIMEOUT_MS * 1000;
         while (esp_timer_get_time() < step_deadline_us &&
                esp_timer_get_time() < deadline_us) {
-            camera_slot_info_t now;
-            if (camera_manager_get_slot_info(slot, &now) == ESP_OK &&
-                !now.is_recording) {
-                break;
-            }
+            if (!cam_core_is_recording(slot)) break;
             vTaskDelay(pdMS_TO_TICKS(IS_RECORDING_POLL_MS));
         }
-        camera_slot_info_t after;
-        if (camera_manager_get_slot_info(slot, &after) == ESP_OK &&
-            after.is_recording) {
+        if (cam_core_is_recording(slot)) {
             ESP_LOGW(TAG, "slot %d: stop_recording did not confirm — marking failed",
                      slot);
             failed = true;
@@ -93,7 +89,7 @@ static void shutdown_slot_task(void *arg)
 
     /* ---- Step 2: send sleep command (best-effort). ----------------------- */
     if (esp_timer_get_time() < deadline_us) {
-        esp_err_t err = camera_manager_invoke_sleep(slot);
+        esp_err_t err = cam_core_invoke_sleep(slot);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "slot %d: sleep command sent", slot);
         } else if (err == ESP_ERR_NOT_SUPPORTED) {
@@ -116,13 +112,16 @@ static void shutdown_slot_task(void *arg)
         }
     }
 
-    /* ---- Step 3: terminate BLE link (if any). ---------------------------- */
-    if (gopro_model_uses_ble_control(info.model)) {
+    /* ---- Step 3: terminate BLE link (if any). ---------------------------- *
+     * cam_core records `requires_ble` per slot at driver-attach time; today
+     * only the BLE driver sets it, so this exactly matches the previous
+     * `gopro_model_uses_ble_control` check without pulling in gopro_model.h. */
+    if (cam_core_slot_requires_ble(slot)) {
         open_gopro_ble_terminate_slot(slot);
     }
 
     /* ---- Step 4: stop driver timers, mark slot disconnected. ------------- */
-    camera_manager_teardown_slot(slot);
+    cam_core_teardown_slot(slot);
 
 done:
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -166,7 +165,7 @@ esp_err_t shutdown_manager_request(void)
 
     ESP_LOGW(TAG, "shutdown requested");
 
-    int slot_count = camera_manager_get_slot_count();
+    int slot_count = cam_core_slot_count();
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_failed_mask         = 0;

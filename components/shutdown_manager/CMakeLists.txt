@@ -3,17 +3,15 @@ idf_component_register(
         "shutdown_manager.c"
     INCLUDE_DIRS
         "include"
-    # Reaches into the wireless app to pick up gopro_model.h for
-    # gopro_model_uses_ble_control(). Logically inverted (shared component
-    # referencing variant-specific files) — Phase 3 (decompose camera_manager
-    # → cam_core) routes the BLE terminate through the driver vtable and lets
-    # us drop this cross-layer reference. See docs/multi-variant-restructure-plan.md §4.
-    PRIV_INCLUDE_DIRS
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../apps/wireless/components/gopro"
     REQUIRES
-        camera_manager
+        cam_core
         esp_timer
         freertos
+    # open_gopro_ble is wireless-specific; shutdown_manager still calls
+    # open_gopro_ble_terminate_slot() to drop the BLE link cleanly during
+    # shutdown.  A future cleanup will route this through a new
+    # `terminate_link` vtable entry on camera_driver_t so shutdown_manager
+    # depends only on cam_core; tracked in docs/multi-variant-restructure-plan.md.
     PRIV_REQUIRES
         open_gopro_ble
 )

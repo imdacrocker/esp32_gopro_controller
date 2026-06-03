@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "shutdown_manager.h"
-#include "camera_manager.h"
+#include "cam_core.h"
 #include "http_server_helpers.h"
 
 static const char *TAG = "http_api_shutdown";
@@ -54,7 +54,7 @@ static esp_err_t handler_get_shutdown(httpd_req_t *req)
 {
     shutdown_state_t state = shutdown_manager_get_state();
     uint8_t  mask  = shutdown_manager_get_failed_slots_mask();
-    int      count = camera_manager_get_slot_count();
+    int      count = cam_core_slot_count();
 
     /* External (1-based) slot numbers — matches the rest of the API surface. */
     char buf[128];

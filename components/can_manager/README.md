@@ -8,11 +8,11 @@ The four CAN identifiers are user-configurable from the web UI (per channel `(id
 
 ## Responsibilities
 
-- **Logging command (default `0x600`)**: On every received frame, update `s_logging_state` and fire the `on_logging_state` callback with `LOGGING_STATE_LOGGING` or `LOGGING_STATE_NOT_LOGGING`. When `camera_manager_get_auto_control()` is true, also update `desired_recording` for all camera slots by calling `camera_manager_set_desired_recording_all()`. When auto-control is off, the bus state is still reported but the call into `camera_manager` is skipped so per-slot intent set via `/api/shutter` is preserved.
-- **5 s watchdog**: If no logging-command frame arrives within 5 seconds, revert `s_logging_state` to `LOGGING_STATE_UNKNOWN`. When auto-control is on, also call `camera_manager_set_desired_recording_all(DESIRED_RECORDING_UNKNOWN)` to suppress mismatch correction until the bus recovers; when auto-control is off the slot intents are left alone so manual recording state (and its mismatch-correction safety net) survives the dropout. The `on_logging_state` callback is **not** fired for the `UNKNOWN` transition.
+- **Logging command (default `0x600`)**: On every received frame, update `s_logging_state` and fire the `on_logging_state` callback with `LOGGING_STATE_LOGGING` or `LOGGING_STATE_NOT_LOGGING`. When `cam_core_get_auto_control()` is true, also update intent for all camera slots by calling `cam_core_set_desired_all()`. When auto-control is off, the bus state is still reported but the call into cam_core is skipped so per-slot intent set via `/api/shutter` is preserved.
+- **5 s watchdog**: If no logging-command frame arrives within 5 seconds, revert `s_logging_state` to `LOGGING_STATE_UNKNOWN`. When auto-control is on, also call `cam_core_set_desired_all(DESIRED_RECORDING_UNKNOWN)` to suppress mismatch correction until the bus recovers; when auto-control is off the slot intents are left alone so manual recording state (and its mismatch-correction safety net) survives the dropout. The `on_logging_state` callback is **not** fired for the `UNKNOWN` transition.
 - **GPS UTC timestamp (default `0x602`)**: Parse the 64-bit little-endian Unix epoch (ms). Fire `on_utc_acquired` exactly once per boot session, on the first valid live source — either a GPS frame (year > 2020) or a successful `can_manager_set_manual_utc_ms()` call. Subsequent frames update the stored epoch used for clock extrapolation. Each live update also calls `settimeofday()` so libc time APIs in other components return useful values.
 - **Shutdown request (default `0x603`)**: On every received frame where byte 0 is non-zero, fire the `on_shutdown_request` callback. Idempotent — repeated frames during `SHUTTING_DOWN`/`SHUTDOWN_COMPLETE` are de-duped by the shutdown_manager. See [`docs/design/shutdown.md`](../../../../docs/design/shutdown.md).
-- **Camera status TX (default `0x601`)**: Transmit camera states for all 4 slots at 5 Hz via a periodic `esp_timer`. Slot values read from `camera_manager_get_slot_can_state()`. The TX header's `ide` flag follows the configured channel — extended-ID configurations transmit 29-bit frames.
+- **Camera status TX (default `0x601`)**: Transmit camera states for all 4 slots at 5 Hz via a periodic `esp_timer`. Slot values read from `cam_core_get_can_state()`. The TX header's `ide` flag follows the configured channel — extended-ID configurations transmit 29-bit frames.
 - **Per-channel ID configuration**: Boot-time-frozen `s_channels[CAN_CH_COUNT]` array loaded from NVS, with defaults substituted for missing keys. `can_manager_set_channel()` only writes NVS; the running dispatch table and TX header are not mutated mid-session, so changes apply only after reboot.
 - **Bitrate**: Persist a CAN bitrate in NVS, loaded at init, applied to the TWAI driver. Allowed values: 50k / 100k / 125k / 250k / 500k / 1M bps. Applies on next boot.
 - **Timezone offset**: Persist a UTC-to-local hour offset in NVS, loaded at init, applied when setting camera date/time.
@@ -23,10 +23,10 @@ The four CAN identifiers are user-configurable from the web UI (per channel `(id
 ## Dependencies
 
 ```
-REQUIRES: camera_manager, shutdown_manager, esp_driver_twai, esp_timer, freertos, nvs_flash
+REQUIRES: cam_core, shutdown_manager, esp_driver_twai, esp_timer, freertos, nvs_flash
 ```
 
-**Precondition:** `camera_manager_init()` and `shutdown_manager_init()` must be called before `can_manager_init()`.  
+**Precondition:** `cam_core_init()` and `shutdown_manager_init()` must be called before `can_manager_init()`. In the wireless app, `cam_core_init()` is invoked from `camera_manager_init()`.  
 `can_manager_register_callbacks()` must be called before `can_manager_init()`.
 
 ---

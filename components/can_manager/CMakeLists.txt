@@ -4,7 +4,7 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
     REQUIRES
-        camera_manager
+        cam_core
         shutdown_manager
         esp_driver_twai
         esp_timer

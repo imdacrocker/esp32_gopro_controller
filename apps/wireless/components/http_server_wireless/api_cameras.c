@@ -245,11 +245,11 @@ static esp_err_t handler_shutter(httpd_req_t *req)
     if (cJSON_IsNumber(slot_item)) {
         int external = (int)cJSON_GetNumberValue(slot_item);
         int slot = external - 1;   /* API is 1-based; internal is 0-based */
-        camera_manager_set_desired_recording_slot(slot, intent);
+        cam_core_set_desired_slot(slot, intent);
         dispatched = 1;
         ESP_LOGI(TAG, "shutter %s → Cam %d", record ? "start" : "stop", external);
     } else {
-        camera_manager_set_desired_recording_all(intent);
+        cam_core_set_desired_all(intent);
         dispatched = camera_manager_get_configured_count();
         ESP_LOGI(TAG, "shutter %s → all (%d slots)",
                  record ? "start" : "stop", dispatched);

@@ -226,39 +226,15 @@ int                camera_manager_get_configured_count(void);
 /* Copies slot state into *out.  Returns ESP_ERR_INVALID_ARG for bad index. */
 esp_err_t          camera_manager_get_slot_info(int slot, camera_slot_info_t *out);
 
-/* Translation for CAN 0x601 frame payload (§14.2). */
-camera_can_state_t camera_manager_get_slot_can_state(int slot);
-
-/* ----- Recording intent (§13) ----- */
-
-/* Called by CAN manager on every received 0x600 frame (idempotent). */
-void camera_manager_set_desired_recording_all(desired_recording_t intent);
-
-/* Called by web UI for manual per-slot control. */
-void camera_manager_set_desired_recording_slot(int slot, desired_recording_t intent);
-
-bool camera_manager_get_auto_control(void);
-void camera_manager_set_auto_control(bool enabled);
+/* Recording intent, auto-control flag, CAN-state translation, sleep and
+ * teardown helpers all live in cam_core (`components/cam_core/include/
+ * cam_core.h`).  Wireless callers (web UI, etc.) and shared callers
+ * (can_manager, shutdown_manager, http_server_core) all invoke
+ * `cam_core_*` directly — see `cam_core.h` for the full surface. */
 
 /* ----- Slot removal with compaction (§20.5) ----- */
 
 esp_err_t camera_manager_remove_slot(int slot);
-
-/* ----- Shutdown helpers (docs/design/shutdown.md) -----
- *
- * camera_manager_invoke_sleep — call the driver's sleep vtable entry for the
- * slot.  Returns ESP_ERR_NOT_SUPPORTED if the slot has no driver or no sleep
- * handler.  Forwards the driver's own return code otherwise.  Non-blocking:
- * the driver enqueues the command; the caller is responsible for any
- * per-camera deadline.
- *
- * camera_manager_teardown_slot — call the driver's teardown vtable entry on
- * the slot WITHOUT touching NVS or removing the slot from the table.  Used by
- * shutdown_manager to stop driver timers and release transport-specific
- * resources while keeping the camera paired across the next reboot.
- */
-esp_err_t camera_manager_invoke_sleep(int slot);
-void      camera_manager_teardown_slot(int slot);
 
 /*
  * Reorder camera slots in RAM and NVS (§20.6).
