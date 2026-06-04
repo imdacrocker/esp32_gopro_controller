@@ -1,0 +1,105 @@
+name: deploy-firmware-proxy
+
+# Auto-deploy the Cloudflare Worker (tools/firmware-proxy/) when its
+# source changes on main, and smoke-test that the deployed worker is
+# serving a TOML that ESP Launchpad can actually consume.
+#
+# Trigger:
+#   - push to main touching tools/firmware-proxy/**
+#   - manual workflow_dispatch (re-deploy without a code change)
+#
+# Secret required:
+#   CLOUDFLARE_API_TOKEN — create at
+#     https://dash.cloudflare.com/profile/api-tokens
+#   with the "Edit Cloudflare Workers" template scoped to this account.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/firmware-proxy/**'
+      - '.github/workflows/deploy-firmware-proxy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Deploy to Cloudflare Workers
+        # The wrangler-action's `command` argument runs verbatim from
+        # `workingDirectory`. Pin to v3 (latest major) so action minor
+        # bumps don't break the deploy unexpectedly.
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: tools/firmware-proxy
+          command: deploy
+
+      - name: Smoke-test the deployed TOML
+        # Catches the four post-Phase-4 regressions we hit manually:
+        #   - top-level firmware_images_url present (PR #33)
+        #   - section header parses on a strict TOML parser (PR #34)
+        #   - image.<chipset> key resolves to the binary (PR #36 image key)
+        #   - the composed firmware URL actually returns bytes
+        # Sleep first because the new worker version takes a few seconds
+        # to propagate to the edge after deploy returns.
+        run: |
+          set -euo pipefail
+          sleep 10
+          TOML_URL="https://firmware-proxy.imdacrocker.workers.dev/launchpad.toml"
+          curl -fsS "$TOML_URL" -o launchpad.toml
+          echo "=== fetched TOML ==="
+          cat launchpad.toml
+          echo "===================="
+          python3 - <<'PY'
+          import sys, tomllib, urllib.request
+
+          with open("launchpad.toml", "rb") as f:
+              cfg = tomllib.load(f)
+
+          # 1. Top-level firmware_images_url present and well-formed.
+          url = cfg.get("firmware_images_url")
+          assert isinstance(url, str) and url.startswith("https://"), \
+              f"firmware_images_url missing or non-https: {url!r}"
+          assert url.endswith("/"), f"firmware_images_url must end with /: {url!r}"
+
+          # 2. supported_apps non-empty + each app has a section.
+          apps = cfg.get("supported_apps") or []
+          assert apps, "supported_apps is empty"
+          for app in apps:
+              section = cfg.get(app)
+              assert section, f"missing [{app!r}] section"
+              chipsets = section.get("chipsets") or []
+              images   = section.get("image")   or {}
+              assert chipsets, f"{app}: chipsets empty"
+              assert images,   f"{app}: image table empty"
+
+              # 3. For each chipset, image.<chipset.lower()> must exist
+              #    and point at a non-empty filename.
+              for chip in chipsets:
+                  key = chip.lower()
+                  fname = images.get(key)
+                  assert fname, (
+                      f"{app}: image.{key} missing (Launchpad lookup will "
+                      f"fetch <firmware_images_url>undefined and 404)")
+
+                  # 4. The composed URL actually returns bytes. Set a
+                  #    real-looking User-Agent — GitHub/Cloudflare 403s
+                  #    the default `Python-urllib/<ver>` UA.
+                  asset_url = url + fname
+                  req = urllib.request.Request(
+                      asset_url, method="HEAD",
+                      headers={"User-Agent": "firmware-proxy-smoke/1.0"})
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      size = int(r.headers.get("Content-Length", "0"))
+                      assert r.status == 200, f"{asset_url} → HTTP {r.status}"
+                      assert size > 0,        f"{asset_url} → 0 bytes"
+                      print(f"OK  {asset_url}  ({size} bytes)")
+
+          print("All checks passed.")
+          PY
