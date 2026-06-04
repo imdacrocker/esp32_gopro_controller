@@ -1,11 +1,17 @@
 name: release-beta
 
 # Manual trigger from the Actions tab. Reads the VERSION file and publishes
-# v<VERSION> as a prerelease, then moves the latest-beta floating tag to it.
+# v<VERSION>-<variant> as a prerelease for each variant in the matrix, then
+# moves the latest-beta-<variant> floating tag to each one.
 #
-# Bump VERSION before each run - if v<VERSION> already exists, the workflow
-# refuses to overwrite it. Beta and stable use the same binary; promotion is
-# a pure pointer move (see release-promote.yml).
+# Bump VERSION before each run — if v<VERSION>-<variant> already exists for
+# any matrixed variant, the workflow refuses to overwrite it. Beta and stable
+# use the same binary; promotion is a pure pointer move (see
+# release-promote.yml).
+#
+# The variant matrix is degenerate today ([wireless]) but the seam is in
+# place so future variants drop in alongside (see
+# docs/multi-variant-restructure-plan.md §6).
 
 on:
   workflow_dispatch:
@@ -16,6 +22,10 @@ permissions:
 jobs:
   beta:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [wireless]
     steps:
       - uses: actions/checkout@v5
 
@@ -23,9 +33,10 @@ jobs:
         id: ver
         run: |
           VERSION=$(cat VERSION)
-          TAG="v$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          TAG="v${VERSION}-${{ matrix.variant }}"
+          echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"                >> "$GITHUB_OUTPUT"
+          echo "floating=latest-beta-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
 
       - name: Refuse to overwrite an existing release
         env:
@@ -36,19 +47,32 @@ jobs:
             exit 1
           fi
 
-      - name: Stamp version into sdkconfig.defaults
+      - name: Stamp version + product variant into sdkconfig.defaults
+        # Both the variant app and recovery carry CONFIG_PRODUCT_VARIANT
+        # (Phase 4 §1) so /api/version reports the correct slug at runtime.
+        # Set it explicitly even when matching the default so a typo in
+        # Kconfig defaults can't silently bake the wrong variant.
         run: |
-          sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.version }}\"/" \
-              apps/main/sdkconfig.defaults
+          for SDKCFG in apps/${{ matrix.variant }}/sdkconfig.defaults \
+                        apps/recovery/sdkconfig.defaults; do
+            if grep -q '^CONFIG_APP_PROJECT_VER=' "$SDKCFG"; then
+              sed -i "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"${{ steps.ver.outputs.version }}\"/" "$SDKCFG"
+            fi
+            if grep -q '^CONFIG_PRODUCT_VARIANT=' "$SDKCFG"; then
+              sed -i "s/^CONFIG_PRODUCT_VARIANT=.*/CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"/" "$SDKCFG"
+            else
+              echo "CONFIG_PRODUCT_VARIANT=\"${{ matrix.variant }}\"" >> "$SDKCFG"
+            fi
+          done
 
-      - name: Build main app
+      - name: Build ${{ matrix.variant }} app
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32s3
-          path: apps/main
+          path: apps/${{ matrix.variant }}
 
-      - name: Build recovery app
+      - name: Build recovery app (variant-stamped)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
@@ -56,25 +80,29 @@ jobs:
           path: apps/recovery
 
       - name: Stage assets and generate manifest
+        # Each app's project() name follows the esp32_gopro_canbus_<variant>
+        # convention. Today the only variant is wireless, but the path is
+        # parameterized for the future matrix.
         run: |
           mkdir -p release
-          cp apps/main/build/esp32_gopro_canbus_controller_v2.bin release/app.bin
-          cp apps/main/build/storage.bin                          release/storage.bin
-          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin  release/recovery.bin
+          cp apps/${{ matrix.variant }}/build/esp32_gopro_canbus_${{ matrix.variant }}.bin release/app.bin
+          cp apps/${{ matrix.variant }}/build/storage.bin                                  release/storage.bin
+          cp apps/recovery/build/esp32_gopro_canbus_recovery.bin                           release/recovery.bin
           python tools/release/make_manifest.py \
-            --version "${{ steps.ver.outputs.tag }}" \
+            --version "v${{ steps.ver.outputs.version }}" \
+            --product "${{ matrix.variant }}" \
             --app-bin     release/app.bin \
             --storage-bin release/storage.bin \
             --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.ver.outputs.tag }}" \
             --output release/manifest.json
 
       - name: Stamp ota_data_initial to select ota_0
-        # IDF emits apps/main/build/ota_data_initial.bin as all-0xFF, which
-        # the bootloader interprets as "boot factory" when a factory
-        # partition exists. We emit a valid seq=1 entry into release/ —
-        # writing into apps/main/build/ would fail with EACCES because the
-        # esp-idf-ci-action runs the build inside Docker and files there
-        # are owned by the container UID, not the runner user.
+        # IDF emits build/ota_data_initial.bin as all-0xFF, which the
+        # bootloader interprets as "boot factory" when a factory partition
+        # exists. We emit a valid seq=1 entry into release/ — writing into
+        # the build dir would fail with EACCES because the esp-idf-ci-action
+        # runs the build inside Docker and files there are owned by the
+        # container UID, not the runner user.
         run: |
           python tools/release/make_factory_otadata.py release/ota_data_initial.bin
 
@@ -82,42 +110,44 @@ jobs:
         # One-shot image flashable at 0x0 — what ESP Launchpad and
         # flash_factory.ps1 consume for fresh-board provisioning. Layout
         # mirrors partitions.csv; the stamped ota_data_initial.bin above
-        # makes the device land in the main app on first boot (factory
+        # makes the device land in the variant app on first boot (factory
         # recovery still serves as the bootloader's failsafe).
         run: |
           python -m pip install --quiet esptool
           python -m esptool --chip esp32s3 merge-bin \
             -o release/factory.bin \
             --flash_mode dio --flash_size 8MB --flash_freq 80m \
-            0x000000 apps/main/build/bootloader/bootloader.bin \
-            0x008000 apps/main/build/partition_table/partition-table.bin \
+            0x000000 apps/${{ matrix.variant }}/build/bootloader/bootloader.bin \
+            0x008000 apps/${{ matrix.variant }}/build/partition_table/partition-table.bin \
             0x00F000 release/ota_data_initial.bin \
             0x020000 apps/recovery/build/esp32_gopro_canbus_recovery.bin \
-            0x0E0000 apps/main/build/esp32_gopro_canbus_controller_v2.bin \
-            0x290000 apps/main/build/storage.bin
+            0x0E0000 apps/${{ matrix.variant }}/build/esp32_gopro_canbus_${{ matrix.variant }}.bin \
+            0x290000 apps/${{ matrix.variant }}/build/storage.bin
 
       - name: Create immutable release
         # Prerelease=true until release-promote.yml flips it to stable.
+        # Per-variant tag (v<VERSION>-<variant>) keeps multiple variants
+        # independent: each variant's bytes live in its own release.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "${{ steps.ver.outputs.tag }}" \
-            --notes "Built from \`${GITHUB_SHA::7}\`. Not yet promoted to stable." \
+            --notes "Built from \`${GITHUB_SHA::7}\`. Variant: \`${{ matrix.variant }}\`. Not yet promoted to stable." \
             --generate-notes \
             --target "$GITHUB_SHA" \
             --prerelease \
             release/manifest.json release/app.bin release/storage.bin release/recovery.bin release/factory.bin
 
-      - name: Move latest-beta floating tag
+      - name: Move latest-beta-${{ matrix.variant }} floating tag
         # Floating tag is what the Cloudflare Worker proxies to the device.
         # GitHub releases can't retarget a tag, so delete + recreate.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-beta --yes --cleanup-tag || true
-          gh release create latest-beta \
-            --title "Latest beta (${{ steps.ver.outputs.tag }})" \
+          gh release delete "${{ steps.ver.outputs.floating }}" --yes --cleanup-tag || true
+          gh release create "${{ steps.ver.outputs.floating }}" \
+            --title "Latest beta — ${{ matrix.variant }} (${{ steps.ver.outputs.tag }})" \
             --notes "Floating tag for \`${{ steps.ver.outputs.tag }}\`." \
             --target "$GITHUB_SHA" \
             --prerelease \

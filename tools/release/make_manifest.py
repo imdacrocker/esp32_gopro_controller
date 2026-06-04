@@ -17,8 +17,8 @@ Channel derivation:
 Usage:
     python make_manifest.py \\
         --version v0.1.0-rc.1 \\
-        --app-bin     apps/main/build/esp32_gopro_canbus_controller_v2.bin \\
-        --storage-bin apps/main/build/storage.bin \\
+        --app-bin     apps/wireless/build/esp32_gopro_canbus_wireless.bin \\
+        --storage-bin apps/wireless/build/storage.bin \\
         --output      manifest.json
 """
 
@@ -73,8 +73,13 @@ def main() -> int:
                    help="Release tag, e.g. v0.1.0 or v0.1.0-rc.1")
     p.add_argument("--channel", choices=["dev"], default=None,
                    help="Force a channel (only 'dev' supported — stable/beta are derived from --version)")
+    p.add_argument("--product", default="wireless",
+                   help="Product variant slug (e.g. 'wireless'). Embedded in "
+                        "the manifest as `product` and used by the browser to "
+                        "compose the variant-aware OTA route. Today's only "
+                        "variant is 'wireless'; future siblings drop in.")
     p.add_argument("--app-bin", required=True, type=Path,
-                   help="Path to the main app binary (typically esp32_gopro_canbus_controller_v2.bin)")
+                   help="Path to the wireless app binary (typically esp32_gopro_canbus_wireless.bin)")
     p.add_argument("--storage-bin", required=True, type=Path,
                    help="Path to the LittleFS storage image (storage.bin)")
     p.add_argument("--min-recovery-version", default="0.1.0",
@@ -93,6 +98,7 @@ def main() -> int:
 
     manifest = {
         "channel": channel,
+        "product": args.product,
         "released": date.today().isoformat(),
         "app": {
             "version": version,
@@ -118,6 +124,7 @@ def main() -> int:
 
     print(f"wrote {args.output}")
     print(f"  channel: {channel}")
+    print(f"  product: {args.product}")
     print(f"  version: {version}")
     print(f"  app:     {manifest['app']['size']} bytes, sha={manifest['app']['sha256'][:12]}...")
     print(f"  ui:      {manifest['ui']['size']} bytes, sha={manifest['ui']['sha256'][:12]}...")

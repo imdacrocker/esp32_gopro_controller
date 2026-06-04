@@ -1,3 +1,22 @@
+menu "GoPro Controller — Product (recovery)"
+
+    config PRODUCT_VARIANT
+        string "Product variant slug"
+        default "wireless"
+        help
+            Build-time identifier for the product variant this recovery
+            image belongs to (see docs/multi-variant-restructure-plan.md).
+            Must match the variant of the paired main app — they ship as a
+            unit per release. Threaded through:
+              - /api/version's `product` field (read by the recovery UI
+                to compose the variant-aware OTA route)
+              - per-variant OTA floating tags
+                (latest-<channel>-<PRODUCT_VARIANT>)
+
+            Keep it short ASCII, no slashes — it ends up in URLs.
+
+endmenu
+
 menu "GoPro Controller — OTA (recovery)"
 
     config OTA_BASE_URL
@@ -5,7 +24,7 @@ menu "GoPro Controller — OTA (recovery)"
         default "https://firmware-proxy.imdacrocker.workers.dev"
         help
             Base URL the embedded recovery UI uses to fetch manifests and
-            binaries. Must match apps/main/Kconfig.projbuild — both apps
+            binaries. Must match apps/wireless/Kconfig.projbuild — both apps
             ship as a pair with the same default. If the URL ever moves,
             users on stale recovery builds fall back to manual upload
             (per docs/design/ota.md §1).

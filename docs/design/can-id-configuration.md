@@ -254,7 +254,7 @@ frontend changes in §7 land in the same release as the backend change.
 ### 7.1 Modal layout
 
 Extends the existing CAN-BUS Settings modal at
-[`index.html:118`](../../apps/main/web_ui/index.html). The new rows sit beneath
+[`index.html:118`](../../apps/wireless/web_ui/index.html). The new rows sit beneath
 the existing baud-rate row, each laid out the same way as other settings rows
 (label on the left, controls on the right):
 

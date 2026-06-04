@@ -91,7 +91,7 @@
 const $ = id => document.getElementById(id);
 const log = (id, msg, cls) => { const el = $(id); el.textContent = msg; el.className = 'log' + (cls ? ' ' + cls : ''); };
 
-let otaBaseUrl = null, otaRepoPath = null;
+let otaBaseUrl = null, otaRepoPath = null, otaProduct = 'wireless';
 
 async function loadVersion() {
   try {
@@ -101,6 +101,7 @@ async function loadVersion() {
     if (j.ota_base_url && j.ota_repo_path) {
       otaBaseUrl  = j.ota_base_url;
       otaRepoPath = j.ota_repo_path;
+      if (j.product) otaProduct = j.product;
     }
   } catch (e) { $('ver').textContent = 'Could not read /api/version'; }
 }
@@ -153,7 +154,8 @@ $('upChannel').addEventListener('change', async () => {
 });
 
 async function fetchManifest(channel) {
-  const url = `${otaBaseUrl}/${otaRepoPath}/releases/download/latest-${channel}/manifest.json`;
+  // Variant-aware route: latest-<channel>-<product>. Post-Phase 4 only.
+  const url = `${otaBaseUrl}/${otaRepoPath}/releases/download/latest-${channel}-${otaProduct}/manifest.json`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 10000);
   let r;

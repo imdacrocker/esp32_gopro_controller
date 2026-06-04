@@ -322,7 +322,7 @@ Without this step the BLE bond is volatile: commands work in the current session
 
 Two new predicates gate the behavior:
 
-- `gopro_model_needs_wifi_pair_complete(model)` — true for Hero6/7/8. Drives the one-shot orchestration in `apps/main/components/gopro/open_gopro_ble/pair_complete.c`.
+- `gopro_model_needs_wifi_pair_complete(model)` — true for Hero6/7/8. Drives the one-shot orchestration in `apps/wireless/components/gopro/open_gopro_ble/pair_complete.c`.
 - `gopro_model_uses_legacy_ble(model)` — Hero7 today; can be extended to Hero5/6/8 once verified. Drives the legacy `SetMode(Video)` cmd 0x02 (instead of Hero9+'s Load Preset Group cmd 0x3E) and skips `SetCameraControlStatus` (which legacy cameras reject with INVALID_PARAM).
 
 Hero6/7/8 are intentionally absent from `gopro_model_uses_rc_emulation()` to avoid the dual-transport ambiguity (without a persisted-transport field on the slot, the RC driver would steal these slots on reload by main.c boot order). Existing RC-paired slots for these models after the upgrade become orphaned — the user must remove and re-pair via BLE.

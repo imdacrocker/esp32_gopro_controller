@@ -1,0 +1,30 @@
+idf_component_register(
+    SRCS
+        "driver.c"
+        "pairing.c"
+        "gatt.c"
+        "readiness.c"
+        "control.c"
+        "pair_complete.c"
+        "status.c"
+        "query.c"
+        "notify.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "."
+        ".."
+    REQUIRES
+        bt
+        nvs_flash
+        esp_timer
+        freertos
+        camera_manager_wireless
+        can_manager
+        ble_core
+        wifi_manager
+        esp_http_client
+        esp_netif
+    PRIV_REQUIRES
+        shutdown_manager
+)

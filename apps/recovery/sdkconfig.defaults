@@ -2,7 +2,7 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 
-# Share the partition table with the main app (lives at the monorepo root).
+# Share the partition table with the wireless app (lives at the monorepo root).
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../partitions.csv"
 
@@ -68,6 +68,6 @@ CONFIG_MBEDTLS_HAVE_TIME_DATE=n
 CONFIG_HTTPD_WS_SUPPORT=n
 
 # Expose the "dev" channel in the recovery UI dropdown. Dev builds are
-# recovery-only — the main app's equivalent flag stays off so dev never
-# appears in its settings dropdown (see apps/main/Kconfig.projbuild).
+# recovery-only — the wireless app's equivalent flag stays off so dev never
+# appears in its settings dropdown (see apps/wireless/Kconfig.projbuild).
 CONFIG_OTA_ALLOW_DEV_CHANNEL=y

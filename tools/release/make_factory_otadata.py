@@ -4,10 +4,10 @@
 ESP-IDF generates an all-0xFF ota_data_initial.bin by default. When otadata
 is blank AND a factory partition exists, the bootloader logs "Defaulting
 to factory image" and boots factory — which in this project is the recovery
-app, not the main app users expect to land in.
+app, not the wireless app users expect to land in.
 
 This helper overwrites that file with a valid otadata entry pointing at
-ota_0 (main app). Recovery remains reachable via the bootloader's normal
+ota_0 (wireless app). Recovery remains reachable via the bootloader's normal
 fallback path and via /api/ota/reboot-recovery.
 
 Sector layout per IDF (4 KB each, two redundant copies):

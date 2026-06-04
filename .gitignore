@@ -62,6 +62,6 @@ build/
 /.vscode
 /.claude
 /apps/recovery/.vscode
-/apps/main/.vscode
+/apps/wireless/.vscode
 
 /release/

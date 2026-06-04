@@ -1,16 +1,20 @@
 name: release-promote
 
-# Promotes an existing release to stable. Pure pointer move - no rebuild,
+# Promotes an existing release to stable. Pure pointer move — no rebuild,
 # no version change. The bytes a user installs on stable are byte-identical
 # to what beta testers already validated.
 #
-# Trigger from the Actions tab; supply an existing release tag, e.g. v0.2.1.
+# Trigger from the Actions tab; supply an unsuffixed base version such as
+# `v0.2.1`. Every variant in the matrix is promoted in lockstep (per
+# `docs/multi-variant-restructure-plan.md` §6, Option A): the workflow looks
+# up `<version>-<variant>` per matrix entry and moves
+# `latest-stable-<variant>` to the same bytes.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to promote (e.g. v0.2.1)'
+        description: 'Base release version to promote, e.g. v0.2.1 (workflow appends -<variant> per matrix entry)'
         required: true
         type: string
 
@@ -20,6 +24,10 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [wireless]
     permissions:
       contents: write
     steps:
@@ -33,7 +41,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ inputs.tag }}"
+          BASE="${{ inputs.tag }}"
+          TAG="${BASE}-${{ matrix.variant }}"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::release $TAG not found"
             exit 1
@@ -46,6 +55,7 @@ jobs:
           echo "Promoting $TAG (commit ${COMMIT:0:7}) to stable"
           echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT"  >> "$GITHUB_OUTPUT"
+          echo "floating=latest-stable-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
 
       - name: Download release assets from source tag
         env:
@@ -80,24 +90,25 @@ jobs:
             --prerelease=false \
             --notes-file "$RUNNER_TEMP/notes.md"
 
-      - name: Move latest-stable floating tag
+      - name: Move latest-stable-${{ matrix.variant }} floating tag
         # Floating tag is what the Cloudflare Worker proxies to the device.
         # GitHub releases can't retarget a tag, so delete + recreate with the
         # exact same assets as the source release.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-stable --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release delete "${{ steps.src.outputs.floating }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           # --prerelease on the floating pointer: the real stable release is
-          # the immutable vX.Y.Z tag (which release-promote flipped out of
-          # prerelease above). The floating tag is plumbing for the Cloudflare
-          # Worker, not a user-facing release. Marking it prerelease also
-          # sidesteps a GitHub-side restriction that blocks the bot token from
-          # creating new "Latest" releases (only prereleases work).
-          gh release create latest-stable \
+          # the immutable vX.Y.Z-<variant> tag (which release-promote flipped
+          # out of prerelease above). The floating tag is plumbing for the
+          # Cloudflare Worker, not a user-facing release. Marking it
+          # prerelease also sidesteps a GitHub-side restriction that blocks
+          # the bot token from creating new "Latest" releases (only
+          # prereleases work).
+          gh release create "${{ steps.src.outputs.floating }}" \
             --repo "$GITHUB_REPOSITORY" \
             --prerelease \
-            --title "Latest stable (${{ steps.src.outputs.tag }})" \
+            --title "Latest stable — ${{ matrix.variant }} (${{ steps.src.outputs.tag }})" \
             --notes "Floating tag for \`${{ steps.src.outputs.tag }}\`." \
             --target "${{ steps.src.outputs.commit }}" \
             release/manifest.json release/app.bin release/storage.bin release/recovery.bin release/factory.bin

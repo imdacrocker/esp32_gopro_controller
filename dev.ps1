@@ -1,25 +1,41 @@
 # dev.ps1 - daily dev wrapper for the monorepo.
 #
 # Usage:
-#   .\dev.ps1                                # build + OTA-flash + monitor (main app, default)
+#   .\dev.ps1                                # build + OTA-flash + monitor (wireless variant, default)
 #   .\dev.ps1 build                          # build only
 #   .\dev.ps1 flash                          # build + OTA-flash (no monitor)
 #   .\dev.ps1 flash-usb                      # build + USB-flash to running slot
 #   .\dev.ps1 monitor                        # idf.py monitor
 #   .\dev.ps1 -App recovery build            # build the recovery app
 #   .\dev.ps1 -App recovery flash-usb        # build + USB-flash recovery to factory slot
+#   .\dev.ps1 -Product wireless ...          # variant selector (default: wireless)
 #   .\dev.ps1 -ip 10.71.79.1 ...             # override target IP (default = SoftAP IP)
 #   .\dev.ps1 -port COM7 ...                 # override serial port (default: auto-detect)
 #
-# OTA flow (`flash`, `all`) is main-app only — recovery has no storage.bin and is
-# only reflashed over USB. See tools\flash_factory.ps1 for full board provisioning.
+# Variant scheme:
+#   -Product picks which variant's app tree to build (apps/<Product>) and
+#   stamps CONFIG_PRODUCT_VARIANT into that app's sdkconfig.defaults +
+#   apps/recovery/sdkconfig.defaults so /api/version reports the right slug
+#   (Phase 4 — see docs/multi-variant-restructure-plan.md §6). Today the
+#   only shipping variant is "wireless"; the switch is wired so future
+#   variants drop in.
+#
+#   `-App wireless` historically meant "the main app" — keep it as the
+#   default for muscle memory. With -Product set it means "the variant's
+#   main app", i.e. apps/<Product>. `-App recovery` is always apps/recovery
+#   (one tree, variant-stamped at build time).
+#
+# OTA flow (`flash`, `all`) is variant-app only — recovery has no
+# storage.bin and is only reflashed over USB. See tools\flash_factory.ps1
+# for full board provisioning.
 #
 # Requires the IDF environment to be sourced first:
 #   & 'C:\esp\v6.0.1\esp-idf\export.ps1'
 
 param(
     [Parameter(Position=0)] [string]$cmd = "all",
-    [ValidateSet("main","recovery")] [string]$App = "main",
+    [ValidateSet("wireless","recovery")] [string]$App = "wireless",
+    [string]$Product = "wireless",
     [string]$ip   = "10.71.79.1",
     [string]$port
 )
@@ -52,17 +68,49 @@ function Resolve-Port {
 }
 
 $repo = $PSScriptRoot
-$proj = Join-Path $repo "apps\$App"
 
-# Build artifact names come from the project() call in each app's CMakeLists.
-$binName = if ($App -eq "main") { "esp32_gopro_canbus_controller_v2.bin" } else { "esp32_gopro_canbus_recovery.bin" }
+# Map -App + -Product onto the actual project dir + artifact name. When
+# -App is "wireless", we treat it as "the variant's main app" and resolve
+# to apps/<Product>; -App "recovery" is always apps/recovery.
+$projName = if ($App -eq "recovery") { "recovery" } else { $Product }
+$proj     = Join-Path $repo "apps\$projName"
+
+# Build artifact names come from the project() call in each app's CMakeLists,
+# which follows the esp32_gopro_canbus_<variant> convention. Recovery is
+# variant-agnostic and keeps esp32_gopro_canbus_recovery regardless of
+# CONFIG_PRODUCT_VARIANT.
+$binName = if ($App -eq "recovery") { "esp32_gopro_canbus_recovery.bin" } else { "esp32_gopro_canbus_$Product.bin" }
 $bin     = Join-Path $proj "build\$binName"
-$ui      = Join-Path $proj "build\storage.bin"   # main-only
+$ui      = Join-Path $proj "build\storage.bin"   # variant-app only
 
-# USB-flash offset: main goes to ota_0, recovery to factory.
-$usbOffset = if ($App -eq "main") { "0xE0000" } else { "0x20000" }
+# USB-flash offset: variant app goes to ota_0, recovery to factory. Offsets
+# come from partitions.csv (shared by all apps), so they're variant-agnostic.
+$usbOffset = if ($App -eq "recovery") { "0x20000" } else { "0xE0000" }
+
+function Stamp-ProductVariant {
+    # Stamp CONFIG_PRODUCT_VARIANT into the relevant sdkconfig.defaults so
+    # /api/version reports the right slug and any variant-conditional code
+    # paths take the matching branch. Idempotent: if the key is already
+    # there with the right value, the file is left alone.
+    $targets = @(
+        (Join-Path $repo "apps\$Product\sdkconfig.defaults"),
+        (Join-Path $repo "apps\recovery\sdkconfig.defaults")
+    )
+    $desired = "CONFIG_PRODUCT_VARIANT=`"$Product`""
+    foreach ($f in $targets) {
+        if (-not (Test-Path $f)) { continue }
+        $content = Get-Content $f -Raw
+        if ($content -match '(?m)^CONFIG_PRODUCT_VARIANT=.*$') {
+            $new = [regex]::Replace($content, '(?m)^CONFIG_PRODUCT_VARIANT=.*$', $desired)
+            if ($new -ne $content) { Set-Content -Path $f -Value $new -NoNewline:$false }
+        } else {
+            Add-Content -Path $f -Value $desired
+        }
+    }
+}
 
 function Build {
+    Stamp-ProductVariant
     # Force __DATE__/__TIME__ in esp_app_desc to refresh every build.
     # ESP-IDF v6.0.1's esp_app_format/CMakeLists.txt has no force-rebuild
     # rule on esp_app_desc.c, so incremental builds reuse the cached .obj
@@ -91,7 +139,7 @@ function Curl-Post($url, $headers, $bodyPath) {
 }
 
 function FlashOta {
-    if ($App -ne "main") { throw "OTA flow is main-app only. Use -App main or flash-usb." }
+    if ($App -eq "recovery") { throw "OTA flow is variant-app only. Drop -App recovery or use flash-usb." }
     if (-not (Test-Path $bin)) { throw "$bin missing - run build first" }
 
     $appSha  = Sha256OfFile $bin
@@ -118,7 +166,7 @@ function FlashOta {
 function FlashUsb {
     Build
     $p = Resolve-Port
-    Write-Host "USB-flashing $App app to $usbOffset on $p ..."
+    Write-Host "USB-flashing $projName app to $usbOffset on $p ..."
     python -m esptool --chip esp32s3 -p $p -b 921600 write_flash $usbOffset $bin
 }
 
@@ -128,5 +176,5 @@ switch ($cmd) {
     "flash-usb" { FlashUsb }
     "monitor"   { Monitor }
     "all"       { Build; FlashOta; Monitor }
-    default     { Write-Host "usage: .\dev.ps1 [build|flash|flash-usb|monitor|all] [-App main|recovery] [-ip IP] [-port COMn]" }
+    default     { Write-Host "usage: .\dev.ps1 [build|flash|flash-usb|monitor|all] [-App wireless|recovery] [-Product <variant>] [-ip IP] [-port COMn]" }
 }

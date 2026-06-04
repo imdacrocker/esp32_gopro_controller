@@ -22,7 +22,7 @@ Treat this as the source of truth — companion to [`camera-manager.md`](camera-
 | Auto-update reach | **Both** main and recovery offer the auto-update flow (channel picker → check → install). Recovery additionally keeps the manual file-upload form. |
 | OTA base URL | Compile-time only via each app's own `CONFIG_OTA_BASE_URL`. No runtime override; if the URL ever moves, ship a new release and users on stale recovery fall back to manual upload. |
 | Channel storage | Shared NVS namespace `ota`, key `channel`. Both apps read the same value, set from either UI. |
-| Single monorepo | `apps/main/` + `apps/recovery/` + shared top-level `components/{ota_io,wifi_manager}/`, shared `partitions.csv` at root |
+| Single monorepo | `apps/wireless/` + `apps/recovery/` + shared top-level `components/{ota_io,wifi_manager}/`, shared `partitions.csv` at root |
 | Daily dev | `.\dev.ps1 -App main\|recovery` wraps build + OTA-flash + monitor |
 | Releases | `release-beta.yml` (manual trigger, tags `v$VERSION` from root `VERSION` file — bumped before each cut) + `release-promote.yml` (manual, pure pointer-move: re-uses the source release's bytes, no rebuild). Beta and stable always share the same binary; channel switch on the same version is a no-op. |
 
@@ -172,15 +172,24 @@ Single JSON file per channel. Hosted as a release asset on GitHub Releases, fetc
 
 ### Channel routing
 
-Two channels, two floating tags on GitHub:
-- `stable` → `https://github.com/<owner>/<repo>/releases/download/latest-stable/manifest.json`
-- `beta` → `https://github.com/<owner>/<repo>/releases/download/latest-beta/manifest.json`
+Two channels × N product variants → per-variant floating tags on GitHub
+(Phase 4 — see `docs/multi-variant-restructure-plan.md` §6):
+- `stable` (wireless) → `https://github.com/<owner>/<repo>/releases/download/latest-stable-wireless/manifest.json`
+- `beta`   (wireless) → `https://github.com/<owner>/<repo>/releases/download/latest-beta-wireless/manifest.json`
 
-CI moves the floating tag on each release. Device picks the URL by reading NVS `ota/channel` (default `"stable"`).
+CI moves the matching floating tag on each release. Device picks the URL
+by reading NVS `ota/channel` (default `"stable"`) and the compile-time
+`CONFIG_PRODUCT_VARIANT` slug.
 
 Through the Worker, the browser fetches from:
 ```
-https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-<channel>/manifest.json
+https://firmware-proxy.<account>.workers.dev/<owner>/<repo>/releases/download/latest-<channel>-<product>/manifest.json
+```
+
+The Worker also accepts a friendly per-variant route used by Launchpad
+and humans, which it rewrites to the suffixed GitHub path:
+```
+https://firmware-proxy.<account>.workers.dev/<product>/latest-<channel>/manifest.json
 ```
 
 ---
@@ -201,17 +210,20 @@ Returns the running firmware's identity.
   "recovery": "0.1.0",
   "channel": "stable",
   "running_partition": "ota_0",
-  "mode": "main",
+  "mode": "wireless",
+  "product": "wireless",
   "ota_base_url": "https://firmware-proxy.imdacrocker.workers.dev",
   "ota_repo_path": "imdacrocker/esp32_gopro_controller"
 }
 ```
 
-Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent main app's version).
+Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent variant-app's version).
 
 Per the locked equality invariant (§1), `app == ui` always. Both fields derive from `CONFIG_APP_PROJECT_VER` at compile time. No file read needed.
 
-`ota_base_url` and `ota_repo_path` come from compile-time `CONFIG_OTA_BASE_URL` / `CONFIG_OTA_REPO_PATH` (set per-app in each `Kconfig.projbuild`). The browser composes the manifest URL as `<base>/<repo>/releases/download/latest-<channel>/manifest.json`. Both apps return the same fields so the auto-update flow works identically in main and recovery without a separate config file in LittleFS.
+`product` comes from compile-time `CONFIG_PRODUCT_VARIANT` (Phase 4 — `multi-variant-restructure-plan.md` §6). Both apps in a release ship with the same slug. The browser feeds it into the variant-aware OTA route below.
+
+`ota_base_url` and `ota_repo_path` come from compile-time `CONFIG_OTA_BASE_URL` / `CONFIG_OTA_REPO_PATH` (set per-app in each `Kconfig.projbuild`). The browser composes the manifest URL as `<base>/<repo>/releases/download/latest-<channel>-<product>/manifest.json`. Both apps return the same fields so the auto-update flow works identically in variant-app and recovery without a separate config file in LittleFS.
 
 ---
 
@@ -348,7 +360,7 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 **Deliverables:**
 - New project directory `esp32_gopro_canbus_recovery/` (sibling of main project).
 - `CMakeLists.txt` referencing main project's `components/` via `EXTRA_COMPONENT_DIRS`.
-- `sdkconfig.defaults` pointing at shared partition table via `"../esp32_gopro_canbus_controller_v2/partitions.csv"`.
+- `sdkconfig.defaults` pointing at shared partition table via `"../../partitions.csv"`.
 - `main/main.c` — minimal: NVS, esp_netif, esp_event, `wifi_manager_init`, `recovery_http_init`.
 - `main/recovery.html` — single-page, dependency-free, embedded via `EMBED_TXTFILES`.
 - New `components/recovery_http/`:
@@ -368,13 +380,13 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 **Goal:** main app can be updated in place via OTA, can switch channels, can reboot to recovery.
 
 **Deliverables:**
-- New `components/http_server/api_ota.c` with the endpoints from §6 (excluding recovery-only).
+- New `components/http_server_core/api_ota.c` with the endpoints from §6 (excluding recovery-only).
 - Bump `config.max_uri_handlers` from 28 → 35 in `components/http_server/driver.c`.
 - Extend `GET /api/version` to read `/www/manifest.json` and report `ui` field. Add `mode: "main"`.
 - New NVS namespace `ota`, key `channel` (default `"stable"`).
 - SHA-skip optimization: store last-written SHA per partition in NVS keys `app_sha`, `ui_sha`. Compare before each upload's first byte.
 
-**Files touched:** new `components/http_server/api_ota.c`, edits to `components/http_server/driver.c`, `components/http_server/api_system.c` (for extended `/api/version`).
+**Files touched:** new `components/http_server_core/api_ota.c`, edits to `components/http_server_core/driver.c`, `components/http_server_core/api_system.c` (for extended `/api/version`).
 
 **Done when:** all endpoints from §6 respond correctly. Channel switch persists across reboots. SHA-skip avoids rewriting unchanged partitions. "Reboot to recovery" puts the device into recovery mode.
 
@@ -402,7 +414,7 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 **Deliverables:**
 - Cloudflare Worker `firmware-proxy/` deployed via `wrangler deploy`. Source in Appendix A.
 - `tools/release/make_manifest.py`: hashes prebuilt `app.bin` and `storage.bin`, emits `manifest.json` per §5. (Builds happen in CI via `espressif/esp-idf-ci-action`, not in the script.)
-- `.github/workflows/release-beta.yml`: manual trigger; reads root `VERSION` file, refuses to overwrite an existing `v$VERSION` tag, stamps `CONFIG_APP_PROJECT_VER` into `apps/main/sdkconfig.defaults` for this build only, builds both apps, publishes immutable release as prerelease, moves `latest-beta` floating tag.
+- `.github/workflows/release-beta.yml`: manual trigger; reads root `VERSION` file, refuses to overwrite an existing `v$VERSION` tag, stamps `CONFIG_APP_PROJECT_VER` into `apps/wireless/sdkconfig.defaults` for this build only, builds both apps, publishes immutable release as prerelease, moves `latest-beta` floating tag.
 - `.github/workflows/release-promote.yml`: manual trigger with input `tag` (e.g. `v0.2.1`); downloads the source release's existing assets, flips that release out of prerelease, moves `latest-stable` floating tag with the same bytes. **No rebuild, no version change.** Beta and stable bytes are byte-identical.
 - Root `VERSION` file holds the next planned version line (e.g. `0.2.1`). Bumped manually before each release-beta run; if not bumped, the workflow's overwrite guard fails the run.
 
@@ -446,8 +458,8 @@ Both apps get the same simple flow: pick channel → check → install. Differen
 
 ### Main app deliverables
 
-- **`apps/main/web_ui/compress.py`** — no Phase-5 changes (the `manifest.json` plan was dropped during implementation; all OTA URL config now flows through `/api/version`). The script still picks up a new `updates.js` in its asset list.
-- **`apps/main/web_ui/index.html`** — new "Updates" panel:
+- **`apps/wireless/web_ui/compress.py`** — no Phase-5 changes (the `manifest.json` plan was dropped during implementation; all OTA URL config now flows through `/api/version`). The script still picks up a new `updates.js` in its asset list.
+- **`apps/wireless/web_ui/index.html`** — new "Updates" panel:
   ```
   ┌─ Updates ─────────────────────────────┐
   │ App version: 0.2.0                    │
@@ -462,7 +474,7 @@ Both apps get the same simple flow: pick channel → check → install. Differen
   └───────────────────────────────────────┘
   ```
   The "Built" row carries `esp_app_desc_t.date` + `time` (ESP-IDF auto-stamps at link time). Every `idf.py build` produces a new fingerprint, so dev-channel users can confirm "my flash actually took" without bumping the version manually. `/api/version` carries these as `build_date` and `build_time`.
-- **`apps/main/web_ui/updates.js`** — new module:
+- **`apps/wireless/web_ui/updates.js`** — new module:
   - On panel load: fetch `/api/version` (versions + base URL config) and `/api/ota/channel` (current + available list) in parallel.
   - Channel change: immediate `POST /api/ota/channel`; on failure, revert dropdown and show inline error.
   - "Check for updates": fetch `<base>/<owner>/<repo>/releases/download/latest-<channel>/manifest.json` with 10 s `AbortController` timeout. On success show version + Install button. On error map to one of three buckets (see below).
@@ -473,7 +485,7 @@ Both apps get the same simple flow: pick channel → check → install. Differen
     4. If response has `rebooting: true`: show *"Device rebooting into v<version>…"* and call `setTimeout(() => location.reload(), 3000)` — same fire-and-reload pattern as the Reboot button. The browser reconnects to the device's SoftAP once it comes back up.
     5. If response has `rebooting: false` (UI-only path, only reachable via manual upload edge cases): show *"UI updated. Reload the page to see changes."*
   - "Restart to Recovery": confirmation modal, then `POST /api/ota/reboot-recovery`, then `setTimeout(() => location.reload(), 3000)`.
-- **`apps/main/web_ui/style.css`** — styles for the Updates panel, progress bar, advanced disclosure.
+- **`apps/wireless/web_ui/style.css`** — styles for the Updates panel, progress bar, advanced disclosure.
 
 ### Recovery deliverables
 
@@ -495,7 +507,7 @@ No "you're up to date" or "older version" copy — if the user clicks Install on
 
 ### Files touched
 
-- **Main:** `apps/main/web_ui/index.html`, `apps/main/web_ui/style.css`, new `apps/main/web_ui/updates.js`, `apps/main/web_ui/compress.py` (picks up updates.js), `apps/main/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/main/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` + `build_date` + `build_time` from `esp_app_desc_t`), `apps/main/components/http_server/api_ota.c` (channel handlers use `ota_io`), `apps/main/components/http_server/driver.c` (new `/updates.js` URI handler — `compress.py` writes the file to LittleFS but driver.c needs an explicit handler since there's no wildcard asset route; `max_uri_handlers` bumped from 4 → 5 assets).
+- **Main:** `apps/wireless/web_ui/index.html`, `apps/wireless/web_ui/style.css`, new `apps/wireless/web_ui/updates.js`, `apps/wireless/web_ui/compress.py` (picks up updates.js), `apps/wireless/main/Kconfig.projbuild` (add `CONFIG_OTA_REPO_PATH`), `apps/wireless/components/http_server/api_system.c` (drop `/www/manifest.json` read; emit `ota_base_url` + `ota_repo_path` + `build_date` + `build_time` from `esp_app_desc_t`), `apps/wireless/components/http_server_core/api_ota.c` (channel handlers use `ota_io`), `apps/wireless/components/http_server/driver.c` (new `/updates.js` URI handler — `compress.py` writes the file to LittleFS but driver.c needs an explicit handler since there's no wildcard asset route; `max_uri_handlers` bumped from 4 → 5 assets).
 - **Recovery:** new `apps/recovery/Kconfig.projbuild`, `apps/recovery/main/recovery.html` (auto-update section), `apps/recovery/components/recovery_http/recovery_http.c` (channel handlers + `ota_base_url`/`ota_repo_path` in `/api/version`), `apps/recovery/components/recovery_http/CMakeLists.txt` (`espressif__cjson` requires).
 - **Shared:** `components/ota_io/include/ota_io.h` (channel helper declarations), new `components/ota_io/ota_settings.c`, `components/ota_io/CMakeLists.txt`.
 

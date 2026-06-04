@@ -1,0 +1,25 @@
+idf_component_register(
+    SRCS
+        "driver.c"
+        "connection.c"
+        "command.c"
+        "status.c"
+        "udp.c"
+        "settings.c"
+        "diagnostic.c"
+        "../gopro_model.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "."
+        ".."
+    REQUIRES
+        camera_manager_wireless
+        can_manager
+        wifi_manager
+        esp_timer
+        freertos
+        lwip
+        esp_wifi
+        esp_netif
+)

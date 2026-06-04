@@ -10,7 +10,7 @@
 # dev use .\dev.ps1 instead.
 #
 # Monorepo layout (this script lives in tools\ at the repo root):
-#   <repo>\apps\main\
+#   <repo>\apps\wireless\
 #   <repo>\apps\recovery\
 #
 # Requires the IDF environment to be sourced first:
@@ -50,45 +50,45 @@ function Resolve-Port {
     return $script:port
 }
 
-$mainProj = Resolve-Path (Join-Path $PSScriptRoot "..\apps\main")
-$recProj  = Resolve-Path (Join-Path $PSScriptRoot "..\apps\recovery")
-$mainBld  = Join-Path $mainProj "build"
-$recBld   = Join-Path $recProj  "build"
-$outDir   = Join-Path $PSScriptRoot "..\build"
-$factory  = Join-Path $outDir "factory.bin"
+$wirelessProj = Resolve-Path (Join-Path $PSScriptRoot "..\apps\wireless")
+$recProj      = Resolve-Path (Join-Path $PSScriptRoot "..\apps\recovery")
+$wirelessBld  = Join-Path $wirelessProj "build"
+$recBld       = Join-Path $recProj      "build"
+$outDir       = Join-Path $PSScriptRoot "..\build"
+$factory      = Join-Path $outDir "factory.bin"
 
-Write-Host "Building main app: $mainProj"
-idf.py -C $mainProj build
-Write-Host "Building recovery:  $recProj"
-idf.py -C $recProj  build
+Write-Host "Building wireless app: $wirelessProj"
+idf.py -C $wirelessProj build
+Write-Host "Building recovery:     $recProj"
+idf.py -C $recProj      build
 
 if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
 
 # IDF emits ota_data_initial.bin as all-0xFF, which the bootloader
 # interprets as "boot factory" when a factory partition exists. Rewrite
-# it to a valid seq=1 entry so first-boot lands in ota_0 (main app).
+# it to a valid seq=1 entry so first-boot lands in ota_0 (wireless app).
 Write-Host "Stamping ota_data_initial.bin to select ota_0"
 python "$PSScriptRoot\release\make_factory_otadata.py" `
-    (Join-Path $mainBld "ota_data_initial.bin")
+    (Join-Path $wirelessBld "ota_data_initial.bin")
 
 # Partition layout (see partitions.csv at repo root):
 #   0x000000  bootloader.bin
 #   0x008000  partition-table.bin
 #   0x00F000  ota_data_initial.bin   — stamped above to select ota_0
 #   0x020000  recovery (factory)     — 768 KB
-#   0x0E0000  main app (ota_0)       — 1.69 MB
+#   0x0E0000  wireless app (ota_0)   — 1.69 MB
 #   0x290000  storage (LittleFS)     — 3 MB
 #   0x590000  ota_1                  — left blank, populated on first OTA
 Write-Host "Merging factory image -> $factory"
 python -m esptool --chip esp32s3 merge-bin `
     -o $factory `
     --flash_mode dio --flash_size 8MB --flash_freq 80m `
-    0x000000 (Join-Path $mainBld "bootloader\bootloader.bin") `
-    0x008000 (Join-Path $mainBld "partition_table\partition-table.bin") `
-    0x00F000 (Join-Path $mainBld "ota_data_initial.bin") `
-    0x020000 (Join-Path $recBld  "esp32_gopro_canbus_recovery.bin") `
-    0x0E0000 (Join-Path $mainBld "esp32_gopro_canbus_controller_v2.bin") `
-    0x290000 (Join-Path $mainBld "storage.bin")
+    0x000000 (Join-Path $wirelessBld "bootloader\bootloader.bin") `
+    0x008000 (Join-Path $wirelessBld "partition_table\partition-table.bin") `
+    0x00F000 (Join-Path $wirelessBld "ota_data_initial.bin") `
+    0x020000 (Join-Path $recBld      "esp32_gopro_canbus_recovery.bin") `
+    0x0E0000 (Join-Path $wirelessBld "esp32_gopro_canbus_wireless.bin") `
+    0x290000 (Join-Path $wirelessBld "storage.bin")
 
 $p = Resolve-Port
 Write-Host "Flashing $p ..."

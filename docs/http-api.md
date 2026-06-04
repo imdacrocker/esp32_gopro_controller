@@ -10,7 +10,7 @@ Full request/response contracts (bodies, error codes, state diagrams) are in [`d
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/version` | `{app, ui, recovery, channel, running_partition, mode, build_date, build_time, ota_base_url, ota_repo_path}` |
+| GET | `/api/version` | `{app, ui, recovery, channel, running_partition, mode, product, build_date, build_time, ota_base_url, ota_repo_path}` |
 | GET | `/api/logging-state` | RaceCapture logging state (`logging` / `not_logging` / `unknown`) |
 | GET | `/api/utc` | UTC timestamp (TZ-applied); `valid` for any anchor incl. NVS-restored, `session_synced` for live-source-this-boot |
 | GET | `/api/auto-control` | Whether cameras follow CAN logging state automatically |

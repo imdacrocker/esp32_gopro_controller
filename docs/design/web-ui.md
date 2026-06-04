@@ -685,7 +685,7 @@ Each row carries a `data-model="HeroN"` attribute. A single `forEach(row => row.
 | Hero7 | BLE Scan | "Reset all wireless connections on the camera. After resetting you MUST update the camera Wifi to 2.4ghz manually. Then, choose to pair with the GoPro App. Once in Pairing mode, click Scan.&lt;br&gt;&lt;br&gt;NOTE: The wireless connection to this browser may disconnect during this process. If this happens, reconnect to the controller's WiFi and refresh." |
 | Hero9, Hero10, Hero11, Hero12, Hero13 | BLE Scan | "Reset all wireless connections on the camera, and then choose to pair with the GoPro App. Once in Pairing mode, click Scan." |
 
-The Hero7 message exists because the controller's STA-side join during the pair-complete handshake (see [`hero7_pair_complete`](../../apps/main/components/gopro/open_gopro_ble/pair_complete.c) and the §12 / CHANGELOG entry for 5 GHz fail-fast) briefly drops the SoftAP, which may disconnect the user's browser if they're connected to the controller's own Wi-Fi. The "MUST switch to 2.4 GHz" reminder warns the user before they try, instead of relying on the 5 GHz fail-fast error to teach them after the fact.
+The Hero7 message exists because the controller's STA-side join during the pair-complete handshake (see [`hero7_pair_complete`](../../apps/wireless/components/gopro/open_gopro_ble/pair_complete.c) and the §12 / CHANGELOG entry for 5 GHz fail-fast) briefly drops the SoftAP, which may disconnect the user's browser if they're connected to the controller's own Wi-Fi. The "MUST switch to 2.4 GHz" reminder warns the user before they try, instead of relying on the 5 GHz fail-fast error to teach them after the fact.
 
 **`selectCameraModel(model)`** body:
 1. Reveal `#add-camera-back`.

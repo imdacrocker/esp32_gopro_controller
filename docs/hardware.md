@@ -19,9 +19,9 @@
 | `otadata` | data | `0x00F000` | 8 KB | which OTA slot is active |
 | `phy_init` | data | `0x011000` | 4 KB | PHY init data |
 | `factory` | app | `0x020000` | 768 KB | **recovery app** (always-present fallback) |
-| `ota_0` | app | `0x0E0000` | 1.69 MB | main app slot A |
-| `storage` | data | `0x290000` | 3 MB | LittleFS (web UI for main app) |
-| `ota_1` | app | `0x590000` | 1.69 MB | main app slot B |
+| `ota_0` | app | `0x0E0000` | 1.69 MB | wireless app slot A |
+| `storage` | data | `0x290000` | 3 MB | LittleFS (web UI for wireless app) |
+| `ota_1` | app | `0x590000` | 1.69 MB | wireless app slot B |
 | *(free)* | | `0x740000` | 768 KB | reserved |
 
 See [`design/ota.md`](design/ota.md) §3 for the full partition table rationale and §6 for the boot/upgrade flow.

@@ -1,5 +1,5 @@
 /*
- * ota_io — shared OTA image-writing primitives used by both the main app
+ * ota_io — shared OTA image-writing primitives used by both the wireless app
  * (in-place A/B updates) and the recovery app (factory-mediated updates).
  *
  * Implements the §6 contract from docs/design/ota.md: streaming uploads with
