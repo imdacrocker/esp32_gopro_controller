@@ -12,6 +12,17 @@
 # Multi-variant Launchpad support will need a different shape (see the
 # SUPPORTED_VARIANTS comment in src/index.js).
 #
+# Section header is quoted (`["..."]`) because the label has spaces —
+# TOML's bare-key rule rejects them on strict parsers.
+#
+# Image key uses the hyphenated chipset name: Launchpad looks up
+# `image.<chipset.toLowerCase()>` preserving dashes, so chipset
+# `ESP32-S3` maps to `image.esp32-s3` (not `image.esp32s3`).
+#
+# No `readme.text` — despite the field name, it's a URL pointing at a
+# hosted markdown file, not inline text. Re-add as `readme.text =
+# "https://.../README.md"` if we want a Launchpad blurb later.
+#
 # Schema:  https://github.com/espressif/esp-launchpad/blob/main/config/config.toml
 
 esp_toml_version = 1.0
@@ -20,11 +31,4 @@ supported_apps = ["GoPro CAN-Bus Controller"]
 
 ["GoPro CAN-Bus Controller"]
 chipsets = ["ESP32-S3"]
-image.esp32s3 = "factory.bin"
-readme.text = """
-Fresh-board provisioning for the ESP32 GoPro CAN-Bus Controller.
-
-After flashing, power-cycle the board. It will come up as WiFi SoftAP
-`HERO-RC-XXXXXX` (open, no password). Join it and open http://10.71.79.1/
-to add cameras and adjust settings.
-"""
+image.esp32-s3 = "factory.bin"

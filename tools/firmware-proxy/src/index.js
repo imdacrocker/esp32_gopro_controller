@@ -35,11 +35,10 @@ const SUPPORTED_VARIANTS = [
   {
     slug:  "wireless",
     label: "GoPro CAN-Bus Controller",
-    readme: `Fresh-board provisioning for the ESP32 GoPro CAN-Bus Controller.
-
-After flashing, power-cycle the board. It will come up as WiFi SoftAP
-\`HERO-RC-XXXXXX\` (open, no password). Join it and open http://10.71.79.1/
-to add cameras and adjust settings.`,
+    // No `readme` field — ESP Launchpad's readme.text is a URL pointing
+    // at a hosted markdown file, not inline text (the field name is
+    // misleading). If we want a readme blurb in Launchpad later, host a
+    // .md somewhere reachable and add { readmeUrl: "..." } here.
   },
 ];
 
@@ -68,16 +67,18 @@ function launchpadToml(origin) {
   // The supported_apps entry is a regular array-of-strings so it's
   // already quoted; the section header just has to wrap the same label
   // in quotes inside the brackets: ["Foo Bar"].
+  //
+  // image key: Launchpad looks up `image.<chipsetname.toLowerCase()>`,
+  // preserving dashes. Chipset "ESP32-S3" → `image.esp32-s3` (NOT
+  // `image.esp32s3`, which silently returns undefined and makes
+  // Launchpad fetch `.../undefined`).
   return `esp_toml_version = 1.0
 firmware_images_url = "${url}"
 supported_apps = ["${primary.label}"]
 
 ["${primary.label}"]
 chipsets = ["ESP32-S3"]
-image.esp32s3 = "factory.bin"
-readme.text = """
-${primary.readme}
-"""
+image.esp32-s3 = "factory.bin"
 `;
 }
 
