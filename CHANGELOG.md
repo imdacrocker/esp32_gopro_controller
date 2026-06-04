@@ -10,6 +10,66 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-03
+
+### Internal
+- **Bumped revovery app to 1.1.0** to reflect major change to release channels.
+- **Multi-variant restructure (phases 1–4).** The firmware tree is now
+  organised around a "product variant" axis so a future sibling controller
+  (e.g. a wired/USB variant) can drop into `apps/<variant>/` and reuse
+  every shared seam. Wireless is the only shipping variant before and
+  after this work; no user-visible behavior change. Full plan:
+  [`docs/multi-variant-restructure-plan.md`](docs/multi-variant-restructure-plan.md).
+  - **Renamed** `apps/main → apps/wireless` (history preserved via
+    `git mv`). Project name, `sdkconfig.defaults`, CI matrix, release
+    YAML paths, and `factory.bin` merge offsets follow the new name.
+    Build artefact is now `esp32_gopro_canbus_wireless.bin`.
+  - **Lifted shared components** to top-level `components/`:
+    `can_manager`, `log_ring`, `shutdown_manager`. Split the HTTP server
+    into `http_server_core` (shared `/api/*` — settings, OTA, logs,
+    system) and `http_server_wireless` (per-app handlers — pairing,
+    cameras, RC, repair).
+  - **Decomposed `camera_manager`** into a new shared
+    `components/cam_core/` (recording-intent engine, driver vtable,
+    `mismatch_step`, grace timers, recording-status cache, CAN-state
+    map, time-sync fan-out — all BLE-free) plus
+    `apps/wireless/components/camera_manager_wireless/` (the multi-slot
+    table, NVS slot records, BLE pairing state machine, WiFi-RC glue).
+    The shared `cam_core` header no longer pulls in NimBLE — BLE-typed
+    declarations moved into a separate `camera_manager_ble.h`. Slot
+    count is parameterised on `cam_core` so a future single-target
+    variant can build with `N = 1`.
+  - **Variant-aware release pipeline.** New `CONFIG_PRODUCT_VARIANT`
+    Kconfig (default `"wireless"`), surfaced via `/api/version`'s new
+    `product` field. The wireless and recovery update UIs read the
+    field and compose a variant-aware OTA route:
+    `latest-<channel>-<product>/manifest.json`. `release-beta`,
+    `release-promote`, `release-dev`, and `ci` workflows are now
+    parameterised over a `variant: [wireless]` matrix — each step
+    stamps `CONFIG_PRODUCT_VARIANT` into the variant app and the shared
+    recovery app, so one recovery source tree produces per-variant
+    images. Immutable per-variant tag `v$VERSION-<variant>`; floating
+    tags `latest-{beta,stable,dev}-<variant>`. Promote takes the
+    unsuffixed base `v$VERSION` and the matrix appends the variant.
+  - **Cloudflare Worker** drives the Launchpad TOML and a friendly
+    `/<variant>/latest-<channel>/manifest.json` rewrite off a single
+    `SUPPORTED_VARIANTS` list — adding a future variant is a one-line
+    append. `launchpad.toml` has one `[app]` section per variant.
+  - **`dev.ps1 -Product <variant>`** stamps the slug into both
+    `apps/<Product>/sdkconfig.defaults` and
+    `apps/recovery/sdkconfig.defaults` before `idf.py build`. `-App`
+    still toggles main-vs-recovery.
+  - **`make_manifest.py --product`** threads the slug into
+    `manifest.product`.
+- **Field-device migration note.** Existing devices that poll the
+  unsuffixed `latest-stable/manifest.json` / `latest-beta/manifest.json`
+  will 404 on auto-update once releases switch to the variant-suffixed
+  tags. New firmware (this release onward) polls the suffixed routes.
+  Recovery's manual upload flow remains a fallback for devices stuck on
+  the old URL shape. The Cloudflare Worker must be redeployed
+  (`cd tools/firmware-proxy && wrangler deploy`) close to the first
+  variant-aware `release-beta` run.
+
 ## [1.1.0] - 2026-05-27
 
 ### Added
@@ -466,7 +526,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.9...v1.1.0
 [1.0.9]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.7...v1.0.8
