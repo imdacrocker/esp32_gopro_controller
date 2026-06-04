@@ -74,11 +74,18 @@ jobs:
       - name: Flip source release out of prerelease
         # Preserve the auto-generated changelog from the beta release and
         # append a promotion footer, rather than overwriting it.
+        #
+        # release-beta seeds the body with "...Not yet promoted to stable."
+        # so the prerelease state is obvious to humans reading the release
+        # page during the beta window. Strip that sentence on promotion —
+        # otherwise the body ends up self-contradictory ("Not yet promoted
+        # to stable" + "Promoted to stable on YYYY-MM-DD").
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           EXISTING=$(gh release view "${{ steps.src.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+            --repo "$GITHUB_REPOSITORY" --json body --jq '.body' \
+            | sed 's/ Not yet promoted to stable\.//')
           {
             echo "$EXISTING"
             echo ""
