@@ -63,11 +63,16 @@ function launchpadToml(origin) {
   const primary = SUPPORTED_VARIANTS[0];
   const url = `${origin}${GITHUB_REPO_PATH}/releases/download/latest-stable-${primary.slug}/`;
 
+  // TOML requires section headers with spaces to be quoted — `[Foo Bar]`
+  // is a parse error on strict TOML parsers (ESP Launchpad's included).
+  // The supported_apps entry is a regular array-of-strings so it's
+  // already quoted; the section header just has to wrap the same label
+  // in quotes inside the brackets: ["Foo Bar"].
   return `esp_toml_version = 1.0
 firmware_images_url = "${url}"
 supported_apps = ["${primary.label}"]
 
-[${primary.label}]
+["${primary.label}"]
 chipsets = ["ESP32-S3"]
 image.esp32s3 = "factory.bin"
 readme.text = """
