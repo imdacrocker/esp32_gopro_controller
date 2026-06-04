@@ -2,21 +2,27 @@
 #
 # The Worker (src/index.js) is the canonical source — it rewrites
 # firmware_images_url at request time so the same Worker code works on any
-# deployment URL, and it generates one [app] section per supported product
-# variant from a single source list. Keep this file in sync with the
-# generated output so humans can read and review the TOML as TOML.
+# deployment URL, and it generates the TOML from a single
+# SUPPORTED_VARIANTS list. Keep this file in sync with the generated
+# output so humans can read and review the TOML as TOML.
 #
-# Schema:  https://github.com/espressif/esp-launchpad/blob/main/config/template.toml
+# ESP Launchpad's schema puts firmware_images_url at the top level with
+# no per-section override; while only the wireless variant ships, the
+# top-level URL points at its latest-stable-wireless floating release.
+# Multi-variant Launchpad support will need a different shape (see the
+# SUPPORTED_VARIANTS comment in src/index.js).
+#
+# Schema:  https://github.com/espressif/esp-launchpad/blob/main/config/config.toml
 
 esp_toml_version = 1.0
-supported_apps = ["GoPro CAN-Bus Controller (Wireless)"]
+firmware_images_url = "https://firmware-proxy.<account>.workers.dev/imdacrocker/esp32_gopro_controller/releases/download/latest-stable-wireless/"
+supported_apps = ["GoPro CAN-Bus Controller"]
 
-[GoPro CAN-Bus Controller (Wireless)]
+[GoPro CAN-Bus Controller]
 chipsets = ["ESP32-S3"]
 image.esp32s3 = "factory.bin"
-firmware_images_url = "https://firmware-proxy.<account>.workers.dev/imdacrocker/esp32_gopro_controller/releases/download/latest-stable-wireless/"
 readme.text = """
-Fresh-board provisioning for the wireless ESP32 GoPro CAN-Bus Controller.
+Fresh-board provisioning for the ESP32 GoPro CAN-Bus Controller.
 
 After flashing, power-cycle the board. It will come up as WiFi SoftAP
 `HERO-RC-XXXXXX` (open, no password). Join it and open http://10.71.79.1/

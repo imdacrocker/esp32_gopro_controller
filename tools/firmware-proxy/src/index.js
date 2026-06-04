@@ -24,13 +24,18 @@
 const GITHUB_REPO_PATH = "/imdacrocker/esp32_gopro_controller";
 
 // Catalog of product variants advertised through Launchpad. Keep names
-// short ASCII — they end up in URLs. Order is the order the dropdown
-// shows in Launchpad. Add new variants here when they ship.
+// short ASCII — they end up in URLs. The FIRST entry is the "primary"
+// variant — its release tag drives Launchpad's top-level
+// firmware_images_url (ESP Launchpad's schema has no per-section URL
+// override, so a multi-variant catalog will need a different shape
+// here: probably variant-prefixed asset names sharing one URL, or
+// per-variant /<variant>/launchpad.toml endpoints. Solve when the
+// second variant lands.)
 const SUPPORTED_VARIANTS = [
   {
     slug:  "wireless",
-    label: "GoPro CAN-Bus Controller (Wireless)",
-    readme: `Fresh-board provisioning for the wireless ESP32 GoPro CAN-Bus Controller.
+    label: "GoPro CAN-Bus Controller",
+    readme: `Fresh-board provisioning for the ESP32 GoPro CAN-Bus Controller.
 
 After flashing, power-cycle the board. It will come up as WiFi SoftAP
 \`HERO-RC-XXXXXX\` (open, no password). Join it and open http://10.71.79.1/
@@ -48,25 +53,26 @@ const CORS_HEADERS = {
 // Keep in sync with tools/firmware-proxy/launchpad.toml. The Worker is the
 // canonical source so firmware_images_url can be rewritten at request time
 // from the Worker's own origin — same code works on any deployment URL.
-// One [app] section per variant, each pointing at its own latest-stable
-// floating release.
+//
+// ESP Launchpad's schema (espressif/esp-launchpad/config/config.toml) puts
+// firmware_images_url at the **top level** with no per-section override.
+// While only one variant ships, we emit a single section pointing at the
+// primary variant's latest-stable-<slug> floating release. Multi-variant
+// support will need a separate path here (see SUPPORTED_VARIANTS note).
 function launchpadToml(origin) {
-  const supportedAppsList = SUPPORTED_VARIANTS.map(v => `"${v.label}"`).join(", ");
-  const sections = SUPPORTED_VARIANTS.map(v => {
-    const url = `${origin}${GITHUB_REPO_PATH}/releases/download/latest-stable-${v.slug}/`;
-    return `[${v.label}]
-chipsets = ["ESP32-S3"]
-image.esp32s3 = "factory.bin"
-firmware_images_url = "${url}"
-readme.text = """
-${v.readme}
-"""`;
-  }).join("\n\n");
+  const primary = SUPPORTED_VARIANTS[0];
+  const url = `${origin}${GITHUB_REPO_PATH}/releases/download/latest-stable-${primary.slug}/`;
 
   return `esp_toml_version = 1.0
-supported_apps = [${supportedAppsList}]
+firmware_images_url = "${url}"
+supported_apps = ["${primary.label}"]
 
-${sections}
+[${primary.label}]
+chipsets = ["ESP32-S3"]
+image.esp32s3 = "factory.bin"
+readme.text = """
+${primary.readme}
+"""
 `;
 }
 
