@@ -136,7 +136,11 @@ void app_main(void)
         .on_shutdown_request_arg  = NULL,
     };
     can_manager_register_callbacks(&can_cbs);
-    can_manager_init();
+    /* TEMPORARY: CAN disabled — dev board has no CAN transceiver, so the TWAI
+     * controller hits bus-off immediately and loops on recovery. Re-enable
+     * (uncomment) once the custom board with a transceiver is available. */
+    (void)can_cbs;
+    /* can_manager_init(); */
 
     ESP_LOGI(TAG, "wired controller boot complete — USB host up, awaiting camera");
 }

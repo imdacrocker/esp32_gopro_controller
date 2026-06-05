@@ -9,16 +9,23 @@
 #   .\dev.ps1 -App recovery build            # build the recovery app
 #   .\dev.ps1 -App recovery flash-usb        # build + USB-flash recovery to factory slot
 #   .\dev.ps1 -Product wireless ...          # variant selector (default: wireless)
-#   .\dev.ps1 -ip 10.71.79.1 ...             # override target IP (default = SoftAP IP)
+#   .\dev.ps1 -Product wired all             # build + OTA-flash + monitor the wired variant
+#   .\dev.ps1 -Product wired flash-usb       # build + USB-flash the wired app to ota_0
+#   .\dev.ps1 -ip 10.71.79.1 ...             # override target IP (default = variant SoftAP IP)
 #   .\dev.ps1 -port COM7 ...                 # override serial port (default: auto-detect)
 #
 # Variant scheme:
 #   -Product picks which variant's app tree to build (apps/<Product>) and
 #   stamps CONFIG_PRODUCT_VARIANT into that app's sdkconfig.defaults +
 #   apps/recovery/sdkconfig.defaults so /api/version reports the right slug
-#   (Phase 4 — see docs/multi-variant-restructure-plan.md §6). Today the
-#   only shipping variant is "wireless"; the switch is wired so future
-#   variants drop in.
+#   (Phase 4 — see docs/multi-variant-restructure-plan.md §6). Shipping
+#   variants today are "wireless" (Hero RC over WiFi/BLE) and "wired"
+#   (USB-host); recovery is variant-agnostic, stamped at build time.
+#
+#   Both variants serve the web UI + OTA from the shared wifi_manager SoftAP
+#   at 10.71.79.1 (the wired camera lives on a separate USB netif, which is
+#   NOT the OTA target). The $variantIp table below is the seam if a variant
+#   ever moves its UI off that address.
 #
 #   `-App wireless` historically meant "the main app" — keep it as the
 #   default for muscle memory. With -Product set it means "the variant's
@@ -35,12 +42,21 @@
 param(
     [Parameter(Position=0)] [string]$cmd = "all",
     [ValidateSet("wireless","recovery")] [string]$App = "wireless",
-    [string]$Product = "wireless",
-    [string]$ip   = "10.71.79.1",
+    [ValidateSet("wireless","wired")] [string]$Product = "wireless",
+    [string]$ip,
     [string]$port
 )
 
 $ErrorActionPreference = "Stop"
+
+# Per-variant default OTA/web-UI target. Both variants currently expose the
+# web UI on the shared SoftAP at 10.71.79.1; the table is the single place to
+# change if a variant ever serves it elsewhere. An explicit -ip always wins.
+$variantIp = @{ wireless = "10.71.79.1"; wired = "10.71.79.1" }
+if (-not $ip) {
+    $ip = $variantIp[$Product]
+    if (-not $ip) { $ip = "10.71.79.1" }
+}
 
 # Auto-detect the ESP32 serial port by USB VID/PID, the same way the ESP-IDF
 # VS Code extension does. Matches the ESP32-S3 native USB-JTAG/Serial device

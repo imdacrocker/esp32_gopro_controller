@@ -71,3 +71,5 @@ CONFIG_HTTPD_WS_SUPPORT=n
 # recovery-only — the wireless app's equivalent flag stays off so dev never
 # appears in its settings dropdown (see apps/wireless/Kconfig.projbuild).
 CONFIG_OTA_ALLOW_DEV_CHANNEL=y
+CONFIG_PRODUCT_VARIANT="wired"
+
