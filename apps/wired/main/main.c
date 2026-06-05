@@ -4,13 +4,13 @@
  * Boot composition mirrors the wireless app's app_main minus BLE/WiFi-RC,
  * plus (from Phase 2) USB host bring-up. See docs/design/wired-variant.md §3.
  *
- * Phase 1 (this file): boots the shared infrastructure — log ring, NVS,
+ * Phases 1–2 (this file): boots the shared infrastructure — log ring, NVS,
  * cam_core, shutdown_manager, WiFi SoftAP (web UI only), http_server_core,
- * OTA-rollback disarm, and the CAN manager — with NO camera attached. The
- * USB host stack (usb_host_net) and the USB camera driver (gopro_usb) land
- * in Phases 2–3; the proof-of-concept USB+HTTP sketch that previously lived
- * here is preserved in git history (commit aa4e7d7) and will be lifted into
- * the usb_host_net component.
+ * OTA-rollback disarm, the CAN manager — and the USB host bus (usb_host_net),
+ * which surfaces the camera link via on_usb_link. The USB camera driver
+ * (gopro_usb) that turns that link into a cam_core slot lands in Phase 3; the
+ * proof-of-concept USB+HTTP sketch that previously lived here is preserved in
+ * git history (commit aa4e7d7).
  */
 
 #include "nvs_flash.h"
@@ -25,6 +25,7 @@
 #include "http_server_wired.h"
 #include "log_ring.h"
 #include "shutdown_manager.h"
+#include "usb_host_net.h"
 
 static const char *TAG = "main";
 
@@ -52,6 +53,21 @@ static void on_gps_utc_acquired(uint64_t utc_ms, void *arg)
 {
     (void)utc_ms; (void)arg;
     /* Phase 3: gopro_usb_sync_time_all(); — push SetDateTime to the camera. */
+}
+
+/* ---- USB camera link callback ------------------------------------------- */
+
+static void on_usb_link(bool up, uint32_t camera_ip)
+{
+    (void)camera_ip;
+    if (up) {
+        ESP_LOGI(TAG, "USB camera link up");
+        /* Phase 3: gopro_usb_on_link_up(camera_ip); — enable wired control,
+         * run the readiness handshake, mark the cam_core slot ready. */
+    } else {
+        ESP_LOGI(TAG, "USB camera link down");
+        /* Phase 3: gopro_usb_on_link_down(); — mark the slot not-ready. */
+    }
 }
 
 void app_main(void)
@@ -99,8 +115,12 @@ void app_main(void)
     /* httpd up = "healthy enough"; disarm OTA rollback. */
     mark_ota_valid();
 
-    /* Phase 2: usb_host_net_init(on_usb_link);  — CherryUSB host bring-up. */
-    /* Phase 3: gopro_usb_init();                — register the USB camera slot. */
+    /* Bring up the USB host bus; the camera link surfaces via on_usb_link
+     * once the camera is plugged in and DHCP completes. Safe to start after
+     * httpd — the UI is reachable with no camera attached. */
+    usb_host_net_init(on_usb_link);
+
+    /* Phase 3: gopro_usb_init(); — register the USB camera slot with cam_core. */
 
     /* Wire CAN callbacks before starting the TWAI driver. */
     can_manager_callbacks_t can_cbs = {
@@ -116,5 +136,5 @@ void app_main(void)
     can_manager_register_callbacks(&can_cbs);
     can_manager_init();
 
-    ESP_LOGI(TAG, "wired controller boot complete (no camera — Phase 1 skeleton)");
+    ESP_LOGI(TAG, "wired controller boot complete — USB host up, awaiting camera");
 }

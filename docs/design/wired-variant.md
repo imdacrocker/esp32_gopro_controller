@@ -138,9 +138,22 @@ Each phase is independently buildable + flashable.
 - Outcome: wired board boots to SoftAP web UI + OTA + CAN status TX/RX with
   **no camera**. Proves the shared-component wiring end to end.
 
-### Phase 2 — `usb_host_net` component *(future)*
-- Lift CherryUSB host + DHCP-client + camera-IP derivation out of the PoC
-  `main.c` into a component with a `wifi_manager`-style callback API.
+### Phase 2 — `usb_host_net` component *(done)*
+- Lifted the CherryUSB host bring-up + camera-IP derivation out of the PoC
+  `main.c` into `apps/wired/components/usb_host_net`, exposing a
+  `wifi_manager`-style `usb_host_net_link_cb_t(up, camera_ip)` callback plus
+  `usb_host_net_is_up()` / `usb_host_net_camera_ip()` accessors.
+- **Key realization:** the esp_netif + DHCP-client + USB↔lwIP frame pump is
+  all done *inside* CherryUSB (`platform/idf/usbh_net.c`, compiled because
+  `CONFIG_CHERRYUSB_HOST_CDC_NCM/_CDC_RNDIS=y` → `cherryusb.cmake` adds it and
+  the Kconfig selects `USBHOST_PLATFORM_CDC_*`). The class connect handler
+  calls `usbh_cdc_ncm_run()`/`usbh_rndis_run()`, which create an `eth`-type
+  netif and start DHCP — so the camera lease arrives as `IP_EVENT_ETH_GOT_IP`.
+  `usb_host_net` therefore owns only: `usbh_initialize()`, the IP-event →
+  camera-IP (`.51`) derivation (link up), and `USBH_EVENT_DEVICE_DISCONNECTED`
+  (link down).
+- `main.c` calls `usb_host_net_init(on_usb_link)` after httpd; `on_usb_link`
+  currently just logs (Phase 3 forwards to the driver).
 
 ### Phase 3 — `gopro/gopro_usb` driver *(future)*
 - Implement `camera_driver_t` over the working PoC HTTP sequence; register one
