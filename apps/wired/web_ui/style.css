@@ -1,0 +1,1255 @@
+:root {
+  --blue:               #2980b9;
+  --blue-hover:         #2471a3;
+  --green:              #27ae60;
+  --green-dark:         #2e7d32;
+  --green-hover:        #219a52;
+  --orange:             #f39c12;
+  --orange-dark:        #e67e22;
+  --orange-dark-hover:  #ca6f1e;
+  --red:                #e74c3c;
+  --red-hover:          #c0392b;
+  --gray-text:          #888;
+  --gray-light:         #999;
+  --gray-label:         #555;
+  --gray-bg:            #f8f8f8;
+  --gray-border:        #ddd;
+  --gray-border-light:  #eee;
+  --gray-disabled:      #e0e0e0;
+  --gray-disabled-text: #bbb;
+  --gray-toggle-off:    #ccc;
+  --text-primary:       #222;
+  --text-secondary:     #555;
+  --white:              #fff;
+  --card-bg:            #fafafa;
+  --modal-bg:           #fff;
+  --page-bg:            #fff;
+  --overlay:            rgba(0,0,0,0.45);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* The HTML `hidden` attribute should win over explicit `display:` rules.
+ * Without this, e.g. `.modal-info-btn { display: flex }` keeps the button
+ * rendered even when JS sets `hidden = true`. */
+[hidden] { display: none !important; }
+
+html { font-size: 20px; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--page-bg);
+  color: var(--text-primary);
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0 1em 5em;
+  touch-action: manipulation;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 700;
+}
+
+/* ---- Animations ---------------------------------------------------------- */
+
+@keyframes cam-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Page header --------------------------------------------------------- */
+
+#page-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-border);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#page-header h1 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#header-actions {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#settings-btn,
+#power-btn {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--gray-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#settings-btn:hover,
+#power-btn:hover { color: #333; background: #f0f0f0; }
+
+/* ---- Section shell (shared by rc-status, auto-control, cam-status) ------- */
+
+.section-card {
+  border: 1px solid var(--gray-border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 0.4em 0 0.8em;
+}
+
+.section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--gray-text);
+  background: var(--gray-bg);
+  border-bottom: 1px solid var(--gray-border);
+  padding: 8px 14px;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.section-title-btn {
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: none;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.section-title-btn:hover { background: #eaf4fb; }
+.section-title-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ---- RaceCapture status -------------------------------------------------- */
+
+#rc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.rc-cell {
+  padding: 12px 14px;
+}
+
+.rc-cell:first-child {
+  border-right: 1px solid var(--gray-border);
+}
+
+.rc-cell-label {
+  font-size: 0.68rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gray-light);
+  margin-bottom: 4px;
+}
+
+#system-time-section { overflow: visible; }
+
+#utc-display {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#utc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#utc-display .modal-info-btn {
+  margin-left: auto;
+}
+
+#utc-date-line,
+#utc-time-line {
+  font-family: monospace;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--gray-label);
+}
+
+#utc-display.stale #utc-date-line,
+#utc-display.stale #utc-time-line {
+  color: var(--orange);
+}
+
+/* ---- Auto-control -------------------------------------------------------- */
+
+#auto-control-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  gap: 14px;
+  border-bottom: 1px solid var(--gray-border);
+}
+
+.ac-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+#auto-control-row .modal-info-btn {
+  margin-left: auto;
+}
+
+.toggle-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.toggle-state {
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-width: 26px;
+  text-align: center;
+}
+
+.toggle-track {
+  position: relative;
+  width: 56px;
+  height: 32px;
+  border-radius: 16px;
+  background: var(--gray-toggle-off);
+  transition: background 0.2s;
+}
+
+.toggle-track.on { background: var(--green); }
+
+.toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--white);
+  transition: left 0.2s;
+}
+
+.toggle-track.on .toggle-thumb { left: 28px; }
+
+/* ---- Status feedback line ------------------------------------------------ */
+
+#status {
+  font-size: 0.88rem;
+  color: var(--gray-label);
+  margin: 0.5em 0 1em;
+  min-height: 1.2em;
+}
+
+#status:empty {
+  margin: 0;
+  min-height: 0;
+}
+
+/* ---- Camera status section ----------------------------------------------- */
+
+#cam-status-section { overflow: visible; }
+
+#control-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--gray-border);
+}
+
+#btn-record-all {
+  background: var(--green);
+  color: var(--white);
+  font-size: 0.85rem;
+  min-height: 48px;
+}
+
+#btn-record-all:hover:not(:disabled) { background: var(--green-hover); }
+
+#btn-stop-all {
+  background: var(--red);
+  color: var(--white);
+  font-size: 0.85rem;
+  min-height: 48px;
+}
+
+#btn-stop-all:hover:not(:disabled) { background: var(--red-hover); }
+
+#btn-record-all:disabled,
+#btn-stop-all:disabled {
+  background: var(--gray-disabled);
+  color: var(--gray-disabled-text);
+  cursor: not-allowed;
+}
+
+#cam-status-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--gray-disabled);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+#cam-status-empty {
+  display: block;
+  padding: 20px 14px;
+  font-size: 0.9rem;
+  color: var(--gray-text);
+}
+
+/* ---- Camera card --------------------------------------------------------- */
+
+.camera-card {
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--gray-border-light);
+}
+
+.camera-card:last-child { border-bottom: none; }
+
+.cam-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.cam-number {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cam-display-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-light);
+}
+
+.cam-type-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e8f4fd;
+  color: var(--blue);
+  border: 1px solid #aad4f0;
+}
+
+.cam-model-name {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--gray-light);
+  margin-bottom: 12px;
+}
+
+.cam-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ---- Status badge -------------------------------------------------------- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.status-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Legacy .status-dot (kept hidden in case any non-rendered code paths still emit it). */
+.status-dot { display: none; }
+
+.status-badge.disconnected { color: #9aa0a6; }
+.status-badge.pairing      { color: #1d6fdb; }
+.status-badge.connecting   { color: #1d6fdb; }
+.status-badge.idle         { color: #248a3d; }
+.status-badge.recording    { color: #c0271f; }
+
+/* Pulsing recording dot. */
+.status-badge.recording .recording-icon svg circle {
+  transform-origin: center;
+  animation: cam-pulse 1.2s infinite;
+}
+
+/* Real arc spinner for connecting / pairing. */
+.status-badge.connecting .connecting-icon,
+.status-badge.pairing    .connecting-icon {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(29, 111, 219, 0.25);
+  border-top-color: #1d6fdb;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+/* ---- Per-camera shutter buttons ----------------------------------------- */
+
+.cam-shutter-btn {
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 11px 20px;
+  min-height: 44px;
+  border-radius: 8px;
+  color: var(--white);
+}
+
+.cam-shutter-start { background: var(--green); }
+.cam-shutter-start:hover:not(:disabled) { background: var(--green-hover); }
+
+.cam-shutter-stop  { background: var(--red); }
+.cam-shutter-stop:hover:not(:disabled)  { background: var(--red-hover); }
+
+.cam-shutter-btn:disabled {
+  background: var(--gray-disabled);
+  color: var(--gray-disabled-text);
+  cursor: not-allowed;
+}
+
+/* ---- Fixed bottom bar ---------------------------------------------------- */
+
+#manage-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--white);
+  border-top: 1px solid var(--gray-border);
+  padding: 0.75em 1em;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+}
+
+#manage-btn {
+  background: var(--blue);
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 480px;
+}
+
+#manage-btn:hover { background: var(--blue-hover); }
+
+/* ---- Modal shared -------------------------------------------------------- */
+
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 200;
+}
+
+.modal-overlay.open { display: flex; }
+
+#settings-overlay,
+#advanced-overlay,
+#about-overlay,
+#power-overlay,
+#can-bus-overlay,
+#updates-overlay  { align-items: flex-start; justify-content: center; }
+#modal-overlay,
+#add-camera-overlay { align-items: flex-end;   justify-content: center; }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--gray-border);
+}
+
+.modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.modal-done-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.modal-done-btn:hover { background: #f0f0f0; }
+
+.modal-section-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--gray-light);
+  padding: 16px 16px 6px;
+}
+
+.modal-separator {
+  height: 1px;
+  background: var(--gray-border-light);
+  margin: 12px 16px;
+}
+
+.modal-action-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+}
+
+.modal-action-row .modal-action-btn {
+  flex: 1;
+  width: auto;
+  margin: 0;
+}
+
+.modal-info-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--gray-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.modal-info-btn svg { width: 28px; height: 28px; }
+
+.modal-info-btn:hover { color: var(--text-secondary); }
+
+.modal-info-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  max-width: 280px;
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 9px 11px;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  z-index: 10;
+  display: none;
+}
+
+.modal-info-tooltip.show { display: block; }
+
+/* ---- Settings modal (top sheet) ----------------------------------------- */
+
+.settings-modal {
+  background: var(--modal-bg);
+  border-radius: 0 0 12px 12px;
+  width: 100%;
+  max-width: 480px;
+  padding-bottom: 1.5em;
+}
+
+.settings-modal .modal-header { position: sticky; top: 0; background: var(--white); z-index: 10; }
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gray-border-light);
+  gap: 12px;
+}
+
+.settings-row-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.settings-select {
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.settings-action-btn {
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--blue);
+  border: none;
+  color: var(--white);
+  cursor: pointer;
+}
+
+.settings-action-btn:hover { background: var(--blue-hover); }
+
+.settings-inline-msg {
+  font-size: 0.85rem;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+
+.settings-hint {
+  font-size: 0.78rem;
+  color: var(--orange-dark);
+  padding: 6px 16px 10px;
+  border-bottom: 1px solid var(--gray-border-light);
+}
+
+.settings-input {
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.can-channel-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.can-id-input {
+  width: 8.5em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.can-channel-row.has-error .can-id-input,
+.can-channel-row.has-error .can-ide-select {
+  border-color: var(--red, #b71c1c);
+}
+
+.can-settings-error {
+  color: var(--red, #b71c1c);
+}
+
+.settings-reboot-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 16px 16px 0;
+  background: var(--orange-dark);
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  border-radius: 8px;
+}
+
+.settings-reboot-btn:hover { background: var(--orange-dark-hover); }
+
+.settings-shutdown-btn {
+  background: var(--red, #b71c1c);
+}
+.settings-shutdown-btn:hover { background: var(--red-hover, #8e1414); }
+
+/* ---- Updates section (in settings modal) -------------------------------- */
+
+.settings-row-value {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #555);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-action-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-action-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 12px 16px 0;
+}
+
+.upd-result {
+  margin: 12px 16px 0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: #f7f7f9;
+  border: 1px solid var(--gray-border-light);
+}
+
+.upd-result.upd-error  { background: #fdeceb; border-color: #f5c6c2; color: #8a1a13; }
+.upd-result.upd-info   { background: #eef5fb; border-color: #cfe2f0; color: #1c4f7a; }
+.upd-result.upd-success { background: #ebf7ee; border-color: #c3e1cb; color: #1f6b34; }
+
+.upd-result-version {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 6px;
+}
+
+.upd-result-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.upd-result-actions .settings-action-btn {
+  margin: 0;
+  width: 100%;
+}
+
+.upd-progress-row {
+  margin-top: 10px;
+}
+
+.upd-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.upd-progress-bar {
+  height: 8px;
+  background: var(--gray-border-light);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.upd-progress-fill {
+  height: 100%;
+  background: var(--blue);
+  width: 0;
+  transition: width 0.2s ease;
+}
+
+.settings-recovery-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 12px 16px 0;
+  background: var(--orange-dark);
+  border: none;
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.settings-recovery-btn:hover { background: var(--orange-dark-hover); }
+.settings-recovery-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Manage cameras modal (bottom sheet) --------------------------------- */
+
+.manage-modal {
+  background: var(--modal-bg);
+  border-radius: 12px 12px 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding-bottom: 2em;
+}
+
+.manage-modal .modal-header { position: sticky; top: 0; background: var(--white); z-index: 10; }
+
+.modal-section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 6px;
+}
+
+.modal-count-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: var(--blue);
+  color: var(--white);
+  border-radius: 10px;
+  padding: 1px 7px;
+  display: none;
+}
+
+.modal-count-badge.visible { display: inline-block; }
+
+/* Scan / RC-add button */
+.modal-action-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 0 16px 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 44px;
+  border-radius: 8px;
+  color: var(--white);
+}
+
+#add-camera-btn       { background: var(--blue); }
+#add-camera-btn:hover { background: var(--blue-hover); }
+
+#add-camera-scan-btn       { background: var(--blue); }
+#add-camera-scan-btn:hover { background: var(--blue-hover); }
+#add-camera-scan-btn.scanning {
+  background: none;
+  border: 1px solid var(--gray-border);
+  color: #333;
+}
+
+/* Found camera rows */
+#add-camera-ble-results, #add-camera-rc-results {
+  padding: 0 20px;
+}
+
+.found-camera-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--gray-border-light);
+  gap: 10px;
+}
+
+.found-camera-row:last-child { border-bottom: none; }
+
+.found-cam-info { flex: 1; }
+
+.found-cam-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.found-cam-meta {
+  font-size: 0.72rem;
+  color: var(--gray-light);
+  margin-top: 2px;
+}
+
+.pair-this-btn {
+  background: var(--blue);
+  color: var(--white);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.pair-this-btn:hover { background: var(--blue-hover); }
+
+/* Paired camera rows */
+#paired-list {
+  padding: 0 16px;
+}
+
+.modal-paired-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--card-bg);
+  border: 1px solid var(--gray-border-light);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  gap: 10px;
+}
+
+.modal-paired-info { flex: 1; }
+
+.modal-paired-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.modal-paired-meta {
+  font-size: 0.72rem;
+  color: var(--gray-light);
+}
+
+.remove-btn {
+  background: var(--red);
+  color: var(--white);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.remove-btn:hover { background: var(--red-hover); }
+
+.modal-empty {
+  font-size: 0.88rem;
+  color: var(--gray-text);
+  padding: 8px 16px 4px;
+}
+
+/* ---- Pair-in-progress modal (bottom sheet) ------------------------------ */
+
+@keyframes pair-sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0);    }
+}
+
+.pair-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 1000;            /* above manage-cameras modal (200) */
+  align-items: flex-end;    /* stick to bottom like manage modal */
+  justify-content: center;
+}
+
+.pair-overlay.open { display: flex; }
+
+.pair-sheet {
+  background: var(--modal-bg);
+  border-radius: 12px 12px 0 0;
+  width: 100%;
+  max-width: 480px;
+  padding: 28px 24px 32px;
+  text-align: center;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.15);
+  animation: pair-sheet-up 0.22s ease-out;
+}
+
+.pair-sheet-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 28px;
+  color: var(--text-primary);
+}
+
+/* Throbber: 72px ring with one accent arc that spins.  In success / failure
+ * states the JS swaps in a checkmark / X glyph and the spin animation is
+ * paused via the modifier classes below. */
+.pair-throbber {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 22px;
+  border: 6px solid var(--gray-border-light);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pair-throbber.success {
+  border: 6px solid var(--green);
+  border-top-color: var(--green);
+  animation: none;
+  color: var(--green);
+}
+.pair-throbber.success::before { content: "✓"; }
+
+.pair-throbber.failed {
+  border: 6px solid var(--red);
+  border-top-color: var(--red);
+  animation: none;
+  color: var(--red);
+}
+.pair-throbber.failed::before { content: "✕"; }
+
+.pair-status {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  min-height: 2.6em;        /* reserve space so layout doesn't jump */
+  line-height: 1.35;
+  padding: 0 8px;
+}
+
+.pair-cancel-btn {
+  width: 100%;
+  max-width: 320px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 14px 18px;
+  min-height: 48px;
+  border-radius: 8px;
+  background: var(--gray-disabled);
+  color: var(--text-primary);
+  border: 0;
+  cursor: pointer;
+}
+
+.pair-cancel-btn:hover:not(:disabled) { background: var(--gray-toggle-off); }
+
+.pair-cancel-btn:disabled {
+  background: var(--gray-disabled);
+  color: var(--gray-disabled-text);
+  cursor: default;
+}
+
+/* ---- Disconnect overlay -------------------------------------------------- */
+
+#disconnect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+}
+
+.disconnect-box {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.disconnect-icon {
+  width: 96px;
+  height: 96px;
+  color: #000;
+  margin-bottom: 0.5em;
+}
+
+.disconnect-title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #000;
+  letter-spacing: 0.02em;
+  margin-bottom: 1em;
+  line-height: 1;
+}
+
+#disconnect-reload-btn,
+#shutdown-reboot-btn {
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 48px;
+  border-radius: 8px;
+  width: 100%;
+  border: 0;
+}
+
+#disconnect-reload-btn          { background: var(--blue); }
+#disconnect-reload-btn:hover    { background: var(--blue-hover); }
+#shutdown-reboot-btn            { background: var(--orange-dark); }
+#shutdown-reboot-btn:hover      { background: var(--orange-dark-hover); }
+
+/* ---- Shutdown-complete overlay ------------------------------------------ */
+
+#shutdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+}
+
+.shutdown-subtitle {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #333;
+  margin-top: -0.5em;
+  margin-bottom: 1.2em;
+  line-height: 1.2;
+}
+
+/* ---- Add Camera modal (bottom sheet with two-pane slider) --------------- */
+
+.add-camera-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.modal-back-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-back-btn:hover { background: #f0f0f0; }
+.modal-back-btn svg   { width: 18px; height: 18px; }
+
+.add-camera-content {
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: hidden;
+  position: relative;
+}
+
+.add-camera-track {
+  display: flex;
+  width: 200%;
+  height: 100%;
+  transition: transform 0.28s ease;
+}
+
+.add-camera-track.step-instructions {
+  transform: translateX(-50%);
+}
+
+.add-camera-pane {
+  width: 50%;
+  flex-shrink: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 0 24px;
+}
+
+/* Camera model list — vertical scrollable list, mobile-friendly tap targets */
+.camera-model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.camera-model-row {
+  padding: 16px 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--gray-border-light);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  transition: background 0.12s;
+}
+
+.camera-model-row:last-child { border-bottom: none; }
+
+.camera-model-row::after {
+  content: "›";
+  color: var(--gray-light);
+  font-size: 1.6rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.camera-model-row:hover,
+.camera-model-row:active { background: var(--gray-bg); }
+
+/* Instructions pane */
+.add-camera-instructions {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  padding: 4px 20px 16px;
+  margin: 0;
+}
+
+.add-camera-status {
+  font-size: 0.85rem;
+  color: var(--gray-label);
+  padding: 6px 20px;
+  min-height: 1.4em;
+}
+
+.add-camera-modal .modal-action-btn {
+  margin: 0 20px 8px;
+  width: calc(100% - 40px);
+}

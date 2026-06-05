@@ -6,13 +6,35 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.6.1
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19~2
   idf:
     source:
       type: idf
     version: 6.0.1
+  joltwallet/littlefs:
+    component_hash: 29eff7921c4e8bce021aeb7fff2723bfcafed661756de700646ea0f6223c2a32
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.21.1
 direct_dependencies:
 - cherry-embedded/cherryusb
+- espressif/cjson
 - idf
-manifest_hash: 913591ff61cd4f1719649599acc7e2ad67bac9e2e21fb4c36e44e0c7213165e2
+- joltwallet/littlefs
+manifest_hash: 0cc0b8d4622ea29789b0660ae35a21919169e51b337d9bfbd835b534d5344f99
 target: esp32s3
 version: 3.0.0
