@@ -217,7 +217,7 @@ Returns the running firmware's identity.
 }
 ```
 
-Recovery returns `"mode": "recovery"` and `"running_partition": "factory"`. Recovery's `app` and `ui` fields reflect *its own* version (not the most recent variant-app's version).
+`mode` is the running app's role: for a variant app it is the `CONFIG_PRODUCT_VARIANT` slug (`"wireless"`, `"wired"`, …) and equals `product`; the recovery app overrides it to `"recovery"`. Recovery also returns `"running_partition": "factory"`, and its `app`/`ui` fields reflect *its own* version (not the most recent variant-app's version).
 
 Per the locked equality invariant (§1), `app == ui` always. Both fields derive from `CONFIG_APP_PROJECT_VER` at compile time. No file read needed.
 
