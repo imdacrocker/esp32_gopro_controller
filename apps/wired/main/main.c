@@ -26,6 +26,7 @@
 #include "log_ring.h"
 #include "shutdown_manager.h"
 #include "usb_host_net.h"
+#include "gopro_usb.h"
 
 static const char *TAG = "main";
 
@@ -52,21 +53,19 @@ static void mark_ota_valid(void)
 static void on_gps_utc_acquired(uint64_t utc_ms, void *arg)
 {
     (void)utc_ms; (void)arg;
-    /* Phase 3: gopro_usb_sync_time_all(); — push SetDateTime to the camera. */
+    gopro_usb_sync_time_all();
 }
 
 /* ---- USB camera link callback ------------------------------------------- */
 
 static void on_usb_link(bool up, uint32_t camera_ip)
 {
-    (void)camera_ip;
     if (up) {
         ESP_LOGI(TAG, "USB camera link up");
-        /* Phase 3: gopro_usb_on_link_up(camera_ip); — enable wired control,
-         * run the readiness handshake, mark the cam_core slot ready. */
+        gopro_usb_on_link_up(camera_ip);
     } else {
         ESP_LOGI(TAG, "USB camera link down");
-        /* Phase 3: gopro_usb_on_link_down(); — mark the slot not-ready. */
+        gopro_usb_on_link_down();
     }
 }
 
@@ -115,12 +114,15 @@ void app_main(void)
     /* httpd up = "healthy enough"; disarm OTA rollback. */
     mark_ota_valid();
 
+    /* Register the single USB camera slot + driver with cam_core and start its
+     * worker.  Must precede usb_host_net_init() so the slot exists when the
+     * first link-up event fires. */
+    gopro_usb_init();
+
     /* Bring up the USB host bus; the camera link surfaces via on_usb_link
      * once the camera is plugged in and DHCP completes. Safe to start after
      * httpd — the UI is reachable with no camera attached. */
     usb_host_net_init(on_usb_link);
-
-    /* Phase 3: gopro_usb_init(); — register the USB camera slot with cam_core. */
 
     /* Wire CAN callbacks before starting the TWAI driver. */
     can_manager_callbacks_t can_cbs = {

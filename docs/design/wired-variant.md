@@ -155,10 +155,35 @@ Each phase is independently buildable + flashable.
 - `main.c` calls `usb_host_net_init(on_usb_link)` after httpd; `on_usb_link`
   currently just logs (Phase 3 forwards to the driver).
 
-### Phase 3 — `gopro/gopro_usb` driver *(future)*
-- Implement `camera_driver_t` over the working PoC HTTP sequence; register one
-  `cam_core` slot. Attach + `wired_usb?p=1` → `cam_core_slot_set_ready(true)`;
-  unplug → ready false. CAN + UI now drive the camera.
+### Phase 3 — `gopro_usb` driver *(done)*
+- `apps/wired/components/gopro_usb` implements `camera_driver_t` over the Open
+  GoPro HTTP API and registers a single `cam_core` slot (slot 0) directly
+  (`cam_core_register_slot` + `cam_core_slot_attach_driver`) — no
+  `camera_manager` in the wired variant.
+- Threading mirrors `gopro_wifi_rc`: vtable `start`/`stop` post to a queue and
+  set an optimistic cached status; `get_recording_status` returns the cache;
+  all blocking HTTP + `cam_core_slot_set_ready` run on a dedicated worker task.
+  A 3 s timer drives `keep_alive` + a `/gopro/camera/state` poll that refreshes
+  the cache (status field `"10"` = encoding).
+- Link lifecycle: `on_usb_link(true,ip)` → worker enables wired control
+  (`/gopro/camera/control/wired_usb?p=1`), reads `/gopro/camera/info` to log +
+  gate the model, probes state, then `cam_core_slot_set_ready(true)`.
+  `on_usb_link(false)` → `set_ready(false)`.
+- **CAN + UI drive the camera for free:** the shared `can_manager` already maps
+  the 0x600 logging frame to `cam_core_set_desired_all(START/STOP)` (gated by
+  auto-control), and `cam_core_get_can_state(0)` feeds the 0x601 status TX. No
+  wired-specific CAN wiring beyond `can_manager_init()`.
+- DateTime sync: `gopro_usb_sync_time_all()` (from `on_gps_utc_acquired`)
+  reads the CAN UTC anchor + tz offset and issues `/gopro/camera/set_date_time`.
+- **Deferred / TODO:**
+  - `sleep` vtable is NULL — Open GoPro HTTP has no reliable power-off and the
+    camera is bus-powered (loses power at system shutdown). `shutdown_manager`
+    budgets a NULL sleep as a no-op.
+  - The USB-control model gate is a local predicate in `gopro_usb.c`; the
+    canonical home is `gopro_model.h`. Promoting that header into a shared
+    component (so both variants share it) is the tracked follow-up below.
+  - Built but **not yet verified on hardware** — the HTTP endpoint set is the
+    modern Open GoPro path (Hero10+), not the PoC's legacy `/gp/gpControl` one.
 
 ### Phase 4 — Wired web UI + endpoints *(future)*
 - Single-camera panel; gate the multi-camera/pair/reorder UI off a
@@ -202,4 +227,9 @@ void      gopro_usb_sync_time_all(void);     /* called from on_gps_utc_acquired 
   "gopro_rc UDP" and "COHN TLS" sockets copied from wireless — recompute the
   `CONFIG_LWIP_MAX_SOCKETS` budget for the wired socket set (httpd + USB) in a
   later phase.
-```
+- **Promote `gopro_model.h`** (+ `gopro_model.c`'s `gopro_model_from_name`)
+  into a shared component so the wired `gopro_usb` driver can use the canonical
+  `gopro_model_supports_usb_control()` predicate instead of its local copy.
+- Decide whether `gopro_usb` should warm up the camera into a shooting mode on
+  link-up (the PoC's legacy webcam-STOP + sub_mode dance) — only if Hero10+
+  hardware testing shows the modern shutter path needs it.
