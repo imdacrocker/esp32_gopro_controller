@@ -55,6 +55,14 @@ struct camera_driver {
      * timeout itself).  Return ESP_ERR_NOT_SUPPORTED if the model has no
      * usable sleep path.  See docs/design/shutdown.md §5. */
     esp_err_t                  (*sleep)(void *ctx);
+
+    /* Nullable — drop any persistent transport link to the camera (e.g. a
+     * BLE GAP connection) as part of the shutdown sequence.  Non-blocking;
+     * the driver enqueues / fires the teardown and returns.  Drivers with no
+     * persistent link (RC-emulation, USB) leave this NULL.  Routed via
+     * cam_core_invoke_terminate_link so shutdown_manager depends only on
+     * cam_core — see docs/design/shutdown.md. */
+    void                       (*terminate_link)(void *ctx);
 };
 
 /* ---- Driver registration types (§21.4) ----
@@ -233,6 +241,12 @@ camera_can_state_t cam_core_get_can_state(int idx);
  * slot has no driver or no sleep handler.  Forwards the driver return
  * code otherwise.  Non-blocking; the driver enqueues the command. */
 esp_err_t cam_core_invoke_sleep(int idx);
+
+/* Invoke the driver's terminate_link entry (drop the persistent transport
+ * link, e.g. a BLE GAP connection) during shutdown.  No-op if the slot has
+ * no driver or no terminate_link handler.  Non-blocking; the driver enqueues
+ * / fires the teardown. */
+void cam_core_invoke_terminate_link(int idx);
 
 /* Stop the mismatch poll timer, clear the ready flag, and invoke the
  * driver's teardown entry (if any).  Used by the shutdown path and by

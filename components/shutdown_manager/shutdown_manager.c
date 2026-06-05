@@ -4,7 +4,8 @@
  * One per-slot FreeRTOS task per configured camera; each runs:
  *   stop_recording (if recording, with 1.5 s confirm wait)
  *   sleep command  (via driver vtable, with 500 ms ACK settle)
- *   BLE terminate  (for BLE-control slots, via open_gopro_ble)
+ *   link terminate (for slots whose driver holds a persistent link, via the
+ *                   cam_core terminate_link vtable entry)
  *   teardown       (cam_core_teardown_slot — stops mismatch timer +
  *                   invokes driver teardown)
  *
@@ -12,10 +13,11 @@
  * but the sequence continues; the global state transitions to COMPLETE
  * once every slot has finished one way or the other.
  *
- * Layering note: the BLE-terminate step still calls into open_gopro_ble,
- * a wireless-only component.  A clean fix would add a `terminate_link`
- * vtable entry the BLE driver implements; that follow-up is out of scope
- * for the multi-variant restructure (docs/multi-variant-restructure-plan.md).
+ * Layering note: the link-terminate step is routed through cam_core's
+ * `terminate_link` vtable entry (the BLE driver implements it; RC/USB leave
+ * it NULL), so this component depends only on cam_core — no wireless-only
+ * components.  Done as part of the wired-variant integration
+ * (docs/design/wired-variant.md §2).
  */
 
 #include "shutdown_manager.h"
@@ -24,7 +26,6 @@
 #include <string.h>
 
 #include "cam_core.h"
-#include "open_gopro_ble.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -112,12 +113,14 @@ static void shutdown_slot_task(void *arg)
         }
     }
 
-    /* ---- Step 3: terminate BLE link (if any). ---------------------------- *
-     * cam_core records `requires_ble` per slot at driver-attach time; today
-     * only the BLE driver sets it, so this exactly matches the previous
-     * `gopro_model_uses_ble_control` check without pulling in gopro_model.h. */
+    /* ---- Step 3: terminate the transport link (if any). ----------------- *
+     * Routed through cam_core's terminate_link vtable entry so this component
+     * depends only on cam_core, not on any wireless-only driver.  Drivers
+     * with no persistent link (RC-emulation, USB) leave the entry NULL and
+     * this is a no-op.  cam_core_slot_requires_ble gates the call to slots
+     * whose driver actually holds a link worth tearing down. */
     if (cam_core_slot_requires_ble(slot)) {
-        open_gopro_ble_terminate_slot(slot);
+        cam_core_invoke_terminate_link(slot);
     }
 
     /* ---- Step 4: stop driver timers, mark slot disconnected. ------------- */
