@@ -1,0 +1,4 @@
+dependencies:
+  cherry-embedded/cherryusb: "^1.6.1"
+  idf:
+    version: ">=6.0"
