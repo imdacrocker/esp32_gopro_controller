@@ -64,9 +64,9 @@ component unchanged and adds two small wired-specific components.
 | `usb_host_net` | (none — replaces `ble_core`/station plumbing) | CherryUSB host bring-up, device attach/detach, CDC-NCM/RNDIS class, lwIP netif + DHCP client, camera-IP derivation. Surfaces link-up/down + camera-IP via callbacks modeled on `wifi_manager`'s station callbacks. |
 | `gopro/gopro_usb` | `gopro_wifi_rc` / `open_gopro_ble` | Implements `camera_driver_t` over the Open GoPro HTTP path. Enables wired control, start/stop/status/datetime/sleep. Registers one slot with `cam_core`. |
 
-`gopro_model.h` (the `gopro_model_supports_usb_control()` Hero10+ allowlist)
-is promoted/shared as needed — same pattern the wireless `http_server_wireless`
-CMake notes for its private include of `../gopro`.
+`gopro_model.h` (the `gopro_model_uses_usb_control()` Hero10+ allowlist) lives
+in the shared `components/gopro_model/` component; both the wireless gopro
+drivers and the wired `gopro_usb` driver `REQUIRES gopro_model`.
 
 ---
 
@@ -179,9 +179,10 @@ Each phase is independently buildable + flashable.
   - `sleep` vtable is NULL — Open GoPro HTTP has no reliable power-off and the
     camera is bus-powered (loses power at system shutdown). `shutdown_manager`
     budgets a NULL sleep as a no-op.
-  - The USB-control model gate is a local predicate in `gopro_usb.c`; the
-    canonical home is `gopro_model.h`. Promoting that header into a shared
-    component (so both variants share it) is the tracked follow-up below.
+  - ~~The USB-control model gate is a local predicate in `gopro_usb.c`; the
+    canonical home is `gopro_model.h`.~~ **done:** `gopro_model.{h,c}` were
+    promoted into the shared `components/gopro_model/` component and
+    `gopro_usb.c` now calls the canonical `gopro_model_uses_usb_control()`.
   - Built but **not yet verified on hardware** — the HTTP endpoint set is the
     modern Open GoPro path (Hero10+), not the PoC's legacy `/gp/gpControl` one.
 
@@ -244,9 +245,12 @@ void      gopro_usb_sync_time_all(void);     /* called from on_gps_utc_acquired 
   recomputed to `CONFIG_LWIP_MAX_SOCKETS=12` = 8 httpd + 3 httpd-internal + 1
   `gopro_usb` esp_http_client. The SoftAP DHCP server and USB-netif DHCP client
   use raw lwIP UDP PCBs (`udp_new`) and do NOT count against this limit.
-- **Promote `gopro_model.h`** (+ `gopro_model.c`'s `gopro_model_from_name`)
+- ~~**Promote `gopro_model.h`** (+ `gopro_model.c`'s `gopro_model_from_name`)
   into a shared component so the wired `gopro_usb` driver can use the canonical
-  `gopro_model_supports_usb_control()` predicate instead of its local copy.
+  USB-control predicate instead of its local copy.~~ — **done:** now lives at
+  `components/gopro_model/`; the canonical predicate is
+  `gopro_model_uses_usb_control()`. Both variants' gopro components (and the
+  `test_gopro_model` host test) consume it via the shared component.
 - Decide whether `gopro_usb` should warm up the camera into a shooting mode on
   link-up (the PoC's legacy webcam-STOP + sub_mode dance) — only if Hero10+
   hardware testing shows the modern shutter path needs it.

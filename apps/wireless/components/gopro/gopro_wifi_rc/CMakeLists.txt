@@ -7,13 +7,12 @@ idf_component_register(
         "udp.c"
         "settings.c"
         "diagnostic.c"
-        "../gopro_model.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
         "."
-        ".."
     REQUIRES
+        gopro_model
         camera_manager_wireless
         can_manager
         wifi_manager

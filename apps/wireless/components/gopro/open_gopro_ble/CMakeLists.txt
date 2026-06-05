@@ -13,8 +13,8 @@ idf_component_register(
         "include"
     PRIV_INCLUDE_DIRS
         "."
-        ".."
     REQUIRES
+        gopro_model
         bt
         nvs_flash
         esp_timer

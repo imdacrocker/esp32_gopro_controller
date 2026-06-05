@@ -9,8 +9,9 @@
  * emitted by the camera's GET /gp/gpControl JSON `info.model_name` field —
  * verified against the gpControl-*.json reference dumps in goprowifihack.
  *
- * This file is compiled into the gopro_wifi_rc component (see its
- * CMakeLists.txt SRCS list).
+ * This file is the lone SRC of the shared `gopro_model` component
+ * (components/gopro_model/); the wireless gopro drivers and the wired
+ * `gopro_usb` driver reach it via `REQUIRES gopro_model`.
  */
 
 #include <string.h>

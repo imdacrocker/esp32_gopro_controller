@@ -23,6 +23,7 @@
 
 #include "cam_core.h"
 #include "camera_types.h"
+#include "gopro_model.h"
 #include "can_manager.h"
 #include "gopro_usb.h"
 
@@ -72,25 +73,6 @@ typedef struct {
 static gopro_usb_ctx_t s_ctx;
 static cam_core_slot_t s_slot;                       /* embedded, zero-init at .bss */
 static QueueHandle_t   s_queue;
-
-/* ---- USB-control model gate ---------------------------------------------- *
- * Hero10+ over USB only — Hero9 USB shutter-start is firmware-broken
- * (docs/wired-variant-followup.md).  GoPro's model_number matches our
- * camera_model_t numbering, so /gopro/camera/info.model_number maps directly.
- *
- * NOTE: the canonical home for this predicate is gopro_model.h; promoting that
- * header into a shared component is a tracked follow-up (wired-variant.md §7).
- * Kept local here to avoid a cross-app include. */
-static bool model_supports_usb_control(camera_model_t m)
-{
-    return m == CAMERA_MODEL_GOPRO_HERO10_BLACK
-        || m == CAMERA_MODEL_GOPRO_HERO11_BLACK
-        || m == CAMERA_MODEL_GOPRO_HERO11_MINI
-        || m == CAMERA_MODEL_GOPRO_HERO12_BLACK
-        || m == CAMERA_MODEL_GOPRO_HERO13_BLACK
-        || m == CAMERA_MODEL_GOPRO_MAX2
-        || m == CAMERA_MODEL_GOPRO_LIT_HERO;
-}
 
 /* ---- HTTP helper --------------------------------------------------------- *
  * Blocking GET against the camera.  Returns the HTTP status code, or -1 on a
@@ -201,7 +183,7 @@ static void handle_link_up(uint32_t ip)
             }
             ESP_LOGI(TAG, "camera model=%d (%s)", (int)s_ctx.model,
                      s_ctx.model_name[0] ? s_ctx.model_name : "?");
-            if (!model_supports_usb_control(s_ctx.model)) {
+            if (!gopro_model_uses_usb_control(s_ctx.model)) {
                 ESP_LOGW(TAG, "model %d is not on the USB-control allowlist "
                               "(Hero10+); proceeding anyway", (int)s_ctx.model);
             }
