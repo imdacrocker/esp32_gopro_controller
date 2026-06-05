@@ -160,21 +160,11 @@ void open_gopro_ble_connect_by_addr(const ble_addr_t *addr)
     ble_core_connect_by_addr(addr);
 }
 
-/* ---- Shutdown helper (docs/design/shutdown.md) -------------------------- */
-
-void open_gopro_ble_terminate_slot(int slot)
-{
-    gopro_ble_ctx_t *ctx = gopro_ctx_by_slot(slot);
-    if (!ctx) return;
-    if (ctx->conn_handle == GOPRO_CONN_NONE) {
-        ESP_LOGI(TAG, "slot %d: terminate skipped — not connected", slot);
-        return;
-    }
-    int rc = ble_gap_terminate(ctx->conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-    ESP_LOGI(TAG, "slot %d: ble_gap_terminate rc=%d", slot, rc);
-    /* gopro_on_disconnected will clear ctx->conn_handle when the controller
-     * acknowledges the disconnect. */
-}
+/* ---- Shutdown helper (docs/design/shutdown.md) -------------------------- *
+ *
+ * Routed through cam_core's terminate_link vtable entry (see drv_terminate_link
+ * below) so shutdown_manager depends only on cam_core, not on this
+ * wireless-only component. */
 
 /* ---- UTC sync (§15.5) ---------------------------------------------------- */
 
@@ -255,6 +245,20 @@ static void drv_update_slot_index(void *arg, int new_slot)
     ctx->slot = new_slot;
 }
 
+static void drv_terminate_link(void *arg)
+{
+    gopro_ble_ctx_t *ctx = (gopro_ble_ctx_t *)arg;
+    if (!ctx) return;
+    if (ctx->conn_handle == GOPRO_CONN_NONE) {
+        ESP_LOGI(TAG, "slot %d: terminate skipped — not connected", ctx->slot);
+        return;
+    }
+    int rc = ble_gap_terminate(ctx->conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    ESP_LOGI(TAG, "slot %d: ble_gap_terminate rc=%d", ctx->slot, rc);
+    /* gopro_on_disconnected will clear ctx->conn_handle when the controller
+     * acknowledges the disconnect. */
+}
+
 static const camera_driver_t k_gopro_ble_driver = {
     .start_recording      = drv_start_recording,
     .stop_recording       = drv_stop_recording,
@@ -263,6 +267,7 @@ static const camera_driver_t k_gopro_ble_driver = {
     .update_slot_index    = drv_update_slot_index,
     .on_wifi_disconnected = NULL,
     .sleep                = drv_sleep,
+    .terminate_link       = drv_terminate_link,
 };
 
 static bool model_matches(camera_model_t model)

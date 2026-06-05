@@ -423,6 +423,25 @@ esp_err_t cam_core_invoke_sleep(int idx)
     return drv->sleep(ctx);
 }
 
+void cam_core_invoke_terminate_link(int idx)
+{
+    if (!valid_idx(idx)) return;
+    const camera_driver_t *drv = NULL;
+    void                  *ctx = NULL;
+
+    lock();
+    cam_core_slot_t *sl = s_slots[idx];
+    if (sl && sl->driver) {
+        drv = sl->driver;
+        ctx = sl->driver_ctx;
+    }
+    unlock();
+
+    if (drv && drv->terminate_link) {
+        drv->terminate_link(ctx);
+    }
+}
+
 void cam_core_teardown_slot(int idx)
 {
     if (!valid_idx(idx)) return;

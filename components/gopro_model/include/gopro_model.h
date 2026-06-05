@@ -139,6 +139,26 @@ static inline bool gopro_model_uses_udp_keepalive(camera_model_t model)
 }
 
 /**
+ * Camera can be driven over a wired USB CDC-NCM/RNDIS link using the modern
+ * Open GoPro HTTP path (the wired variant — docs/design/wired-variant.md).
+ *
+ * Hero10 and newer only: Hero9 USB shutter-start is firmware-broken
+ * (docs/wired-variant-followup.md), and Hero8-and-earlier predate the modern
+ * `/gopro/` HTTP API.  GoPro's reported `model_number` matches our
+ * camera_model_t numbering, so the `/gopro/camera/info` model maps directly.
+ */
+static inline bool gopro_model_uses_usb_control(camera_model_t model)
+{
+    return model == CAMERA_MODEL_GOPRO_HERO10_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO11_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO11_MINI
+        || model == CAMERA_MODEL_GOPRO_HERO12_BLACK
+        || model == CAMERA_MODEL_GOPRO_HERO13_BLACK
+        || model == CAMERA_MODEL_GOPRO_MAX2
+        || model == CAMERA_MODEL_GOPRO_LIT_HERO;
+}
+
+/**
  * Camera predates the OpenGoPro spec and uses the legacy BLE control protocol.
  *
  * Implications:

@@ -1,0 +1,11 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: ">=6.0"
+  # USB host stack for the wired GoPro link (Phase 2+).
+  cherry-embedded/cherryusb: "^1.6.1"
+  # LittleFS image for the web UI + cJSON for the shared /api/* handlers,
+  # matching the wireless app (http_server_core depends on both).
+  joltwallet/littlefs: ==1.21.1
+  espressif/cjson:
+    version: ">=1.7.18"

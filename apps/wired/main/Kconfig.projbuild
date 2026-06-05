@@ -1,0 +1,50 @@
+menu "GoPro Controller — Identity"
+
+    config DEVICE_IDENTITY_NAME
+        string "Controller identity name"
+        default "ESP32 Controller"
+        help
+            Single source of truth for the controller's display name. 
+
+endmenu
+
+menu "GoPro Controller — Product"
+
+    config PRODUCT_VARIANT
+        string "Product variant slug"
+        default "wired"
+        help
+            Build-time identifier for the product variant this firmware
+            belongs to 
+
+endmenu
+
+menu "GoPro Controller — OTA"
+
+    config OTA_BASE_URL
+        string "Cloudflare Worker base URL (proxy to GitHub Releases)"
+        default "https://firmware-proxy.imdacrocker.workers.dev"
+        help
+            Base URL the browser uses to fetch manifests and binaries.
+            The Worker proxies github.com and adds CORS headers.
+            Path layout: <base>/<owner>/<repo>/releases/download/latest-<channel>/manifest.json
+            See docs/design/ota.md §5 (Manifest format) and Appendix A (Worker source).
+            Replace the default with your deployed Worker URL.
+
+    config OTA_REPO_PATH
+        string "GitHub <owner>/<repo> path for releases"
+        default "imdacrocker/esp32_gopro_controller"
+        help
+            Used by the browser to compose the full manifest URL:
+              <OTA_BASE_URL>/<OTA_REPO_PATH>/releases/download/latest-<channel>/manifest.json
+            Change this if you fork the project.
+
+    config OTA_ALLOW_DEV_CHANNEL
+        bool "Expose 'dev' channel in /api/ota/channel"
+        default n
+        help
+            When enabled, adds "dev" to the available-channels list returned by
+            GET /api/ota/channel. Intended for local developer builds only —
+            no online publishing target exists for the dev channel.
+
+endmenu

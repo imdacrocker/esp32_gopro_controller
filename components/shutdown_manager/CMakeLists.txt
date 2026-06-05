@@ -7,11 +7,8 @@ idf_component_register(
         cam_core
         esp_timer
         freertos
-    # open_gopro_ble is wireless-specific; shutdown_manager still calls
-    # open_gopro_ble_terminate_slot() to drop the BLE link cleanly during
-    # shutdown.  A future cleanup will route this through a new
-    # `terminate_link` vtable entry on camera_driver_t so shutdown_manager
-    # depends only on cam_core; tracked in docs/multi-variant-restructure-plan.md.
-    PRIV_REQUIRES
-        open_gopro_ble
+    # No wireless-only dependencies: BLE-link teardown during shutdown is
+    # routed through cam_core's terminate_link vtable entry (the BLE driver
+    # implements it), so this shared component depends only on cam_core.
+    # See docs/design/wired-variant.md §2.
 )

@@ -38,7 +38,11 @@ static const char *TAG = "http_api_system";
  *   recovery:          factory partition's app desc; "unknown" if missing
  *   channel:           shared NVS ota/channel via ota_io
  *   running_partition: label (typically ota_0 or ota_1 in wireless mode)
- *   mode:              "wireless"
+ *   mode:              app role — the running variant's CONFIG_PRODUCT_VARIANT
+ *                      (e.g. "wireless", "wired"). The recovery app overrides
+ *                      this to "recovery" in its own handler. Distinguishes a
+ *                      normal variant app from recovery; for variant apps it
+ *                      equals `product`.
  *   product:           compile-time CONFIG_PRODUCT_VARIANT — slug for the
  *                      product variant (e.g. "wireless"). The browser uses
  *                      it to compose the variant-aware OTA route
@@ -77,12 +81,12 @@ static esp_err_t handler_version(httpd_req_t *req)
     snprintf(buf, sizeof(buf),
              "{\"app\":\"%s\",\"ui\":\"%s\",\"recovery\":\"%s\","
              "\"channel\":\"%s\",\"running_partition\":\"%s\","
-             "\"mode\":\"wireless\",\"product\":\"%s\","
+             "\"mode\":\"%s\",\"product\":\"%s\","
              "\"build_date\":\"%s\",\"build_time\":\"%s\","
              "\"ota_base_url\":\"%s\",\"ota_repo_path\":\"%s\"}",
              app->version, app->version, recovery, channel,
              running ? running->label : "unknown",
-             CONFIG_PRODUCT_VARIANT,
+             CONFIG_PRODUCT_VARIANT, CONFIG_PRODUCT_VARIANT,
              app->date, app->time,
              CONFIG_OTA_BASE_URL, CONFIG_OTA_REPO_PATH);
     send_json(req, buf);

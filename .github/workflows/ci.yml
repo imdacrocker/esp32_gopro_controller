@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [wireless]
+        variant: [wireless, wired]
     steps:
       - uses: actions/checkout@v5
 
