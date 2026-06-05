@@ -185,9 +185,25 @@ Each phase is independently buildable + flashable.
   - Built but **not yet verified on hardware** — the HTTP endpoint set is the
     modern Open GoPro path (Hero10+), not the PoC's legacy `/gp/gpControl` one.
 
-### Phase 4 — Wired web UI + endpoints *(future)*
-- Single-camera panel; gate the multi-camera/pair/reorder UI off a
-  `/api/version` capability flag (one shared `storage.bin`, variant-gated).
+### Phase 4 — Wired web UI + endpoints *(done)*
+- **Reused the shared UI contract rather than forking it.** `http_server_wired`
+  now serves the *same* `/api/paired-cameras` (one-element array) and
+  `/api/shutter` endpoints as the wireless variant
+  (`apps/wired/components/http_server_wired/api_camera_wired.c`), sourced from
+  `cam_core` slot 0 + `usb_host_net` + `gopro_usb_get_model_name()`. The
+  existing `renderCameraCards` path therefore renders the USB camera unchanged.
+- Status mapping: `cam_core_get_can_state(0)` → recording/idle; otherwise
+  `usb_host_net_is_up()` → "connecting" (handshake in flight) vs "disconnected".
+- UI gating: `app.js` probes `/api/version`; when `product === "wired"` it
+  hides the "Add / Manage Cameras" bar (no pairing/scan/reorder) and relabels
+  the manual control buttons to "Record"/"Stop". Everything else (auto-control
+  toggle, per-camera shutter button, CAN/UTC/OTA/logs/power settings) is the
+  shared UI as-is. The wired `storage.bin` ships its own copy of the web UI
+  today, but the gating is product-driven so the assets could be unified later.
+- Added `gopro_usb_get_model_name()` so the card shows the camera's
+  self-reported model (from `/gopro/camera/info`).
+- Pairing/scan/RC endpoints are intentionally NOT served on wired; they are
+  unreachable from the UI once the manage bar is hidden.
 
 ---
 
@@ -223,10 +239,11 @@ void      gopro_usb_sync_time_all(void);     /* called from on_gps_utc_acquired 
 
 ## 7. Cleanup noted during integration
 
-- `apps/wired/sdkconfig.defaults` socket-budget comment still references
-  "gopro_rc UDP" and "COHN TLS" sockets copied from wireless — recompute the
-  `CONFIG_LWIP_MAX_SOCKETS` budget for the wired socket set (httpd + USB) in a
-  later phase.
+- ~~`apps/wired/sdkconfig.defaults` socket-budget comment still references
+  "gopro_rc UDP" and "COHN TLS" sockets copied from wireless~~ — **done:**
+  recomputed to `CONFIG_LWIP_MAX_SOCKETS=12` = 8 httpd + 3 httpd-internal + 1
+  `gopro_usb` esp_http_client. The SoftAP DHCP server and USB-netif DHCP client
+  use raw lwIP UDP PCBs (`udp_new`) and do NOT count against this limit.
 - **Promote `gopro_model.h`** (+ `gopro_model.c`'s `gopro_model_from_name`)
   into a shared component so the wired `gopro_usb` driver can use the canonical
   `gopro_model_supports_usb_control()` predicate instead of its local copy.

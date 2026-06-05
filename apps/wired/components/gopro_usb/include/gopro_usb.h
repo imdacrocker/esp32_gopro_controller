@@ -35,3 +35,8 @@ void gopro_usb_on_link_down(void);
 /* Push the current CAN UTC anchor to the camera as a SetDateTime.  No-op if no
  * UTC is available or the link is down. */
 void gopro_usb_sync_time_all(void);
+
+/* Copy the camera's self-reported model name (from /gopro/camera/info) into
+ * out, NUL-terminated.  Empty string when no camera / not yet identified.
+ * Safe to call from any task. */
+void gopro_usb_get_model_name(char *out, size_t out_len);

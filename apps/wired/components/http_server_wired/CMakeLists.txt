@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "driver_wired.c"
+        "api_camera_wired.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -8,5 +9,9 @@ idf_component_register(
         # http_server_core_start and pulls in its header.
         http_server_core
     PRIV_REQUIRES
+        cam_core
+        gopro_usb
+        usb_host_net
         esp_http_server
+        espressif__cjson
 )

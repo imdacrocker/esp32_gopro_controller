@@ -14,6 +14,9 @@
 #include "http_server_core.h"
 #include "http_server_wired.h"
 
+/* Wired-specific /api/... registration entry point (api_camera_wired.c). */
+void api_camera_wired_register(httpd_handle_t server);
+
 static const char *TAG = "http_server_wired";
 
 void http_server_wired_init(void)
@@ -24,7 +27,7 @@ void http_server_wired_init(void)
         return;
     }
 
-    /* Phase 4: api_camera_wired_register(server); */
+    api_camera_wired_register(server);
 
-    ESP_LOGI(TAG, "wired HTTP server up (core endpoints only)");
+    ESP_LOGI(TAG, "wired HTTP endpoints registered");
 }

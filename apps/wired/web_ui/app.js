@@ -1563,6 +1563,25 @@ apiFetch('GET', '/api/settings/timezone')
 refreshTopSection();
 refreshCameraStatus();
 
+/* Wired variant: a single fixed USB camera, no pairing/management.  Detect via
+ * /api/version's product slug and trim the multi-camera affordances; the camera
+ * list itself works unchanged (the device serves a one-element
+ * /api/paired-cameras).  See docs/design/wired-variant.md §4. */
+function applyWiredVariant() {
+    document.body.classList.add('variant-wired');
+    const manage = document.getElementById('manage-bar');
+    if (manage) manage.style.display = 'none';
+    const rec  = document.getElementById('btn-record-all');
+    const stop = document.getElementById('btn-stop-all');
+    if (rec)  rec.textContent  = 'Record';
+    if (stop) stop.textContent = 'Stop';
+    const empty = document.getElementById('cam-status-empty');
+    if (empty) empty.textContent = 'Camera not connected.';
+}
+apiFetch('GET', '/api/version')
+    .then(v => { if (v && v.product === 'wired') applyWiredVariant(); })
+    .catch(() => {});
+
 cameraStatusTimer = setInterval(refreshCameraStatus, 3000);
 topSectionTimer   = setInterval(refreshTopSection, 2000);
 clockTickTimer    = setInterval(renderClock, 1000);

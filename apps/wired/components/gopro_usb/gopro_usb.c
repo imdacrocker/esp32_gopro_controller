@@ -66,6 +66,7 @@ typedef struct {
     volatile uint32_t                  camera_ip;   /* 0 when link down */
     volatile camera_recording_status_t cached;      /* read by drv_get_recording_status */
     camera_model_t                     model;       /* from /gopro/camera/info */
+    char                               model_name[40]; /* camera-reported, from info */
 } gopro_usb_ctx_t;
 
 static gopro_usb_ctx_t s_ctx;
@@ -195,8 +196,11 @@ static void handle_link_up(uint32_t ip)
             if (cJSON_IsNumber(mn)) {
                 s_ctx.model = (camera_model_t)mn->valueint;
             }
+            if (nm && cJSON_IsString(nm)) {
+                strlcpy(s_ctx.model_name, nm->valuestring, sizeof(s_ctx.model_name));
+            }
             ESP_LOGI(TAG, "camera model=%d (%s)", (int)s_ctx.model,
-                     (nm && cJSON_IsString(nm)) ? nm->valuestring : "?");
+                     s_ctx.model_name[0] ? s_ctx.model_name : "?");
             if (!model_supports_usb_control(s_ctx.model)) {
                 ESP_LOGW(TAG, "model %d is not on the USB-control allowlist "
                               "(Hero10+); proceeding anyway", (int)s_ctx.model);
@@ -219,9 +223,10 @@ static void handle_link_up(uint32_t ip)
 static void handle_link_down(void)
 {
     cam_core_slot_set_ready(GOPRO_USB_SLOT, false);
-    s_ctx.camera_ip = 0;
-    s_ctx.cached    = CAMERA_RECORDING_UNKNOWN;
-    s_ctx.model     = CAMERA_MODEL_UNKNOWN;
+    s_ctx.camera_ip     = 0;
+    s_ctx.cached        = CAMERA_RECORDING_UNKNOWN;
+    s_ctx.model         = CAMERA_MODEL_UNKNOWN;
+    s_ctx.model_name[0] = '\0';
     ESP_LOGI(TAG, "slot %d not ready (link down)", GOPRO_USB_SLOT);
 }
 
@@ -395,4 +400,11 @@ void gopro_usb_on_link_down(void)
 void gopro_usb_sync_time_all(void)
 {
     post(CMD_SYNC_TIME, 0);
+}
+
+void gopro_usb_get_model_name(char *out, size_t out_len)
+{
+    if (!out || !out_len) return;
+    /* Single writer (worker task); a cosmetic torn read is acceptable. */
+    strlcpy(out, s_ctx.model_name, out_len);
 }

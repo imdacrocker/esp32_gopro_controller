@@ -20,8 +20,17 @@ CONFIG_APP_PROJECT_VER="0.1.1-dev"
 CONFIG_LWIP_DHCPS=y
 CONFIG_LWIP_DHCPS_MAX_STATION_NUM=8
 
-# Socket budget: 8 (httpd) + 3 (httpd internal) + 2 (gopro_rc UDP) + 4 (COHN TLS) = 17
-CONFIG_LWIP_MAX_SOCKETS=17
+# Socket budget — counts BSD/netconn sockets only. The SoftAP DHCP server and
+# the USB-netif DHCP client both use raw lwIP UDP PCBs (udp_new), which do NOT
+# count against LWIP_MAX_SOCKETS.
+#   8  httpd max_open_sockets (http_server_core driver.c)
+#   3  httpd internal (1 TCP listen + 2 UDP control) — httpd requires
+#      LWIP_MAX_SOCKETS >= max_open_sockets + 3
+#   1  gopro_usb esp_http_client (single worker task, sequential GETs)
+#   = 12
+# No gopro_rc UDP or COHN TLS sockets here — the wired variant has no WiFi-RC
+# and no BLE.
+CONFIG_LWIP_MAX_SOCKETS=12
 
 # tcpip_thread stack — default 3072 is too shallow under concurrent httpd+BLE load
 # CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=5120 # Not needed with no BLE?
