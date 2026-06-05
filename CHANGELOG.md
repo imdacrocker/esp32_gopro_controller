@@ -10,6 +10,54 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 
 ## [Unreleased]
 
+### Added
+- **Wired (USB) product variant** — a second sibling firmware for connecting
+  a single Hero10+ camera over USB instead of BLE/WiFi-RC. The ESP32-S3 acts
+  as a USB host; the camera presents as a CDC-NCM/RNDIS network gadget and
+  the controller communicates via the Open GoPro HTTP API over the USB netif.
+  The SoftAP is kept purely for the web UI and browser OTA — the USB link and
+  the SoftAP are independent network interfaces with no routing between them.
+  Delivers the same CAN-bus trigger → start/stop/status/datetime/sleep
+  behaviour and the same SoftAP web UI as the wireless variant. See
+  [`docs/design/wired-variant.md`](docs/design/wired-variant.md).
+  - **`apps/wired/`** — new top-level IDF project (mirrors `apps/wireless`).
+    `sdkconfig.defaults` enables USB OTG host mode, disables BLE/Bluetooth
+    stacks, and sets `CONFIG_PRODUCT_VARIANT="wired"`.
+  - **`usb_host_net` component** — CherryUSB host bring-up, CDC-NCM/RNDIS
+    class, lwIP netif + DHCP client, camera-IP derivation (`.51` from lease),
+    and link-up/down callbacks modelled on `wifi_manager`'s station API.
+  - **`gopro_usb` component** — implements the `camera_driver_t` vtable over
+    Open GoPro HTTP. Handles enable, start/stop recording, status polling,
+    datetime sync, and sleep. Registers one slot with `cam_core`.
+  - **`http_server_wired` component** — thin adapter that calls
+    `http_server_core_start()` then mounts wired-only endpoints (single-camera
+    status, manual start/stop).
+  - **Single-camera web UI** (`apps/wired/web_ui/`) — trimmed variant of the
+    wireless UI using the same shared `/api/*` contract; no pairing flows,
+    no multi-slot management.
+
+### Changed
+- **`shutdown_manager` no longer depends on `open_gopro_ble`.**
+  The BLE-terminate step is now routed through a new `terminate_link` vtable
+  entry in `cam_core`; the BLE driver implements it, RC and USB leave it
+  `NULL`. `shutdown_manager` now depends only on `cam_core` and compiles
+  cleanly into the wired variant.
+- **`gopro_model` promoted to a shared top-level component** at
+  `components/gopro_model/`. Previously lived under
+  `apps/wireless/components/gopro/`. Both the wireless gopro drivers and the
+  new `gopro_usb` wired driver `REQUIRES gopro_model`.
+- **`dev.ps1 -Product <variant>`** now accepts `wired` in addition to
+  `wireless`, stamping `CONFIG_PRODUCT_VARIANT` and building the correct app.
+- **`flash_factory.ps1`** updated to support the wired variant's flash layout
+  and partition offsets.
+- **CI matrix and release workflows** extended with a `wired` variant entry
+  so the build, test, and release pipelines cover both apps.
+  Build artefact is `esp32_gopro_canbus_wired.bin`.
+
+### Internal
+- `cam_core` gains a `terminate_link` vtable slot and a `cam_core_terminate_link()`
+  helper; BLE driver registers its `ble_gap_terminate` implementation there.
+
 ## [1.2.0] - 2026-06-03
 
 ### Internal
@@ -526,7 +574,8 @@ First public release.
 - OTA delivery via GitHub Releases with floating `latest-beta` and
   `latest-stable` tags, proxied through a Cloudflare Worker.
 
-[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.9...v1.1.0
 [1.0.9]: https://github.com/imdacrocker/esp32_gopro_controller/compare/v1.0.8...v1.0.9
