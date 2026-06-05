@@ -14,5 +14,5 @@ direct_dependencies:
 - cherry-embedded/cherryusb
 - idf
 manifest_hash: 913591ff61cd4f1719649599acc7e2ad67bac9e2e21fb4c36e44e0c7213165e2
-target: esp32
+target: esp32s3
 version: 3.0.0

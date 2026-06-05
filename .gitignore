@@ -65,3 +65,4 @@ build/
 /apps/wireless/.vscode
 
 /release/
+/apps/wired/.vscode/settings.json
