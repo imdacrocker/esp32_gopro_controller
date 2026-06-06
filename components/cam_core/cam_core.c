@@ -107,6 +107,9 @@ void cam_core_unregister_slot(int idx)
 
 int cam_core_slot_count(void)
 {
+    /* REVIEW[cam_core:C3]: unlocked read of s_slot_count. Relies on aligned-int read
+     * atomicity; no barrier vs. writers under the lock. Benign in practice,
+     * flagged for consistency review. */
     /* Atomic int read; locking would add nothing useful. */
     return s_slot_count;
 }
@@ -227,6 +230,9 @@ static void start_poll_timer_locked(cam_core_slot_t *sl, int idx)
     esp_timer_handle_t h;
     if (esp_timer_create(&args, &h) == ESP_OK) {
         sl->poll_timer = h;
+        /* REVIEW[cam_core:R1]: esp_timer_start_periodic return value ignored. If start
+         * fails, the slot holds a live-but-never-firing timer and mismatch
+         * correction silently dies for this slot with no log. */
         esp_timer_start_periodic(h, (uint64_t)STATUS_POLL_INTERVAL_MS * 1000ULL);
     } else {
         ESP_LOGE(TAG, "slot %d: failed to create poll timer", idx);
@@ -338,6 +344,9 @@ void cam_core_set_desired_all(desired_recording_t intent)
     unlock();
 }
 
+/* REVIEW[cam_core:C3]: s_auto_control read/written with no lock/atomic/volatile.
+ * Potentially accessed from different cores. Benign on Xtensa in practice;
+ * flagged for a consistency decision (lock vs. _Atomic). */
 bool cam_core_get_auto_control(void)        { return s_auto_control; }
 void cam_core_set_auto_control(bool enabled) { s_auto_control = enabled; }
 
@@ -405,6 +414,13 @@ camera_can_state_t cam_core_get_can_state(int idx)
  * Shutdown helpers
  * ================================================================ */
 
+/* REVIEW[cam_core:C1]: snapshot-pointer-then-unlock-then-call pattern. This is the
+ * exact TOCTOU pattern poll_timer_cb documents removing: a concurrent
+ * detach/teardown could null sl->driver or free driver_ctx between the
+ * unlock and the call below (use-after-free). Same pattern in
+ * cam_core_invoke_terminate_link and cam_core_teardown_slot. Currently
+ * safe only because the shutdown path is single-threaded — decide whether
+ * to harden or document that assumption. */
 esp_err_t cam_core_invoke_sleep(int idx)
 {
     if (!valid_idx(idx)) return ESP_ERR_INVALID_ARG;
@@ -460,6 +476,9 @@ void cam_core_teardown_slot(int idx)
     sl->grace_until_us = 0;
     drv               = sl->driver;
     ctx               = sl->driver_ctx;
+    /* REVIEW[cam_core:C2]: sl->driver is not nulled here, so two concurrent teardowns
+     * (or teardown racing unregister) snapshot the same drv/ctx and call
+     * drv->teardown(ctx) twice → double-free if teardown frees ctx. */
     unlock();
 
     if (to_stop) {

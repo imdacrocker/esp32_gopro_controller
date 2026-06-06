@@ -37,6 +37,16 @@ static uint64_t          s_total_written;
 static uint64_t          s_total_dropped;
 static uint64_t          s_tail_byte_abs;    /* monotonic absolute position of s_tail; ticks per evicted byte */
 
+/* REVIEW[log_ring:M1] (minor/contract): s_mtx is a non-recursive mutex taken
+ * inside the esp_log vprintf hook (log_tee) with portMAX_DELAY. Two standing
+ * invariants this creates are worth documenting/guarding:
+ *   (a) No code may call ESP_LOG* while holding s_mtx — that would re-enter
+ *       log_tee and self-deadlock. Currently respected (no logging happens
+ *       under the lock), but it's an easy trap for future edits.
+ *   (b) If ESP_LOG* is ever invoked from ISR context, xSemaphoreTake() here is
+ *       illegal and will crash. ESP_LOG-from-ISR is already unsupported, but
+ *       the hook turns it into a hard fault rather than the usual benign path.
+ *       Consider a xPortInIsrContext() bail-out at the top of log_tee. */
 static SemaphoreHandle_t s_mtx;
 static atomic_bool       s_enabled    = true;   /* start ON to catch pre-NVS boot logs */
 static atomic_bool       s_initialized = false;
@@ -114,6 +124,21 @@ static size_t strip_ansi_inplace(char *buf, size_t n)
 
 static int log_tee(const char *fmt, va_list args)
 {
+    /* Decide UART echo from the FIRST char of the assembled format string,
+     * before doing any formatting work. That char is always a literal: the
+     * level letter, or ESC (0x1b) for colored INFO/WARN/ERROR. DEBUG/VERBOSE
+     * never carry color in ESP-IDF, so they always start with 'D'/'V' — which
+     * is exactly the non-echoed set. (fmt[0] == buf[0] for the same reason,
+     * so this matches the previous post-vsnprintf test.) */
+    bool echo_to_uart = (fmt[0] != 'D' && fmt[0] != 'V');
+
+    /* Capture disabled (the default): skip all formatting. Echo INFO/WARN/ERROR
+     * straight through with the original fmt+args; drop DEBUG/VERBOSE entirely
+     * rather than vsnprintf them just to discard the result. */
+    if (!atomic_load(&s_enabled)) {
+        return echo_to_uart ? vprintf(fmt, args) : 0;
+    }
+
     char buf[LINE_BUF_BYTES];
 
     va_list copy;
@@ -128,18 +153,10 @@ static int log_tee(const char *fmt, va_list args)
         n = (int)sizeof(buf) - 1;
     }
 
-    /* Decide UART echo from the ORIGINAL buf before stripping. For colored
-     * output INFO/WARN/ERROR start with ESC (0x1b) while DEBUG/VERBOSE start
-     * with the level letter (no leading color); both cases agree with the
-     * `!= 'D' && != 'V'` test below. */
-    bool echo_to_uart = (buf[0] != 'D' && buf[0] != 'V');
-
-    if (atomic_load(&s_enabled)) {
-        size_t ring_n = strip_ansi_inplace(buf, (size_t)n);
-        if (s_mtx && xSemaphoreTake(s_mtx, portMAX_DELAY) == pdTRUE) {
-            ring_write_locked(buf, ring_n);
-            xSemaphoreGive(s_mtx);
-        }
+    size_t ring_n = strip_ansi_inplace(buf, (size_t)n);
+    if (s_mtx && xSemaphoreTake(s_mtx, portMAX_DELAY) == pdTRUE) {
+        ring_write_locked(buf, ring_n);
+        xSemaphoreGive(s_mtx);
     }
 
     /* UART echo uses the original fmt+args, so colors are preserved on the

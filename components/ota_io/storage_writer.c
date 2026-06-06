@@ -60,6 +60,13 @@ esp_err_t storage_writer_begin(const char *expected_sha_hex,
         return ESP_OK;
     }
 
+    /* Invalidate the stored SHA BEFORE the erase below destroys the partition
+     * contents. Otherwise an aborted write would leave a stale SHA that lets a
+     * re-upload of the previous image SHA-skip against an erased partition (and
+     * a corrupt LittleFS has no bootloader-rollback net). finish() re-stores it
+     * on success. */
+    ota_io_nvs_sha_delete(part->label);
+
     /* Erase exactly the range we'll touch (rounded up to sector size). */
     size_t erase_size = ((expected_size + ERASE_SECTOR - 1) / ERASE_SECTOR) * ERASE_SECTOR;
     if (erase_size > part->size) erase_size = part->size;

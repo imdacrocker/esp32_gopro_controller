@@ -77,8 +77,13 @@ void ble_core_stop_discovery(void);
 esp_err_t ble_core_connect_by_addr(const ble_addr_t *addr);
 
 /*
- * ATT Write Without Response (non-blocking).
- * Safe to call from any task — routed through the NimBLE event queue.
+ * ATT Write Request (write-WITH-response). The OpenGoPro command/settings/query
+ * characteristics are declared "Write", and Hero13+ silently drop Write Commands
+ * on those handles — so this issues a Write Request. GoPro responses still arrive
+ * via notifications; the ATT write response only confirms receipt.
+ *
+ * Non-blocking from the caller's view — queued to the NimBLE host task, so it is
+ * safe to call from any task. See ble_gatt_write.c.
  */
 esp_err_t ble_core_gatt_write(uint16_t conn_handle, uint16_t attr_handle,
                                const uint8_t *data, uint16_t len);

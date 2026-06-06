@@ -7,6 +7,7 @@
  */
 
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -336,8 +337,20 @@ esp_err_t rc_send_sleep(int slot)
 
 /* ---- Sync time all handler (called from work task on RC_CMD_SYNC_TIME_ALL) */
 
-void rc_handle_sync_time_all(void)
+/* Single-flight guard so repeated time-sets don't spawn stacking tasks. */
+static atomic_bool s_datetime_busy = false;
+
+/*
+ * Datetime sync runs on its OWN short-lived task, not the work task, because
+ * each rc_send_datetime() makes a blocking HTTP call (up to RC_HTTP_TIMEOUT_MS).
+ * Doing that on the work task would stall the per-slot UDP keepalives the entire
+ * RC fleet depends on — one slow/unreachable Hero4 during a time-sync could
+ * starve keepalives to every other camera and drop healthy ones. (Mirrors the
+ * shutdown-sleep HTTP path, which is on its own task for the same reason.)
+ */
+static void datetime_sync_task(void *arg)
 {
+    (void)arg;
     int considered = 0;
     int skipped_not_ready = 0;
     for (int i = 0; i < CAMERA_MAX_SLOTS; i++) {
@@ -353,4 +366,28 @@ void rc_handle_sync_time_all(void)
     }
     ESP_LOGI(TAG, "sync_time_all (HTTP): %d RC slot(s) considered, %d not ready",
              considered, skipped_not_ready);
+    atomic_store(&s_datetime_busy, false);
+    vTaskDelete(NULL);
+}
+
+/*
+ * Called on the work task (RC_CMD_SYNC_TIME_ALL).  Spawns datetime_sync_task and
+ * returns immediately so the work task is never blocked on HTTP — keepalives
+ * keep flowing to the whole fleet while the (slower) HTTP datetime sends run on
+ * the dedicated task.  Runs one level below the work task priority so it can't
+ * preempt keepalive dispatch.
+ */
+void rc_handle_sync_time_all(void)
+{
+    if (atomic_exchange(&s_datetime_busy, true)) {
+        ESP_LOGI(TAG, "sync_time_all: datetime sync already running — skipping");
+        return;
+    }
+    BaseType_t ok = xTaskCreate(datetime_sync_task, "rc_datetime",
+                                RC_WORK_TASK_STACK_BYTES / sizeof(StackType_t),
+                                NULL, RC_WORK_TASK_PRIORITY - 1, NULL);
+    if (ok != pdPASS) {
+        ESP_LOGE(TAG, "sync_time_all: datetime task create failed");
+        atomic_store(&s_datetime_busy, false);
+    }
 }

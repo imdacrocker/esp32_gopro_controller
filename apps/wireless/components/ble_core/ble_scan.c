@@ -26,6 +26,19 @@ volatile bool s_discovering = false;
  */
 #define EDONE_RESCAN_DELAY_MS 3000
 
+/*
+ * Connection-attempt timeout.  We only call ble_gap_connect() after seeing the
+ * peer advertise, so the link normally establishes in well under a second.  A
+ * finite ceiling (vs BLE_HS_FOREVER) ensures that a peer which vanishes
+ * mid-connect — battery dies, walks out of range — eventually fires
+ * BLE_GAP_EVENT_CONNECT with status != 0.  That path clears s_connecting and
+ * resumes the background scan; BLE_HS_FOREVER would instead wedge s_connecting
+ * true forever and silently stall reconnect for every camera.  This bounds the
+ * GATT connection handshake, not the advertisement search (which is the
+ * separate discovery-scan duration).
+ */
+#define CONNECT_TIMEOUT_MS 30000
+
 static struct ble_npl_callout s_rescan_co;
 
 static void rescan_co_cb(struct ble_npl_event *ev)
@@ -84,8 +97,12 @@ static int scan_event_cb(struct ble_gap_event *event, void *arg)
                 s_connecting = true;
                 ble_gap_disc_cancel();
 
+                /* Finite timeout (not BLE_HS_FOREVER): if the peer vanishes
+                 * mid-connect, BLE_GAP_EVENT_CONNECT fires with status != 0,
+                 * which clears s_connecting and resumes the background scan.
+                 * See CONNECT_TIMEOUT_MS. */
                 int rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &event->disc.addr,
-                                         BLE_HS_FOREVER, NULL,
+                                         CONNECT_TIMEOUT_MS, NULL,
                                          connection_event_cb, NULL);
                 if (rc != 0) {
                     ESP_LOGE(TAG, "connect failed: rc=%d", rc);
@@ -274,7 +291,10 @@ static void do_connect(struct ble_npl_event *ev)
     s_discovering = false;
     ble_gap_disc_cancel();
 
-    int rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &addr, BLE_HS_FOREVER,
+    /* Finite timeout — see CONNECT_TIMEOUT_MS and the background-scan path. On
+     * timeout, BLE_GAP_EVENT_CONNECT(status != 0) clears s_connecting and
+     * resumes the background scan. */
+    int rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &addr, CONNECT_TIMEOUT_MS,
                              NULL, connection_event_cb, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "connect_by_addr failed: rc=%d", rc);

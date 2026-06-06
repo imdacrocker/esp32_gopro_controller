@@ -29,6 +29,11 @@ static const char *TAG = "http_api_cameras";
 
 /* ---- Helpers ------------------------------------------------------------- */
 
+/* NOTE: the 8 identification-only models added to camera_types.h (HERO_2014,
+ * FUSION, HERO7_WHITE, HERO7_SILVER, MAX, HERO_2024, MISSION1, MISSION1_PRO) are
+ * intentionally NOT listed below — those cameras are not supported yet, so they
+ * deliberately render as "Unknown" in the UI. Add cases here only when/if
+ * control support for them is implemented. */
 static const char *model_name_str(camera_model_t model)
 {
     switch (model) {
@@ -245,6 +250,12 @@ static esp_err_t handler_shutter(httpd_req_t *req)
     if (cJSON_IsNumber(slot_item)) {
         int external = (int)cJSON_GetNumberValue(slot_item);
         int slot = external - 1;   /* API is 1-based; internal is 0-based */
+        /* REVIEW[http_server_wireless:M2] (minor): no validation that `slot` is
+         * in range or configured. cam_core_set_desired_slot() silently ignores
+         * an invalid/unregistered index (so it's safe), but the handler still
+         * reports {"dispatched":1} and logs success for a bogus slot —
+         * misleading vs. the remove/reorder handlers, which 400 on bad input.
+         * Consider validating against cam_core_slot_active() and returning 400. */
         cam_core_set_desired_slot(slot, intent);
         dispatched = 1;
         ESP_LOGI(TAG, "shutter %s → Cam %d", record ? "start" : "stop", external);

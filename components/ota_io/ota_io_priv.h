@@ -27,3 +27,12 @@ bool ota_io_nvs_sha_matches(const char *partition_label, const char *expected_he
  * the calling write — a missing NVS record just means SHA-skip won't fire
  * next time. */
 void ota_io_nvs_sha_store(const char *partition_label, const char *sha_hex);
+
+/*
+ * Delete the stored SHA for the given partition label. Best-effort. Called at
+ * the start of a write (before the partition is erased) so that an aborted or
+ * failed write cannot leave a stale SHA record — which would otherwise let a
+ * later re-upload of the previous image SHA-skip against an erased partition.
+ * The record is re-stored by *_writer_finish() on success.
+ */
+void ota_io_nvs_sha_delete(const char *partition_label);

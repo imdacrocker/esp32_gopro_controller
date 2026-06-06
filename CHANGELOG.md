@@ -35,6 +35,80 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   - **Single-camera web UI** (`apps/wired/web_ui/`) — trimmed variant of the
     wireless UI using the same shared `/api/*` contract; no pairing flows,
     no multi-slot management.
+- **Expanded the internal GoPro model table** — added 8 more GoPro models
+  (HERO 2014, Fusion, HERO7 White, HERO7 Silver, the original Max, HERO 2024,
+  MISSION1, and MISSION1 Pro) to the model enum and the "is a GoPro" check,
+  cross-referenced against the hypoxic GoPro-Research camera database. These are
+  recognised for **identification only** and are intentionally **not yet** wired
+  into control, the capability predicates, or the web-UI model-name display —
+  they remain unsupported pending hardware verification.
+
+### Fixed
+- **OTA: a failed re-upload could leave a stale "upload succeeded" flag.**
+  The app/UI upload handlers now clear their success flag at the start of each
+  attempt, before the inactive partition is erased. Previously, retrying an
+  upload that then failed mid-stream could leave the flag set over a
+  partially-erased slot, so a subsequent commit would boot-switch to a corrupt
+  partition (the bootloader's image verification + rollback prevented an actual
+  brick, but the behaviour was wrong).
+- **`/api/logging-state` now bounds-guards its state-string lookup**, returning
+  `"unknown"` for any out-of-range value instead of risking an out-of-bounds
+  read.
+- **Log capture: avoid formatting discarded log lines when capture is off.**
+  With the in-RAM log ring disabled (the default), `DEBUG`/`VERBOSE` lines are
+  no longer run through `vsnprintf` only to be thrown away — the tee now
+  short-circuits before formatting, echoing `INFO`/`WARN`/`ERROR` to the UART
+  and dropping the rest. Removes wasted CPU on the common path.
+- **OTA: a failed upload could let a later re-upload skip writing against an
+  erased partition.** The SHA-skip optimisation records each image's hash in
+  NVS and skips re-writing an identical image. The stored hash is now cleared
+  at the start of every app/UI write — before the partition is erased — instead
+  of only being refreshed on success. Previously, an aborted write left the
+  previous image's hash in NVS even though the partition had already been
+  erased, so re-uploading that image would skip the write and commit/serve a
+  corrupt partition. Especially relevant for the UI/storage image, which has no
+  bootloader-rollback safety net.
+- **Wi-Fi: camera tracking could break after repeated AP/STA switches.** The
+  SoftAP station table is now cleared when the AP (re)starts and reuses an
+  existing entry on re-association instead of always allocating a new one.
+  Previously, the AP/STA bounce used during BLE-camera Wi-Fi pairing left stale
+  entries behind (no per-station disconnect event is emitted when the AP is
+  stopped), which over repeated cycles filled the fixed-size table and stopped
+  newly-connected RC-emulation cameras from being tracked (their IP lookups
+  returned 0).
+- **Recovery: same OTA stale-upload-flag fix as the main app**, plus a UI-only
+  commit in recovery no longer forces a boot switch to a possibly-appless
+  `ota_0` (which could bounce the device back into recovery) — it now reports a
+  no-reboot UI-only update, matching the main app's behaviour.
+- **BLE: a camera vanishing mid-connect no longer stalls reconnect for the
+  whole fleet.** BLE connection attempts now use a 30 s timeout instead of
+  waiting forever. Previously, if a camera advertised and then disappeared
+  (battery died, moved out of range) just as the controller tried to connect,
+  the in-progress flag stayed set indefinitely and silently blocked automatic
+  reconnection of every other camera until reboot. On timeout the controller
+  now resumes its background reconnect scan as normal.
+- **BLE: hardened the connect/encrypt callbacks** against a rare case where the
+  connection descriptor could not be resolved, which previously passed an
+  uninitialised peer address to internal handlers. The callback is now skipped
+  cleanly in that case.
+- **Pairing (BLE Hero6/7/8): out-of-memory during the Wi-Fi pair-complete step
+  no longer crashes.** If the HTTP client fails to allocate, the controller now
+  restores Wi-Fi AP mode and fails the pairing attempt cleanly instead of
+  dereferencing a null handle.
+- **Wi-Fi RC: setting the time no longer risks dropping cameras.** The HTTP
+  date/time push to Hero4 cameras now runs on its own task instead of the shared
+  RC work loop. Previously, when GPS time was acquired (or time was set in the
+  UI), a single slow or unreachable Hero4 could block the loop that sends the
+  keepalives every RC camera relies on — starving the whole fleet for several
+  seconds and dropping otherwise-healthy cameras. Keepalives now keep flowing
+  during time sync.
+- **Removing a camera no longer disrupts the auto-recording correction of the
+  others.** When a camera was deleted while other cameras were connected, the
+  internal "make the camera's recording state match what was commanded" poll
+  could get misrouted to the wrong camera (or silently stop) for the remaining
+  cameras, because their poll timers weren't rebound to their new positions
+  after the list was compacted. The remaining cameras' polls are now correctly
+  re-established. Direct start/stop commands were never affected.
 
 ### Changed
 - **`shutdown_manager` no longer depends on `open_gopro_ble`.**
@@ -53,10 +127,15 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
 - **CI matrix and release workflows** extended with a `wired` variant entry
   so the build, test, and release pipelines cover both apps.
   Build artefact is `esp32_gopro_canbus_wired.bin`.
+- **Updated sdkconfig.defaults** for both the wired and wireless variants, enabled the Wifi and CAN in iRam, cleaned up old unused brownout settings
 
 ### Internal
 - `cam_core` gains a `terminate_link` vtable slot and a `cam_core_terminate_link()`
   helper; BLE driver registers its `ble_gap_terminate` implementation there.
+- **Removed the dead `gopro_wifi_rc/diagnostic.c`** network-probe tool
+  (`gopro_wifi_rc_diagnose()`). It was a temporary hardware bring-up aid no
+  longer dispatched by any code path, but still compiled into the firmware.
+  Dropped from the build, public header, and component README.
 
 ## [1.2.0] - 2026-06-03
 

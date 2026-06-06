@@ -63,6 +63,13 @@ esp_err_t ota_writer_begin(const char *expected_sha_hex,
         return ESP_OK;
     }
 
+    /* Invalidate the stored SHA BEFORE esp_ota_begin() erases the partition.
+     * If this write is later aborted/fails, the erased slot no longer holds the
+     * previous image, so leaving its SHA in NVS would let a re-upload of that
+     * image SHA-skip against erased flash and commit a corrupt boot target.
+     * finish() re-stores the SHA on success. */
+    ota_io_nvs_sha_delete(part->label);
+
     psa_status_t ps = psa_crypto_init();
     if (ps != PSA_SUCCESS) {
         ESP_LOGE(TAG, "psa_crypto_init failed: %ld", (long)ps);
@@ -105,6 +112,11 @@ esp_err_t ota_writer_write(ota_writer_t *w, const void *data, size_t len)
                  w->bytes_written, esp_err_to_name(err));
         return err;
     }
+    /* REVIEW[ota_io:M1] (minor): psa_hash_update return value ignored (same in
+     * storage_writer_write). Fails safe — a hashing error yields a wrong digest
+     * that finish() catches as ESP_ERR_INVALID_CRC, rejecting the image — but
+     * checking it would surface the real cause instead of a misleading SHA
+     * mismatch. */
     psa_hash_update(&w->sha, data, len);
     w->bytes_written += len;
     return ESP_OK;

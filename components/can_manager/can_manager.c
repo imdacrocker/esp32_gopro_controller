@@ -399,6 +399,14 @@ static bool IRAM_ATTR on_state_change_isr(twai_node_handle_t handle,
         s_can_tx_enabled = true;
     }
 
+    /* REVIEW[can_manager:R1]: if this enqueue silently fails (s_state_queue
+     * full), the BUS_OFF-entry event is lost and recovery_task never calls
+     * twai_node_recover() — the controller stays bus-off and s_can_tx_enabled
+     * stays false permanently (only a *leaving*-BUS_OFF transition re-opens
+     * the gate, and we never leave). The init-comment acknowledges this with
+     * depth-8 headroom, but the failure is unmitigated: consider latching a
+     * "recover pending" flag the recovery_task can poll, so a dropped event
+     * can't strand the node. */
     BaseType_t higher_prio_woken = pdFALSE;
     xQueueSendFromISR(s_state_queue, edata, &higher_prio_woken);
     return higher_prio_woken == pdTRUE;
@@ -614,6 +622,11 @@ static void load_channels(void)
 
 void can_manager_register_callbacks(const can_manager_callbacks_t *cbs)
 {
+    /* REVIEW[can_manager:C2]: no NULL guard (deref crash on bad caller), and
+     * s_cbs is read unsynchronized by rx_task / the timer callbacks. Relies on
+     * an unenforced "register before can_manager_init() starts the tasks"
+     * ordering — a re-register after boot could be a torn read. Low risk;
+     * document the ordering contract or assert(cbs). */
     s_cbs = *cbs;
 }
 
@@ -833,6 +846,17 @@ esp_err_t can_manager_set_channel(can_channel_id_t ch, can_channel_t value)
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* REVIEW[can_manager:C1] (severity lowered — see note): no collision check
+     * against the other channels at THIS layer. If a caller assigns one channel
+     * the same (id, ide) tuple as another, the rx_task linear scan dispatches
+     * only the first match (RX_HANDLERS order) and the later channel silently
+     * never receives — e.g. shutdown frames swallowed by the logging handler.
+     * MITIGATION: the sole production caller, http_server_core/api_settings.c
+     * handler_post_can, runs a full cross-channel collision check on the merged
+     * set before calling this. So the web path is safe; this is now a
+     * defense-in-depth gap (a future/internal caller could still collide).
+     * Consider rejecting a duplicate tuple here too, or document this as a
+     * deliberately-unguarded internal setter. */
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
         ESP_LOGE(TAG, "nvs_open failed");

@@ -6,7 +6,6 @@ idf_component_register(
         "status.c"
         "udp.c"
         "settings.c"
-        "diagnostic.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -20,5 +19,4 @@ idf_component_register(
         freertos
         lwip
         esp_wifi
-        esp_netif
 )

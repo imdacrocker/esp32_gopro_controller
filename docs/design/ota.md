@@ -273,6 +273,26 @@ Activates the staged update. Both `upload-app` and `upload-ui` must have complet
 
 **Side effects:** `esp_ota_set_boot_partition(ota_0)`, then `esp_restart()`.
 
+> **Implementation invariant — invalidate the success marker *before* the
+> destructive step.** Two kinds of "this image is good" markers gate the flow:
+> the per-session upload flags (`s_app_uploaded` / `s_ui_uploaded`) that gate
+> `commit`, and the per-partition SHA recorded in NVS that drives SHA-skip. Both
+> must be cleared **before** the operation that destroys the partition's current
+> contents — the `esp_ota_begin()` / `esp_partition_erase_range()` inside
+> `*_writer_begin()` — and re-asserted only after the new write verifies.
+> Otherwise an aborted re-upload (which has *already* erased the slot) leaves a
+> stale marker behind, and a later `commit` — or a SHA-skip of that same image —
+> activates a partition that no longer holds valid data. This applies
+> identically in three places: `http_server_core/api_ota.c` (the session flags),
+> `ota_io` (the NVS SHA record, cleared in `*_writer_begin` via
+> `ota_io_nvs_sha_delete`), and recovery's `recovery_http.c`. Any future uploader
+> (e.g. the wired variant) must preserve it.
+>
+> A UI-only `commit` (storage uploaded, no new app) must **not** boot-switch:
+> there is no new app to activate, and forcing a switch to `ota_0` can target a
+> slot with no valid app. Reply `{"rebooting": false, "reason":
+> "ui-only-update"}` — the storage image is already live.
+
 ---
 
 ### `POST /api/ota/boot-main` *(recovery only)*
@@ -325,6 +345,7 @@ The `available` list is hardcoded for now. Compile-time flag `CONFIG_OTA_ALLOW_D
 | New main app boots OK but is buggy | User notices after rollback window expired | "Reboot to recovery" button in UI → `set_boot_partition(factory)` → user re-uploads previous version |
 | Main app marks valid then crashes hard, no rollback | Rollback already disarmed; main app keeps booting and crashing | **Last-resort path.** Currently: USB recovery via `flash-usb` from `dev.ps1`. Future: hardware boot button (§15). |
 | Storage SHA matches but app SHA doesn't (or vice versa) | Per-blob SHA check at upload time | Whichever blob mismatches is rejected; the other can still be skipped or written. `commit` proceeds if all uploaded blobs validated. |
+| Re-upload of a previously-good image aborts mid-stream | Success markers cleared before the erase (see invariant above) | The erased slot leaves no stale upload flag and no stale NVS SHA, so `commit` returns 409 and a later SHA-skip won't fire against the erased partition |
 | Cloudflare Worker is down | Manifest fetch fails in browser | UI shows "Update server unreachable. Try again later, or upload manually." Device is unaffected. |
 | User on SoftAP without internet on phone | Manifest fetch fails | UI shows "Phone needs internet. Keep cellular data on, or use a laptop with another connection." |
 

@@ -20,10 +20,8 @@ Implements `camera_driver_t` for GoPro cameras using the legacy "WiFi Smart Remo
 ## Dependencies
 
 ```
-REQUIRES: camera_manager, can_manager, wifi_manager, esp_timer, freertos, lwip, esp_wifi, esp_netif
+REQUIRES: camera_manager, can_manager, wifi_manager, esp_timer, freertos, lwip, esp_wifi
 ```
-
-`esp_netif` was added for the diagnostic component (`diagnostic.c`) which uses the lwIP ping API; the production paths only need it transitively.
 
 **Precondition:** `camera_manager_init()` must be called before `gopro_wifi_rc_init()`.
 `gopro_wifi_rc_init()` must be called before `wifi_manager_set_callbacks()` and `wifi_manager_init()` — it sets up the queues and tasks that the station callbacks post into.
@@ -136,10 +134,6 @@ bool gopro_wifi_rc_is_managed_mac(const uint8_t mac[6]);
  * is internally a no-op until can_manager reports session-synced UTC AND
  * gopro_model_supports_http_datetime() returns true for the slot's model. */
 void gopro_wifi_rc_sync_time_all(void);
-
-/* DEBUG — runs ICMP/TCP/HTTP/UDP probes against a camera and logs results.
- * Not currently dispatched; kept for future hardware investigations. */
-void gopro_wifi_rc_diagnose(const uint8_t mac[6], uint32_t ip);
 ```
 
 All station callbacks and `sync_time_all` post to `s_work_queue` and return immediately — safe to call from the WiFi event task.
@@ -226,7 +220,6 @@ wol_retry_timer fires every 2 s
 | `command.c` | Shutter task; `rc_http_get` (minimal — used only by datetime); `rc_send_datetime` (HTTP) |
 | `status.c` | UDP status-poll handler; `rc_parse_st_response()` (binary b13/b14/b15); `rc_parse_cv_response()` (length-prefixed firmware + model name → ctx, posts CMD_APPLY_CV) |
 | `udp.c` | Single bound socket on 8383; `rc_send_keepalive`, `rc_send_st`, `rc_send_sh`, `rc_send_cv`, `rc_send_wol`; RX dispatch (0x5F / `st` / `SH` / `cv`) |
-| `diagnostic.c` | `gopro_wifi_rc_diagnose()` — ICMP / TCP port scan / HTTP probe / UDP opcode probe orchestrator. Compiled in but not currently dispatched; kept for future hardware investigations. |
 | `settings.c` | Placeholder — settings sub-commands not yet implemented |
 
 `gopro_model_from_name()` lives in `gopro/gopro_model.c` (parent component), not here.
@@ -235,14 +228,14 @@ wol_retry_timer fires every 2 s
 
 ## Task Affinity
 
-All three production tasks pinned to **core 0** to share the WiFi/lwIP stack without cross-core cache invalidation. The diagnostic task spawns on demand and self-deletes.
+All three production tasks pinned to **core 0** to share the WiFi/lwIP stack without cross-core cache invalidation.
 
 | Task | Priority | Stack | Role |
 |---|---|---|---|
 | `rc_work_task` | 5 | 4 KB | Station lifecycle, promote, apply_cv, keepalive watchdog (with cv-retry), status poll, datetime sync |
 | `rc_shutter_task` | 7 | 4 KB | Shutter START/STOP — higher priority to minimise latency |
 | `rc_udp_rx_task` | 4 | 2 KB | `recvfrom` on the shared 8383 socket; updates `last_response_tick`; dispatch by opcode (0x5F / `st` / `SH` / `cv`) |
-| `rc_diag` | 5 | 8 KB | One-shot diagnostic orchestrator (only when `gopro_wifi_rc_diagnose` is called) |
+| `rc_datetime` | 4 | 4 KB | One-shot HTTP date/time push to Hero4 cameras on time-sync (off the work task so keepalives keep flowing) |
 
 ---
 
