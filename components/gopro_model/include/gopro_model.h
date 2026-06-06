@@ -19,6 +19,13 @@
 
 #include "camera_types.h"
 
+/* REVIEW[gopro_model:M1] (minor/maintainability): this file is several
+ * hand-synced enumerations of camera_model_t. `gopro_model_is_gopro` must
+ * stay a superset of every model; a model added to the enum but forgotten
+ * here silently reports "not a GoPro". The explicit-enumeration design is
+ * deliberate (header §), but there's no compile-time/host-test guard that
+ * is_gopro covers the enum. Consider a host-side unit test that asserts every
+ * enumerated model returns true from is_gopro, so drift is caught in CI. */
 /** True if the model is any known GoPro camera (RC-emulation or BLE-control). */
 static inline bool gopro_model_is_gopro(camera_model_t model)
 {
@@ -47,7 +54,17 @@ static inline bool gopro_model_is_gopro(camera_model_t model)
         || model == CAMERA_MODEL_GOPRO_HERO12_BLACK
         || model == CAMERA_MODEL_GOPRO_MAX2
         || model == CAMERA_MODEL_GOPRO_HERO13_BLACK
-        || model == CAMERA_MODEL_GOPRO_LIT_HERO;
+        || model == CAMERA_MODEL_GOPRO_LIT_HERO
+        /* Identification-only additions (capability predicates intentionally
+         * exclude these pending hardware verification — see camera_types.h). */
+        || model == CAMERA_MODEL_GOPRO_HERO_2014
+        || model == CAMERA_MODEL_GOPRO_FUSION
+        || model == CAMERA_MODEL_GOPRO_HERO7_WHITE
+        || model == CAMERA_MODEL_GOPRO_HERO7_SILVER
+        || model == CAMERA_MODEL_GOPRO_MAX
+        || model == CAMERA_MODEL_GOPRO_HERO_2024
+        || model == CAMERA_MODEL_GOPRO_MISSION1_PRO
+        || model == CAMERA_MODEL_GOPRO_MISSION1;
 }
 
 /**

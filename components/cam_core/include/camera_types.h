@@ -63,6 +63,24 @@ typedef enum {
     CAMERA_MODEL_GOPRO_HERO13_BLACK = 65,
     CAMERA_MODEL_GOPRO_LIT_HERO     = 70,
 
+    /* Identification-only models — recognised so logs/UI show the real model
+     * and the cv/info probe doesn't fall back to HERO_LEGACY_RC.  Model numbers
+     * + codenames cross-checked against the hypoxic GoPro-Research camera
+     * database.  IMPORTANT: these are deliberately NOT wired into any
+     * gopro_model.h capability predicate (uses_rc_emulation / uses_ble_control /
+     * uses_usb_control) — transport/control support is unverified on hardware.
+     * They are added to gopro_model_is_gopro only.  Wire capabilities in a
+     * follow-up once a unit is tested (HERO 2024 is the most likely USB-control
+     * candidate: same Ambarella H22 as LIT_HERO). */
+    CAMERA_MODEL_GOPRO_HERO_2014    = 14,  /* HD3.20,  codename "Bolina"          */
+    CAMERA_MODEL_GOPRO_FUSION       = 22,  /* FS1.04,  codename "Superbank" (360) */
+    CAMERA_MODEL_GOPRO_HERO7_WHITE  = 32,  /* H18.02,  codename "Boomer"          */
+    CAMERA_MODEL_GOPRO_HERO7_SILVER = 33,  /* H18.03,  codename "Badger"          */
+    CAMERA_MODEL_GOPRO_MAX          = 51,  /* H19.03,  codename "Coconuts" (360)  */
+    CAMERA_MODEL_GOPRO_HERO_2024    = 66,  /* H24.03,  codename "Fraction"        */
+    CAMERA_MODEL_GOPRO_MISSION1_PRO = 69,  /* H26.01,  codename "Sandbar"         */
+    CAMERA_MODEL_GOPRO_MISSION1     = 71,  /* H26.02,  codename "Sandbar_Lite"    */
+
     /* Future manufacturer blocks: 1000+ */
 } camera_model_t;
 
@@ -96,6 +114,10 @@ mismatch_action_t mismatch_step(desired_recording_t       desired,
                                  camera_recording_status_t actual,
                                  bool                      grace_period_active);
 
+/* REVIEW[cam_core:A1]: reorder is a wireless-only concept (only caller is
+ * camera_manager_reorder_slots), yet this lives in cam_core. Defensible to
+ * keep pure-logic test files together; flagged to decide whether it should
+ * move to the wireless component. */
 /*
  * Pure reorder-permutation validator — returns true iff `order` is a valid
  * permutation of [0, domain_size): exactly `domain_size` entries, each

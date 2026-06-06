@@ -97,6 +97,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
             esp_wifi_set_ps(WIFI_PS_NONE);
             esp_wifi_set_inactive_time(WIFI_IF_AP, 60);
+            /* Drop any stale station entries. esp_wifi_stop() during an AP/STA
+             * bounce (wifi_manager_sta_join) does not emit AP_STADISCONNECTED
+             * for connected cameras, so without this their entries would
+             * linger across the bounce and orphan the table. Cameras
+             * re-announce themselves via AP_STACONNECTED after restart.
+             * Safe here: the event loop is single-threaded, so this runs
+             * before any STACONNECTED for the new AP session. */
+            memset(s_stations, 0, sizeof(s_stations));
             xEventGroupSetBits(s_wifi_events, AP_STARTED_BIT);
             ESP_LOGI(TAG, "AP started, ch=%d", AP_CHANNEL);
             break;
@@ -113,7 +121,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 
         case WIFI_EVENT_AP_STACONNECTED: {
             wifi_event_ap_staconnected_t *ev = event_data;
-            sta_entry_t *slot = alloc_station_slot();
+            /* Reuse an existing same-MAC entry if present, else allocate a
+             * fresh slot. A re-association that wasn't preceded by an
+             * AP_STADISCONNECTED (e.g. a fast reconnect) would otherwise create
+             * a duplicate entry and orphan the table. */
+            sta_entry_t *slot = find_station(ev->mac);
+            if (!slot) slot = alloc_station_slot();
             if (slot) {
                 slot->active  = true;
                 memcpy(slot->mac, ev->mac, 6);

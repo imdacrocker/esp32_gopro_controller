@@ -63,6 +63,20 @@ void ota_io_nvs_sha_store(const char *partition_label, const char *sha_hex)
     nvs_close(h);
 }
 
+void ota_io_nvs_sha_delete(const char *partition_label)
+{
+    nvs_handle_t h;
+    if (nvs_open(OTA_IO_NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    char key[16];
+    nvs_key_for(partition_label, key);
+    /* ESP_ERR_NVS_NOT_FOUND (no prior record) is fine — nothing to clear. */
+    esp_err_t err = nvs_erase_key(h, key);
+    if (err == ESP_OK) {
+        nvs_commit(h);
+    }
+    nvs_close(h);
+}
+
 /* ---- public boot helpers ----------------------------------------------- */
 
 esp_err_t ota_io_commit_pending(char out_label[17])

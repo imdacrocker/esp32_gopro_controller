@@ -103,8 +103,14 @@ static esp_err_t handler_logging_state(httpd_req_t *req)
         [LOGGING_STATE_LOGGING]     = "logging",
     };
     can_logging_state_t state = can_manager_get_logging_state();
+    /* Bounds-guard the table index: default to "unknown" for any value outside
+     * the defined enum range rather than risk an OOB read / NULL-string deref
+     * if can_manager ever gains a new state. */
+    const char *s = ((unsigned)state < (sizeof(state_str) / sizeof(state_str[0])) && state_str[state])
+                        ? state_str[state]
+                        : "unknown";
     char buf[48];
-    snprintf(buf, sizeof(buf), "{\"state\":\"%s\"}", state_str[state]);
+    snprintf(buf, sizeof(buf), "{\"state\":\"%s\"}", s);
     send_json(req, buf);
     return ESP_OK;
 }

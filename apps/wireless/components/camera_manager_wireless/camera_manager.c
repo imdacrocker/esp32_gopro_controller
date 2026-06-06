@@ -685,6 +685,27 @@ esp_err_t camera_manager_remove_slot(int slot)
      * in-flight callbacks. */
     cam_core_teardown_slot(slot);
 
+    /* The compaction below moves each higher slot's embedded cam_core_slot_t
+     * (including core.poll_timer) to a lower index, but cam_core baked the OLD
+     * index into the timer's callback arg — so a moved timer would misroute the
+     * mismatch poll.  Stop the poll timer of every READY slot above the removed
+     * one now and recreate it at the new index after the shift.  This uses
+     * cam_core_slot_set_ready(false) (timer only), NOT teardown, so the live
+     * driver/connection of those still-connected cameras is untouched.
+     * set_ready must run UNLOCKED (it deletes timers whose callbacks take
+     * cam_core's lock), so snapshot which slots were ready first. */
+    int  orig_count;
+    bool was_ready[CAMERA_MAX_SLOTS] = { false };
+    lock();
+    orig_count = s_slot_count;
+    for (int j = slot + 1; j < orig_count; j++) {
+        was_ready[j] = (s_slots[j].wifi_status == WIFI_CAM_READY);
+    }
+    unlock();
+    for (int j = slot + 1; j < orig_count; j++) {
+        if (was_ready[j]) cam_core_slot_set_ready(j, false);
+    }
+
     lock();
 
     /* Erase NVS at the removed slot's original index */
@@ -700,7 +721,8 @@ esp_err_t camera_manager_remove_slot(int slot)
     /* Compact: shift higher slots down by one.  The struct copy moves
      * the embedded cam_core_slot_t along with the wireless fields, so
      * cam_core's registry pointer (&s_slots[i].core, stable) keeps
-     * pointing at the right memory. */
+     * pointing at the right memory.  Poll-timer index rebinding is handled by
+     * the set_ready(false)/set_ready(true) bracket around this block. */
     for (int i = slot; i < s_slot_count - 1; i++) {
         s_slots[i] = s_slots[i + 1];
         /* Tell the driver its slot index changed (for any internal
@@ -729,6 +751,13 @@ esp_err_t camera_manager_remove_slot(int slot)
     /* Unregister the now-empty top slot from cam_core (drops the pointer
      * from its registry so iteration/queries skip it). */
     cam_core_unregister_slot(s_slot_count);
+
+    /* Re-arm the formerly-ready shifted slots at their NEW index (j-1) so a
+     * fresh poll timer is created bound to the correct index.  All such indices
+     * are < the new s_slot_count, i.e. still-registered slots. */
+    for (int j = slot + 1; j < orig_count; j++) {
+        if (was_ready[j]) cam_core_slot_set_ready(j - 1, true);
+    }
 
     ESP_LOGI(TAG, "slot %d: removed; %d slot(s) remain", slot, s_slot_count);
     return ESP_OK;

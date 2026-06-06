@@ -38,7 +38,16 @@ static const char *TAG = "recovery_http";
 static const char *s_html;
 static size_t      s_html_len;
 
-/* Did at least one successful upload happen this session? gates /commit. */
+/*
+ * Did at least one successful upload happen this session? gates /commit.
+ *
+ * Each flag is cleared at the top of its upload handler, before *_writer_begin()
+ * erases the target partition, and set true only after the upload completes (or
+ * is SHA-skipped). This keeps the flag honest: a re-upload that erases the slot
+ * and then fails must not leave a stale "succeeded" flag, or /commit would
+ * boot-switch to a corrupt partition. See docs/design/ota.md §6 (the
+ * "invalidate the success marker before the destructive step" invariant).
+ */
 static bool s_app_uploaded;
 static bool s_ui_uploaded;
 
@@ -317,6 +326,10 @@ static esp_err_t handler_upload_app(httpd_req_t *req)
             "{\"error\":\"X-Size mismatch with Content-Length\"}");
     }
 
+    /* Invalidate any prior success: ota_writer_begin() below erases the slot,
+     * so from here there is no valid app image until this attempt finishes. */
+    s_app_uploaded = false;
+
     ota_writer_t *w = NULL;
     bool skipped = false;
     esp_err_t err = ota_writer_begin(expected_sha, expected_size, &w, &skipped);
@@ -393,6 +406,10 @@ static esp_err_t handler_upload_ui(httpd_req_t *req)
             "{\"error\":\"X-Size mismatch with Content-Length\"}");
     }
 
+    /* Invalidate any prior success: storage_writer_begin() below erases the
+     * slot, so from here there is no valid UI image until this attempt finishes. */
+    s_ui_uploaded = false;
+
     storage_writer_t *w = NULL;
     bool skipped = false;
     esp_err_t err = storage_writer_begin(expected_sha, expected_size, &w, &skipped);
@@ -453,6 +470,16 @@ static esp_err_t handler_commit(httpd_req_t *req)
     if (!s_app_uploaded && !s_ui_uploaded) {
         return send_status_json(req, "409 Conflict",
             "{\"error\":\"no successful upload in this session\"}");
+    }
+
+    /* UI-only update: there's no new app to boot-switch to, and forcing a boot
+     * switch to ota_0 here could target a partition that holds no valid app
+     * (e.g. a fresh device), making the bootloader fall back into recovery.
+     * The storage image is already live, so just reply OK without rebooting.
+     * Mirrors http_server_core's ui-only-update path. */
+    if (!s_app_uploaded) {
+        s_ui_uploaded = false;  /* clear so a later commit isn't a no-op */
+        return send_json(req, "{\"rebooting\":false,\"reason\":\"ui-only-update\"}");
     }
 
     char label[17];

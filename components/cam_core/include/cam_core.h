@@ -20,6 +20,11 @@
 #include "esp_err.h"
 #include "esp_timer.h"   /* esp_timer_handle_t in cam_core_slot_t */
 
+/* REVIEW[cam_core:D1]: the vtable doc comments below still reference pre-split
+ * camera_manager_* entry points (camera_manager_remove_slot,
+ * set_desired_recording_slot/_all, camera_manager_on_wifi_disconnected).
+ * The actual callers are now cam_core_* — update names after the
+ * multi-variant restructure. */
 /* ---- Driver vtable (§8 / §13.5) ---- */
 typedef struct camera_driver camera_driver_t;
 struct camera_driver {

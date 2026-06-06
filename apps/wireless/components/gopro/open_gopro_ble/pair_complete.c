@@ -420,6 +420,16 @@ static void pair_complete_task(void *arg)
         .disable_auto_redirect = true,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    if (!client) {
+        /* OOM — esp_http_client_get_status_code() would deref a NULL handle.
+         * Restore the radio to AP mode and fail the attempt cleanly. */
+        ESP_LOGE(TAG, "slot %d: esp_http_client_init failed (OOM)", slot);
+        wifi_manager_sta_leave();
+        fail_and_cleanup(slot, conn_handle, "HTTP client init failed");
+        release_busy_and_drain();
+        vTaskDelete(NULL);
+        return;
+    }
     esp_err_t herr = esp_http_client_perform(client);
     /* Status is set as soon as headers parse, even if a later body error
      * fires.  Grab it unconditionally so partial-response cases (e.g.

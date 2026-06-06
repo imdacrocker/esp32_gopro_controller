@@ -44,6 +44,16 @@ static const char *TAG = "api_ota";
  * httpd, or a second httpd_handle_t is started in the same process),
  * these statics must move under a mutex or become atomic.
  */
+/*
+ * Each flag is cleared to false at the top of its upload handler, before
+ * *_writer_begin() erases the inactive slot, and set true only after the
+ * upload completes (or is SHA-skipped).  This invariant matters: begin()
+ * erases/invalidates the slot, so a re-upload that fails mid-stream must NOT
+ * leave a stale "succeeded" flag pointing at a now-partial image — otherwise a
+ * following /commit would boot-switch to a corrupt partition.  Resetting at
+ * entry makes the flag always reflect the state of the slot as of the most
+ * recent attempt.
+ */
 static bool s_app_uploaded;
 static bool s_ui_uploaded;
 
@@ -166,6 +176,10 @@ static esp_err_t handler_upload_app(httpd_req_t *req)
     upload_hdrs_t h;
     if (parse_upload_headers(req, &h) != ESP_OK) return ESP_OK; /* response already sent */
 
+    /* Invalidate any prior success: ota_writer_begin() below erases the slot,
+     * so from here on there is no valid app image until this attempt finishes. */
+    s_app_uploaded = false;
+
     ota_writer_t *w = NULL;
     bool skipped = false;
     esp_err_t err = ota_writer_begin(h.sha, h.size, &w, &skipped);
@@ -228,6 +242,11 @@ static esp_err_t handler_upload_ui(httpd_req_t *req)
 {
     upload_hdrs_t h;
     if (parse_upload_headers(req, &h) != ESP_OK) return ESP_OK;
+
+    /* Invalidate any prior success: storage_writer_begin() below erases the
+     * slot, so from here on there is no valid UI image until this attempt
+     * finishes. */
+    s_ui_uploaded = false;
 
     storage_writer_t *w = NULL;
     bool skipped = false;

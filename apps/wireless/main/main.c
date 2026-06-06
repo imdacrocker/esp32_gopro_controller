@@ -138,6 +138,15 @@ void app_main(void)
      * TCP-only — does not touch the radio, safe to do before BLE. */
     http_server_wireless_init();
 
+    /* REVIEW[main:M1] (minor/robustness — intentional tradeoff): rollback is
+     * disarmed here, BEFORE ble_core_init() and can_manager_init() run. A
+     * post-OTA regression that panics inside BLE or CAN bring-up would then
+     * crash-loop with rollback already disarmed (no auto-revert to the previous
+     * good slot). The early placement is deliberate — see the mark_ota_valid()
+     * header: a later soak lost the dev-loop race against the USB-UART reset
+     * when `idf.py monitor` attaches post-OTA. Flagged only so the tradeoff is
+     * visible; moving it after can_manager_init() would widen rollback coverage
+     * at the cost of reintroducing that race. */
     /* Disarm OTA rollback (§11). httpd up = "healthy enough." */
     mark_ota_valid();
 

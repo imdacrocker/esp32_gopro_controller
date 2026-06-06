@@ -46,6 +46,13 @@ static const char *TAG = "shutdown";
 
 static atomic_int        s_state          = ATOMIC_VAR_INIT(SHUTDOWN_STATE_IDLE);
 static SemaphoreHandle_t s_mutex;
+/* REVIEW[shutdown_manager:M1] (minor/latent-coupling): s_failed_mask is a
+ * uint8_t indexed by `1u << slot`, and api_shutdown.c hard-codes `i < 8` when
+ * reading it. Both silently assume CAMERA_MAX_SLOTS <= 8. It's 4 today, but a
+ * future bump past 8 would overflow the mask (1u<<8 truncates to 0 in a
+ * uint8_t) and drop the high slots from the UI with no warning. A
+ * `static_assert(CAMERA_MAX_SLOTS <= 8, ...)` here (CAMERA_MAX_SLOTS is visible
+ * via cam_core.h → camera_types.h) would lock the assumption at compile time. */
 static uint8_t           s_failed_mask;
 static int               s_done_count;
 static int               s_slot_count_at_start;

@@ -45,10 +45,16 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         s_connecting = false;
         if (event->connect.status == 0) {
-            ble_gap_conn_find(event->connect.conn_handle, &desc);
             ESP_LOGI(TAG, "connected: handle=%u", event->connect.conn_handle);
-            if (g_cbs.on_connected) {
-                g_cbs.on_connected(event->connect.conn_handle, desc.peer_id_addr);
+            /* Only deliver the callback if we can resolve the descriptor —
+               guards against a garbage peer_id_addr if the conn vanished. */
+            if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
+                if (g_cbs.on_connected) {
+                    g_cbs.on_connected(event->connect.conn_handle, desc.peer_id_addr);
+                }
+            } else {
+                ESP_LOGW(TAG, "conn_find failed for handle=%u",
+                         event->connect.conn_handle);
             }
             /* Immediately attempt to resume encryption using stored LTK,
                or begin first-time SMP pairing if no bond exists. */
@@ -78,10 +84,14 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
     /* ---------------------------------------------------------------------- */
     case BLE_GAP_EVENT_ENC_CHANGE:
         if (event->enc_change.status == 0) {
-            ble_gap_conn_find(event->enc_change.conn_handle, &desc);
             ESP_LOGI(TAG, "encrypted: handle=%u", event->enc_change.conn_handle);
-            if (g_cbs.on_encrypted) {
-                g_cbs.on_encrypted(event->enc_change.conn_handle, desc.peer_id_addr);
+            if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
+                if (g_cbs.on_encrypted) {
+                    g_cbs.on_encrypted(event->enc_change.conn_handle, desc.peer_id_addr);
+                }
+            } else {
+                ESP_LOGW(TAG, "conn_find failed for handle=%u",
+                         event->enc_change.conn_handle);
             }
         } else {
             ESP_LOGW(TAG, "encryption failed: handle=%u status=%d",

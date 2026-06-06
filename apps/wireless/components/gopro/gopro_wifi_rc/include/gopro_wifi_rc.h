@@ -79,22 +79,3 @@ bool gopro_wifi_rc_is_managed_mac(const uint8_t mac[6]);
  * can_manager before this fires (first valid GPS frame from RaceCapture).
  */
 void gopro_wifi_rc_sync_time_all(void);
-
-/* ---- DIAGNOSTIC (dev-only — not currently dispatched) ------------------- *
- *
- * Spawn a one-shot task that runs a battery of network probes against the
- * camera at (mac, ip) and logs the results to the serial console:
- *   - ICMP ping (5 packets)
- *   - TCP port sweep across common GoPro / general ports
- *   - HTTP/1.1 GET probes on any responding TCP ports against several known
- *     GoPro endpoint paths
- *   - Extra UDP opcode probes (`cv` GET-form 0/1, `wt`); replies are logged
- *     by the existing rc_udp_rx_task
- *
- * Used in 2026-05 to confirm Hero7's STA-mode behaviour (all TCP closed,
- * UDP `cv` works) which led to the cv-based identify path replacing HTTP.
- * Kept compiled-in for future hardware investigations; to wire it back to
- * the /api/rc/add endpoint, swap gopro_wifi_rc_add_camera() for
- * gopro_wifi_rc_diagnose() in components/http_server/api_rc.c.
- */
-void gopro_wifi_rc_diagnose(const uint8_t mac[6], uint32_t ip);
