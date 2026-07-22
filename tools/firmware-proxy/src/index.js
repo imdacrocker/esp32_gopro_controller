@@ -116,13 +116,23 @@ export default {
       });
     }
 
-    // Friendly /<variant>/latest-<channel>/... route, if matched. Falls
-    // through to the github.com pass-through below for any other path
-    // (including the device firmware's direct
-    // <repo>/releases/download/latest-<channel>-<variant>/... requests).
-    const target =
-      rewriteVariantRoute(url.pathname) ??
-      ("https://github.com" + url.pathname + url.search);
+    // Resolve the upstream target. Two — and ONLY two — shapes are served:
+    //   1. Friendly /<variant>/latest-<channel>/... routes (rewritten), and
+    //   2. Direct paths under this repo (release-asset downloads).
+    // Anything else is refused with a 404. This is deliberate: without the
+    // prefix guard the Worker is an OPEN PROXY to github.com — abusers were
+    // routing arbitrary `git clone` traffic (/<owner>/<repo>.git/...) through
+    // it to dodge GitHub's rate limits, burning the 100k/day free quota.
+    let target = rewriteVariantRoute(url.pathname);
+    if (!target) {
+      const inRepo =
+        url.pathname === GITHUB_REPO_PATH ||
+        url.pathname.startsWith(GITHUB_REPO_PATH + "/");
+      if (!inRepo) {
+        return new Response("Not found", { status: 404, headers: CORS_HEADERS });
+      }
+      target = "https://github.com" + url.pathname + url.search;
+    }
 
     const upstream = await fetch(target, {
       method: request.method,
