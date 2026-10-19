@@ -49,20 +49,17 @@ void gopro_control_set_datetime(gopro_ble_ctx_t *ctx)
 
     int year = t.tm_year + 1900;
 
-    uint8_t pkt[13] = {
-        0x0Cu,                            /* GPBS header: general, len=12 */
+    uint8_t pkt[1 + GOPRO_SET_DATETIME_PAYLOAD_LEN] = {
+        GOPRO_SET_DATETIME_PAYLOAD_LEN,   /* GPBS header: general, len=9 */
         GOPRO_CMD_SET_DATE_TIME,          /* command ID */
-        GOPRO_DT_PARAM_DATE,              /* param 1: date */
-        GOPRO_DT_PARAM_DATE_LEN,          /* param 1 length = 4 */
+        GOPRO_DT_PARAM_LEN,               /* param length = 7 */
         (uint8_t)(year >> 8),             /* year high byte */
         (uint8_t)(year & 0xFF),           /* year low byte */
         (uint8_t)(t.tm_mon + 1),          /* month 1-12 */
         (uint8_t)(t.tm_mday),             /* day 1-31 */
-        GOPRO_DT_PARAM_TIME,              /* param 2: time */
-        GOPRO_DT_PARAM_TIME_LEN,          /* param 2 length = 3 */
-        (uint8_t)(t.tm_hour),
-        (uint8_t)(t.tm_min),
-        (uint8_t)(t.tm_sec),
+        (uint8_t)(t.tm_hour),             /* hour 0-23 */
+        (uint8_t)(t.tm_min),              /* minute 0-59 */
+        (uint8_t)(t.tm_sec),              /* second 0-59 */
     };
 
     ESP_LOGI(TAG, "slot %d: SetDateTime (BLE) sending %04d-%02d-%02d %02d:%02d:%02d (tz=UTC%+d)",

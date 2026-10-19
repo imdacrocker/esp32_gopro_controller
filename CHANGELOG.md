@@ -44,6 +44,18 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   they remain unsupported pending hardware verification.
 
 ### Fixed
+- **BLE cameras never had their date/time set.** The `SetDateTime` (0x0D)
+  packet sent over BLE split the value into separate date and time parameters
+  with a type byte in front of each, but GoPro TLV commands have no
+  per-parameter type byte — the camera read the first type byte as a length
+  and rejected every request with INVALID_PARAMETER (status `0x02`). The
+  packet now carries a single 7-byte date+time parameter
+  (`09 0D 07 yy yy mm dd hh mm ss`), matching the Open GoPro spec. This
+  affected both the immediate sync at connect and the deferred sync fired when
+  UTC arrives from the RaceCapture or the web UI. The camera's response to
+  `SetDateTime` is now logged — a rejection appears as a warning instead of a
+  `DEBUG`-only line. Wi-Fi RC and wired cameras use a separate HTTP path and
+  were not affected.
 - **OTA: a failed re-upload could leave a stale "upload succeeded" flag.**
   The app/UI upload handlers now clear their success flag at the start of each
   attempt, before the inactive partition is erased. Previously, retrying an
