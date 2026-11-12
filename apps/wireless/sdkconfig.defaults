@@ -21,8 +21,10 @@ CONFIG_BT_CTRL_PINNED_TO_CORE_1=y
 # Connection capacity: 4 cameras + headroom
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=5
 
-# Bonding storage in NVS
+# Bonding storage in NVS.  Must exceed CAMERA_MAX_SLOTS (4): NimBLE refuses
+# to pair a new peer while the store is full (default capacity is only 3).
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_MAX_BONDS=6
 
 # ATT MTU — request the maximum so GoPro long responses
 # (GetHardwareInfoRsp ~88 bytes) do not fragment

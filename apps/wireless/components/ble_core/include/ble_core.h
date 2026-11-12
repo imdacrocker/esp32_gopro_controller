@@ -89,13 +89,21 @@ esp_err_t ble_core_gatt_write(uint16_t conn_handle, uint16_t attr_handle,
                                const uint8_t *data, uint16_t len);
 
 /*
- * Walk the NimBLE peer-security store and delete any bond whose address is
- * not in keep[0..keep_count-1].
+ * Delete every NimBLE bond whose peer the is_known_addr callback does not
+ * recognise (i.e. bonds left behind by cameras that are no longer in
+ * camera_manager).  Matching is by address value, like is_known_addr.
  *
- * MUST be called before ble_core_init() — not safe after the NimBLE host
- * task has started.
+ * The bond store holds only CONFIG_BT_NIMBLE_MAX_BONDS entries, and NimBLE
+ * refuses to start pairing with a new peer once it is full, so stale bonds
+ * must not be allowed to accumulate.
+ *
+ * Runs automatically once the host syncs (the store is only loaded from NVS
+ * during ble_core_init, so it cannot run earlier).  Call it again after a
+ * camera is removed.  Safe to call from any task — posted to the NimBLE
+ * event queue; a no-op before ble_core_init().  No-op if is_known_addr is
+ * NULL.
  */
-void ble_core_purge_unknown_bonds(const ble_addr_t keep[], int keep_count);
+void ble_core_purge_unknown_bonds(void);
 
 /*
  * Terminate the active connection to addr (if any) and delete its bond.

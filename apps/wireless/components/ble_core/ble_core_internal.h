@@ -31,6 +31,18 @@ void start_scan_if_needed(void);
 void ble_core_scan_init(void);
 
 /*
+ * True once ble_core_init() has initialised the NimBLE port (and with it the
+ * default event queue).  Defined in ble_init.c.
+ */
+extern volatile bool g_port_initialized;
+
+/*
+ * Synchronous body of ble_core_purge_unknown_bonds().  Must run on the
+ * NimBLE host task.  Defined in ble_connect.c, called from on_sync.
+ */
+void ble_core_purge_unknown_bonds_now(void);
+
+/*
  * GAP event handler for all connection-lifecycle events.
  * Defined in ble_connect.c, registered as the callback for ble_gap_connect().
  */

@@ -1,5 +1,6 @@
 #include "ble_core_internal.h"
 
+#include "sdkconfig.h"
 #include "nimble/nimble_port.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
@@ -58,7 +59,16 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
             }
             /* Immediately attempt to resume encryption using stored LTK,
                or begin first-time SMP pairing if no bond exists. */
-            ble_gap_security_initiate(event->connect.conn_handle);
+            int sec_rc = ble_gap_security_initiate(event->connect.conn_handle);
+            if (sec_rc != 0 && sec_rc != BLE_HS_EALREADY) {
+                /* No ENC_CHANGE event follows a failed initiate, so the link
+                   would sit unencrypted until something times out.  Drop it
+                   now so the failure surfaces immediately. */
+                ESP_LOGW(TAG, "security initiate failed: handle=%u rc=%d — terminating",
+                         event->connect.conn_handle, sec_rc);
+                ble_gap_terminate(event->connect.conn_handle,
+                                  BLE_ERR_REM_USER_CONN_TERM);
+            }
         } else {
             ESP_LOGW(TAG, "connect failed: status=%d", event->connect.status);
             start_scan_if_needed();
@@ -141,14 +151,19 @@ int connection_event_cb(struct ble_gap_event *event, void *arg)
 }
 
 /* ---------------------------------------------------------------------------
- * ble_core_purge_unknown_bonds
+ * ble_core_purge_unknown_bonds — runs on the NimBLE host task
  *
- * Must be called before ble_core_init().  Walks the NimBLE peer-security
- * store and deletes any bond not in keep[].
+ * Deletes every bond whose peer is_known_addr() does not recognise.  Matching
+ * is by address value (is_known_addr ignores the address type), so no
+ * address type needs to be persisted alongside the camera record.
  * -------------------------------------------------------------------------*/
-void ble_core_purge_unknown_bonds(const ble_addr_t keep[], int keep_count)
+void ble_core_purge_unknown_bonds_now(void)
 {
-    ble_addr_t bonded[CONFIG_BT_NIMBLE_MAX_CONNECTIONS + 1];
+    if (!g_cbs.is_known_addr) {
+        return;   /* no way to tell known from stale — keep everything */
+    }
+
+    ble_addr_t bonded[CONFIG_BT_NIMBLE_MAX_BONDS];
     int        bond_count = 0;
 
     int rc = ble_store_util_bonded_peers(bonded, &bond_count,
@@ -158,20 +173,44 @@ void ble_core_purge_unknown_bonds(const ble_addr_t keep[], int keep_count)
         return;
     }
 
+    int purged = 0;
     for (int i = 0; i < bond_count; i++) {
-        bool known = false;
-        for (int j = 0; j < keep_count; j++) {
-            if (bonded[i].type == keep[j].type &&
-                memcmp(bonded[i].val, keep[j].val, sizeof(bonded[i].val)) == 0) {
-                known = true;
-                break;
-            }
+        if (g_cbs.is_known_addr(bonded[i])) {
+            continue;
         }
-        if (!known) {
-            ESP_LOGI(TAG, "purging unknown bond");
-            ble_gap_unpair(&bonded[i]);
-        }
+        ESP_LOGI(TAG, "purging bond for unknown peer %02x:%02x:%02x:%02x:%02x:%02x",
+                 bonded[i].val[5], bonded[i].val[4], bonded[i].val[3],
+                 bonded[i].val[2], bonded[i].val[1], bonded[i].val[0]);
+        /* Also terminates the link if this peer happens to be connected. */
+        ble_gap_unpair(&bonded[i]);
+        purged++;
     }
+
+    ESP_LOGI(TAG, "bond store: %d bond(s), %d purged, capacity %d",
+             bond_count, purged, CONFIG_BT_NIMBLE_MAX_BONDS);
+}
+
+static void do_purge_unknown_bonds(struct ble_npl_event *ev)
+{
+    ble_core_purge_unknown_bonds_now();
+    ble_npl_event_deinit(ev);
+    free(ev);
+}
+
+void ble_core_purge_unknown_bonds(void)
+{
+    /* Before init there is no event queue — and nothing to purge yet: the
+     * store is loaded during init and on_sync purges it then. */
+    if (!g_port_initialized) {
+        return;
+    }
+    struct ble_npl_event *ev = calloc(1, sizeof(*ev));
+    if (!ev) {
+        ESP_LOGW(TAG, "purge: event alloc failed");
+        return;
+    }
+    ble_npl_event_init(ev, do_purge_unknown_bonds, NULL);
+    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), ev);
 }
 
 /* ---------------------------------------------------------------------------

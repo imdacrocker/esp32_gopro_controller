@@ -7,6 +7,7 @@ idf_component_register(
     REQUIRES
         cam_core        # shared types, driver vtable, per-slot record (Phase 3.2)
         bt              # NimBLE (host/ble_hs.h via camera_manager_ble.h)
+        ble_core        # drop a removed camera's bond
         nvs_flash
         esp_timer
         freertos

@@ -112,9 +112,9 @@ void app_main(void)
     /* Registers RC-emulation driver, starts work/shutter/UDP tasks. */
     gopro_wifi_rc_init();
 
-    /* Registers BLE callbacks with ble_core, registers BLE-control driver
-     * with camera_manager, and purges stale bonds.
-     * Must be called before ble_core_init(). */
+    /* Registers BLE callbacks with ble_core and registers the BLE-control
+     * driver with camera_manager.  Must be called before ble_core_init().
+     * (Stale bonds are purged by ble_core once the host syncs.) */
     open_gopro_ble_init();
 
     /* Wire WiFi station events to the RC-emulation driver and camera_manager.

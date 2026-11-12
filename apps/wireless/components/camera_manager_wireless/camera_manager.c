@@ -1,6 +1,7 @@
 #include "camera_manager.h"
 #include "camera_manager_ble.h"   /* ble_addr_t, BLE_HS_CONN_HANDLE_NONE */
 #include "cam_core.h"
+#include "ble_core.h"              /* ble_core_purge_unknown_bonds */
 #include "esp_log.h"
 #include "esp_netif_ip_addr.h"
 #include "nvs.h"
@@ -758,6 +759,11 @@ esp_err_t camera_manager_remove_slot(int slot)
     for (int j = slot + 1; j < orig_count; j++) {
         if (was_ready[j]) cam_core_slot_set_ready(j - 1, true);
     }
+
+    /* The camera is no longer known, so its BLE bond is now stale — drop it
+     * (async, on the NimBLE host task) so removed cameras don't fill the
+     * bond store and block pairing new ones. */
+    ble_core_purge_unknown_bonds();
 
     ESP_LOGI(TAG, "slot %d: removed; %d slot(s) remain", slot, s_slot_count);
     return ESP_OK;
