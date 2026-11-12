@@ -26,7 +26,7 @@ REQUIRES: bt, nvs_flash
 
 `ble_core_register_callbacks()` must be called before `ble_core_init()` if any callbacks are needed.
 
-`ble_core_purge_unknown_bonds()` must be called before `ble_core_init()` (NimBLE bond store is not safe to modify after the host starts).
+`ble_core_purge_unknown_bonds()` runs automatically once the host syncs; it is a no-op if called before `ble_core_init()` (the bond store is only loaded from NVS during init).
 
 ---
 
@@ -173,12 +173,14 @@ Safe to call from any task (HTTP handler, `camera_manager` timers, CAN RX task).
 #### `ble_core_purge_unknown_bonds`
 
 ```c
-void ble_core_purge_unknown_bonds(const ble_addr_t keep[], int keep_count);
+void ble_core_purge_unknown_bonds(void);
 ```
 
-Delete any NVS bond whose address is **not** present in `keep[]`. Call once at startup (before `ble_core_init()`) to remove stale bonds when cameras are removed from `camera_manager`.
+Delete every NVS bond whose peer `is_known_addr` does not recognise (matched by address value). Runs automatically from `on_sync`, once NimBLE has loaded the bond store from NVS; `camera_manager_remove_slot()` calls it again so a removed camera's bond is dropped right away.
 
-**Not thread-safe.** Must be called before `ble_core_init()`.
+The store holds only `CONFIG_BT_NIMBLE_MAX_BONDS` entries, and NimBLE will not start pairing a new peer while it is full, so stale bonds must not accumulate.
+
+Safe to call from any task (posted to the NimBLE event queue). No-op before `ble_core_init()` or when `is_known_addr` is NULL.
 
 ---
 
@@ -276,7 +278,9 @@ on_disconnected(conn_handle, addr, reason)
 | Key mismatch (`BLE_HS_HCI_ERR(BLE_ERR_AUTH_FAIL)` or `BLE_HS_HCI_ERR(BLE_ERR_PINKEY_MISSING)`) | Bond purged via `ble_gap_unpair()`; peer must re-pair |
 | Any other encryption-change failure (link timeouts, transient SMP errors, controller hiccups) | Bond preserved; disconnect triggers reconnect scan |
 | Camera has bond, ESP32 NVS erased (`BLE_GAP_EVENT_REPEAT_PAIRING`) | ESP32 purges camera's stale entry; retries fresh pairing |
-| Bond not in `camera_manager` keep-list | Purged by `ble_core_purge_unknown_bonds()` at startup |
+| Bond for a peer `camera_manager` doesn't know | Purged by `ble_core_purge_unknown_bonds()` on host sync and after a camera is removed |
+| Bond store full when pairing a new camera | `ble_store_util_status_rr` evicts the oldest bond so pairing can proceed |
+| `ble_gap_security_initiate()` fails | Logged as warning; link terminated so the pair attempt fails immediately instead of stalling |
 
 **SMP configuration** (set in `ble_init.c`):
 

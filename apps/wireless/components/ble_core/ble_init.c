@@ -11,6 +11,7 @@
 static const char *TAG = "ble_core";
 
 ble_core_callbacks_t g_cbs;
+volatile bool g_port_initialized = false;
 
 static void on_reset(int reason)
 {
@@ -19,6 +20,11 @@ static void on_reset(int reason)
 
 static void on_sync(void)
 {
+    /* The bond store has been loaded from NVS by now — drop bonds left by
+     * cameras that were removed, before they can fill the store and block
+     * pairing a new camera. */
+    ble_core_purge_unknown_bonds_now();
+
     ESP_LOGI(TAG, "NimBLE synced — starting reconnect scan");
     start_scan_if_needed();
 }
@@ -37,10 +43,18 @@ void ble_core_register_callbacks(const ble_core_callbacks_t *cbs)
 void ble_core_init(void)
 {
     nimble_port_init();
+    g_port_initialized = true;
     ble_core_scan_init();
 
     ble_hs_cfg.sync_cb  = on_sync;
     ble_hs_cfg.reset_cb = on_reset;
+
+    /* When the bond store is full, NimBLE asks the app to make room before
+     * pairing a new peer; with no handler, ble_gap_security_initiate() just
+     * fails and pairing never starts.  Evict the oldest bond instead.  The
+     * stale-bond purge normally keeps the store from filling at all — this
+     * is the backstop. */
+    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
 
     /* Just Works pairing, bonding enabled, ENC + ID keys exchanged both ways. */
     ble_hs_cfg.sm_io_cap       = BLE_HS_IO_NO_INPUT_OUTPUT;

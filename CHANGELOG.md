@@ -44,6 +44,18 @@ sections below. Each release section corresponds to a `vX.Y.Z` tag on `main`.
   they remain unsupported pending hardware verification.
 
 ### Fixed
+- **BLE: new cameras could not be paired once three had ever been bonded.**
+  The NimBLE bond store held only 3 bonds, removing a camera never deleted
+  its bond, and the startup stale-bond purge was never wired up — so after a
+  few pair/remove cycles (or a camera "Reset Connections", which gives it a
+  new address) the store filled up. NimBLE then refused to start pairing:
+  `ble_gap_security_initiate()` failed silently, the link sat unencrypted,
+  and the pair attempt timed out after 20 s with "Camera did not finish
+  pairing in time". Now: bonds for cameras that are no longer configured are
+  purged when the BLE host starts and whenever a camera is removed; a full
+  store evicts its oldest bond instead of blocking pairing; capacity is
+  raised to 6 (above the 4-camera limit); and a failed security initiate
+  drops the link immediately so the failure is reported at once.
 - **BLE cameras never had their date/time set.** The `SetDateTime` (0x0D)
   packet sent over BLE split the value into separate date and time parameters
   with a type byte in front of each, but GoPro TLV commands have no
