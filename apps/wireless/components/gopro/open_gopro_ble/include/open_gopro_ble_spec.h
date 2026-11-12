@@ -177,20 +177,20 @@
  * Response on: cmd_resp_notify (GP-0073)
  * Spec: https://gopro.github.io/OpenGoPro/ble/features/control.html#set-date-time
  *
- * Payload TLV:
- *   [0x01, 0x04, year_hi, year_lo, month, day]   (date param)
- *   [0x02, 0x03, hour, minute, second]            (time param)
+ * TLV payload: [GPBS_hdr=9, cmd=0x0D, param_len=7,
+ *               year_hi, year_lo, month, day, hour, minute, second]
+ *
+ * A single 7-byte parameter — TLV commands carry no per-parameter type byte,
+ * so the byte after the command ID is always a length.  Example from the
+ * OpenGoPro SDK (DateTimeByteParserBuilder): 2026-10-19 08:44:43 →
+ *   09 0D 07 07 EA 0A 13 08 2C 2B
+ * The camera answers INVALID_PARAMETER (status 0x02) on any other layout.
  */
-#define GOPRO_CMD_SET_DATE_TIME  0x0Du
+#define GOPRO_CMD_SET_DATE_TIME      0x0Du
+#define GOPRO_DT_PARAM_LEN           7u   /* year(2B big-endian), month, day, hour, minute, second */
 
-#define GOPRO_DT_PARAM_DATE  0x01u
-#define GOPRO_DT_PARAM_DATE_LEN  4u   /* year(2B big-endian), month, day */
-#define GOPRO_DT_PARAM_TIME  0x02u
-#define GOPRO_DT_PARAM_TIME_LEN  3u   /* hour, minute, second */
-
-/* Full SetDateTime packet: header + cmd + date_TLV + time_TLV */
-#define GOPRO_SET_DATETIME_PAYLOAD_LEN \
-    (1u + 2u + GOPRO_DT_PARAM_DATE_LEN + 2u + GOPRO_DT_PARAM_TIME_LEN)  /* 14 bytes */
+/* Payload length carried in the GPBS header: cmd + param_len + param */
+#define GOPRO_SET_DATETIME_PAYLOAD_LEN  (1u + 1u + GOPRO_DT_PARAM_LEN)  /* 9 bytes */
 
 /*
  * Sleep (Command ID 0x05)

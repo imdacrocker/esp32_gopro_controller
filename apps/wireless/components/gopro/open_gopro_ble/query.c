@@ -152,6 +152,18 @@ static void dispatch(gopro_ble_ctx_t *ctx, gopro_channel_t chan,
                    data[GOPRO_RESP_CMD_IDX] == GOPRO_CMD_SET_THIRD_PARTY_CLIENT) {
             gopro_readiness_handle_third_party_acked(ctx,
                                                       data[GOPRO_RESP_STATUS_IDX]);
+        } else if (len >= GOPRO_RESP_HDR_LEN &&
+                   data[GOPRO_RESP_CMD_IDX] == GOPRO_CMD_SET_DATE_TIME) {
+            /* SetDateTime is fire-and-forget with no retry, so a rejection
+             * would otherwise leave the camera clock unset without a trace
+             * outside DEBUG logs. */
+            uint8_t status = data[GOPRO_RESP_STATUS_IDX];
+            if (status == GOPRO_RESP_STATUS_OK) {
+                ESP_LOGI(TAG, "slot %d: SetDateTime acked", ctx->slot);
+            } else {
+                ESP_LOGW(TAG, "slot %d: SetDateTime rejected by camera (status=0x%02x)",
+                         ctx->slot, status);
+            }
         } else if (len >= GOPRO_RESP_HDR_LEN) {
             ESP_LOGD(TAG, "slot %d: cmd resp cmd=0x%02x status=0x%02x",
                      ctx->slot,

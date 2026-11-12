@@ -188,10 +188,14 @@ Sent once per connection after `GetHardwareInfo` succeeds. Declares to the camer
 ### SetDateTime (TLV 0x0D)
 
 ```
-[0x0C, 0x0D,
- 0x01, 0x04, year_hi, year_lo, month, day,        ← param 1: date
- 0x02, 0x03, hour, minute, second]                ← param 2: time
+[0x09, 0x0D, 0x07,
+ year_hi, year_lo, month, day, hour, minute, second]
+  byte 0 : GPBS general header, payload length 9
+  byte 1 : command ID 0x0D
+  byte 2 : parameter length 7 (one combined date+time parameter)
 ```
+
+TLV commands have no per-parameter type byte — the byte after the command ID is a length. Any other layout is rejected with status `0x02` (INVALID_PARAMETER), which `query.c` logs as a warning. The time sent is local time (UTC shifted by the user-set timezone offset); 0x0D carries no timezone field.
 
 Best-effort. Internally gated on `can_manager_utc_is_session_synced()`. If UTC isn't session-synced when readiness completes, the driver sets `datetime_pending_utc` on the slot's context and `open_gopro_ble_sync_time_all()` consumes the flag when UTC becomes available.
 
